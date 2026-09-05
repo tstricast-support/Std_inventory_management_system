@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+
+    <!-- Prevents pinch-zoom and makes it feel native -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+
+    <title>STD Stock Manager</title>
+
+    <!-- Android / Chrome theme color (matches your header) -->
+    <meta name="theme-color" content="#2563eb" />
+
+    <!-- iOS: run fullscreen, no Safari UI, when added to home screen -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Stock Manager" />
+
+    <!-- iOS home screen icon (needs its own tag, ignores manifest icons) -->
+    <link rel="apple-touch-icon" href="/pwa-192x192.png" />
+
+    <!-- Standard favicon -->
+    <link rel="icon" type="image/png" href="/pwa-192x192.png" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
