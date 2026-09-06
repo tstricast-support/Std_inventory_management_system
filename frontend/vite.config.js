@@ -10,31 +10,13 @@ export default defineConfig({
     tailwindcss(),
 
     VitePWA({
-      registerType: "autoUpdate",
-
-      manifest: {
-        name: "STD Stock Manager",
-        short_name: "StockManager",
-        description: "Inventory management system",
-        theme_color: "#2563eb",
-        background_color: "#ffffff",
-        display: "standalone",
-        start_url: "/",
-
-        icons: [
-          {
-            src: "pwa-192x192.png",
-            sizes: "192x192",
-            type: "image/png",
-          },
-          {
-            src: "pwa-512x512.jpeg",
-            sizes: "512x512",
-            type: "image/jpeg",
-          },
-        ],
-      },
-    }),
+  registerType: "autoUpdate",
+  manifest: false,
+  workbox: {
+    navigateFallback: "/index.html",
+    navigateFallbackDenylist: [/^\/admin/],
+  },
+}),
   ],
 
   build: {
