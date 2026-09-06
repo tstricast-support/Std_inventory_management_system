@@ -1,8 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import Base, engine
-from app.routers import products, categories,requests
-
+from app.routers import products, categories, requests, stock_movements
 Base.metadata.create_all(bind=engine)  # creates tables on startup if they don't exist
 
 app = FastAPI(
@@ -24,6 +23,7 @@ app.add_middleware(
 app.include_router(categories.router)
 app.include_router(products.router)
 app.include_router(requests.router)
+app.include_router(stock_movements.router)
 
 
 @app.get("/")

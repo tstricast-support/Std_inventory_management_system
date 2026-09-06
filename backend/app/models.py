@@ -54,3 +54,15 @@ class ItemRequest(Base):
     resolved_at = Column(TIMESTAMP, nullable=True)
 
     product = relationship("Product")
+
+class StockMovement(Base):
+    __tablename__ = "stock_movements"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    quantity = Column(Integer, nullable=False)  # positive = stock added
+    movement_type = Column(String(20), nullable=False, default="restock")
+    note = Column(Text)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    product = relationship("Product")

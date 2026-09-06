@@ -85,3 +85,23 @@ def delete_product(product_id: int, db: Session = Depends(get_db)):
     db.delete(product)
     db.commit()
     return {"message": "Deleted"}
+
+@router.put("/{product_id}/restock", response_model=schemas.ProductOut)
+def restock_product(product_id: int, payload: schemas.StockAdjustment, db: Session = Depends(get_db)):
+    if payload.quantity <= 0:
+        raise HTTPException(400, "Quantity must be greater than 0")
+
+    product = db.query(models.Product).get(product_id)
+    if not product:
+        raise HTTPException(404, "Product not found")
+
+    product.quantity += payload.quantity
+    db.add(models.StockMovement(
+        product_id=product.id,
+        quantity=payload.quantity,
+        movement_type="restock",
+        note=payload.note,
+    ))
+    db.commit()
+    db.refresh(product)
+    return product

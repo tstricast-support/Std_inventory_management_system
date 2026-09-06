@@ -1,6 +1,43 @@
 import { useEffect, useState } from "react";
-import { Routes, Route, Link } from "react-router-dom";
+import { Routes, Route, Link, useLocation } from "react-router-dom";
+import { Pencil, Trash2, PackagePlus, History } from "lucide-react";
+
 import "./index.css";
+
+// ---------- ManifestSync ----------
+// Swaps the linked PWA manifest (and title/theme-color) based on the current
+// route, so "Install this site as an app" / "Add to Home Screen" produces a
+// separate installable app for /admin vs / with its own start_url.
+function ManifestSync() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const isAdminRoute = location.pathname.startsWith("/admin");
+    const manifestHref = isAdminRoute ? "/manifest-admin.json" : "/manifest-employee.json";
+    const title = isAdminRoute ? "STD Stock Manager — Admin" : "STD Stock Manager";
+    const themeColor = isAdminRoute ? "#7c3aed" : "#2563eb";
+    const appleTitle = isAdminRoute ? "Stock Admin" : "Stock Manager";
+
+    let link = document.getElementById("app-manifest");
+    if (!link) {
+      link = document.createElement("link");
+      link.id = "app-manifest";
+      link.rel = "manifest";
+      document.head.appendChild(link);
+    }
+    link.setAttribute("href", manifestHref);
+
+    document.title = title;
+
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) themeMeta.setAttribute("content", themeColor);
+
+    const appleTitleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    if (appleTitleMeta) appleTitleMeta.setAttribute("content", appleTitle);
+  }, [location.pathname]);
+
+  return null;
+}
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
@@ -95,8 +132,67 @@ async function rejectRequest(id) {
   return res.json();
 }
 
+async function restockProduct(id, quantity, note) {
+  const res = await fetch(`${BASE_URL}/products/${id}/restock`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quantity: Number(quantity), note: note || null }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.detail || "Failed to restock product");
+  }
+  return res.json();
+}
+
+async function getStockMovements() {
+  const res = await fetch(`${BASE_URL}/stock-movements/`);
+  if (!res.ok) throw new Error("Failed to fetch stock history");
+  return res.json();
+}
+
+// ---------- Date helpers ----------
+function formatDateTime(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+// Returns sorted list of "YYYY-MM" strings present in the given ISO date strings, newest first.
+function getMonthOptions(isoDates) {
+  const set = new Set(isoDates.filter(Boolean).map((d) => d.slice(0, 7)));
+  return Array.from(set).sort().reverse();
+}
+
+function formatMonthLabel(ym) {
+  const [year, month] = ym.split("-");
+  const date = new Date(Number(year), Number(month) - 1);
+  return date.toLocaleString(undefined, { month: "long", year: "numeric" });
+}
+
+// ---------- MonthSelect ----------
+function MonthSelect({ options, value, onChange }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+    >
+      <option value="">All months</option>
+      {options.map((m) => (
+        <option key={m} value={m}>{formatMonthLabel(m)}</option>
+      ))}
+    </select>
+  );
+}
+
 // ---------- ProductCard ----------
-function ProductCard({ product, isAdmin, onDelete, onEdit, onRequest }) {
+function ProductCard({ product, isAdmin, onDelete, onEdit, onRequest, onRestock }) {
   const primaryImage = product.images?.find((img) => img.is_primary) || product.images?.[0];
 
   return (
@@ -127,9 +223,31 @@ function ProductCard({ product, isAdmin, onDelete, onEdit, onRequest }) {
           </span>
 
           {isAdmin ? (
-            <div className="flex gap-3">
-              <button onClick={() => onEdit(product)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
-              <button onClick={() => onDelete(product.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => onRestock(product)}
+                title="Add stock"
+                aria-label="Add stock"
+                className="p-1.5 rounded-full text-green-600 hover:bg-green-50 transition-colors"
+              >
+                <PackagePlus size={16} />
+              </button>
+              <button
+                onClick={() => onEdit(product)}
+                title="Edit product"
+                aria-label="Edit product"
+                className="p-1.5 rounded-full text-blue-600 hover:bg-blue-50 transition-colors"
+              >
+                <Pencil size={16} />
+              </button>
+              <button
+                onClick={() => onDelete(product.id)}
+                title="Delete product"
+                aria-label="Delete product"
+                className="p-1.5 rounded-full text-red-500 hover:bg-red-50 transition-colors"
+              >
+                <Trash2 size={16} />
+              </button>
             </div>
           ) : (
             <button
@@ -147,12 +265,11 @@ function ProductCard({ product, isAdmin, onDelete, onEdit, onRequest }) {
 }
 
 // ---------- ProductGrid ----------
-function GroupedProductGrid({ products, categories, isAdmin, onDelete, onEdit, onRequest }) {
+function GroupedProductGrid({ products, categories, isAdmin, onDelete, onEdit, onRequest, onRestock }) {
   if (products.length === 0) {
     return <div className="text-center py-16 text-gray-400">No products match your filters.</div>;
   }
 
-  // Group products by category id (or "uncategorized")
   const grouped = {};
   products.forEach((p) => {
     const key = p.category?.id ?? "uncategorized";
@@ -160,7 +277,6 @@ function GroupedProductGrid({ products, categories, isAdmin, onDelete, onEdit, o
     grouped[key].push(p);
   });
 
-  // Preserve category order from the categories list, uncategorized last
   const orderedKeys = [
     ...categories.map((c) => c.id).filter((id) => grouped[id]),
     ...(grouped["uncategorized"] ? ["uncategorized"] : []),
@@ -186,12 +302,139 @@ function GroupedProductGrid({ products, categories, isAdmin, onDelete, onEdit, o
                   onDelete={onDelete}
                   onEdit={onEdit}
                   onRequest={onRequest}
+                  onRestock={onRestock}
                 />
               ))}
             </div>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ---------- RestockModal ----------
+function RestockModal({ product, onSubmit, onClose }) {
+  const [quantity, setQuantity] = useState("");
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const qty = Number(quantity);
+    if (!qty || qty <= 0) {
+      setError("Enter a quantity greater than 0");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSubmit(product.id, qty, note.trim());
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+        <div className="flex items-center gap-2 mb-1">
+          <PackagePlus size={18} className="text-green-600" />
+          <h2 className="text-lg font-semibold">Add Stock</h2>
+        </div>
+        <p className="text-sm text-gray-500 mb-4">
+          {product.name} — currently {product.quantity} in stock
+        </p>
+
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Quantity received *</label>
+            <input
+              type="number"
+              min="1"
+              autoFocus
+              required
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Note (optional)</label>
+            <input
+              placeholder="e.g. Supplier invoice #234"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {Number(quantity) > 0 && (
+            <p className="text-xs text-gray-400">New total: {product.quantity + Number(quantity)}</p>
+          )}
+
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+              Cancel
+            </button>
+            <button type="submit" disabled={submitting} className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700 disabled:opacity-50">
+              {submitting ? "Adding..." : "Add Stock"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- StockHistoryPanel ----------
+function StockHistoryPanel({ movements }) {
+  const [selectedMonth, setSelectedMonth] = useState("");
+
+  const monthOptions = getMonthOptions(movements.map((m) => m.created_at));
+  const filtered = selectedMonth
+    ? movements.filter((m) => m.created_at?.slice(0, 7) === selectedMonth)
+    : movements;
+
+  return (
+    <div>
+      <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
+        <h2 className="text-sm font-semibold text-gray-500 uppercase">
+          Stock Additions <span className="text-gray-400 font-normal">({filtered.length})</span>
+        </h2>
+        <MonthSelect options={monthOptions} value={selectedMonth} onChange={setSelectedMonth} />
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="text-gray-400 text-sm">No stock movements found for this period.</p>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((m) => (
+            <div key={m.id} className="bg-white border border-gray-200 rounded-lg p-4 flex flex-wrap justify-between items-center gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-full bg-green-50 text-green-600 shrink-0">
+                  <PackagePlus size={16} />
+                </div>
+                <div>
+                  <p className="font-medium text-gray-900">{m.product?.name || `Product #${m.product_id}`}</p>
+                  {m.note && <p className="text-xs text-gray-400 mt-0.5">{m.note}</p>}
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-semibold text-green-600">+{m.quantity}</p>
+                <p className="text-xs text-gray-400">{formatDateTime(m.created_at)}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -337,8 +580,15 @@ function RequestModal({ product, onSubmit, onClose }) {
   );
 }
 
+// ---------- RequestsPanel (now with month filter) ----------
 function RequestsPanel({ requests, onApprove, onReject }) {
   const [processingId, setProcessingId] = useState(null);
+  const [selectedMonth, setSelectedMonth] = useState("");
+
+  const monthOptions = getMonthOptions(requests.map((r) => r.created_at));
+  const filteredRequests = selectedMonth
+    ? requests.filter((r) => r.created_at?.slice(0, 7) === selectedMonth)
+    : requests;
 
   const handleApprove = async (id) => {
     setProcessingId(id);
@@ -360,15 +610,19 @@ function RequestsPanel({ requests, onApprove, onReject }) {
     }
   };
 
-  const pending = requests.filter((r) => r.status === "pending");
-  const resolved = requests.filter((r) => r.status !== "pending");
+  const pending = filteredRequests.filter((r) => r.status === "pending");
+  const resolved = filteredRequests.filter((r) => r.status !== "pending");
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        <MonthSelect options={monthOptions} value={selectedMonth} onChange={setSelectedMonth} />
+      </div>
+
       <div>
         <h2 className="text-sm font-semibold text-gray-500 uppercase mb-2">Pending ({pending.length})</h2>
         {pending.length === 0 ? (
-          <p className="text-gray-400 text-sm">No pending requests.</p>
+          <p className="text-gray-400 text-sm">No pending requests{selectedMonth ? " for this month" : ""}.</p>
         ) : (
           <div className="space-y-2">
             {pending.map((r) => (
@@ -379,6 +633,7 @@ function RequestsPanel({ requests, onApprove, onReject }) {
                     {r.quantity} requested by <span className="font-medium">{r.requested_by}</span>
                   </p>
                   {r.note && <p className="text-xs text-gray-400 mt-1">"{r.note}"</p>}
+                  <p className="text-xs text-gray-400 mt-1">{formatDateTime(r.created_at)}</p>
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -405,7 +660,7 @@ function RequestsPanel({ requests, onApprove, onReject }) {
       <div>
         <h2 className="text-sm font-semibold text-gray-500 uppercase mb-2">History</h2>
         {resolved.length === 0 ? (
-          <p className="text-gray-400 text-sm">No resolved requests yet.</p>
+          <p className="text-gray-400 text-sm">No resolved requests{selectedMonth ? " for this month" : " yet"}.</p>
         ) : (
           <div className="space-y-2">
             {resolved.map((r) => (
@@ -413,6 +668,7 @@ function RequestsPanel({ requests, onApprove, onReject }) {
                 <div>
                   <p className="text-sm font-medium text-gray-700">{r.product?.name}</p>
                   <p className="text-xs text-gray-500">{r.quantity} requested by {r.requested_by}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(r.created_at)}</p>
                 </div>
                 <span className={`text-xs px-2 py-1 rounded-full font-medium ${
                   r.status === "approved" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
@@ -503,7 +759,9 @@ function ProductForm({ categories, initialData, onSubmit, onClose, onCreateCateg
             </div>
           )}
           {isEditMode && (
-            <p className="text-xs text-gray-400">Image editing isn't supported yet — delete and recreate the product to change photos.</p>
+            <p className="text-xs text-gray-400">
+              Quantity here is a manual override (use it for corrections). To receive new stock, use the "Add stock" button on the product card instead — it logs the addition with a timestamp under Stock History.
+            </p>
           )}
 
           <div className="flex gap-2 pt-2">
@@ -525,39 +783,47 @@ function InventoryView({ isAdmin }) {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [requests, setRequests] = useState([]);
-  const [activeTab, setActiveTab] = useState("products"); // "products" | "requests"
+  const [stockMovements, setStockMovements] = useState([]);
+  const [activeTab, setActiveTab] = useState("products"); // "products" | "requests" | "history"
   const [showForm, setShowForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [requestingProduct, setRequestingProduct] = useState(null);
+  const [restockingProduct, setRestockingProduct] = useState(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
 
-const loadData = async (silent = false) => {
-  if (!silent) setLoading(true);
-  const calls = [getProducts(), getCategories()];
-  if (isAdmin) calls.push(getRequests());
-  const results = await Promise.all(calls);
-  setProducts(results[0]);
-  setCategories(results[1]);
-  if (isAdmin) setRequests(results[2]);
-  if (!silent) setLoading(false);
-};
-
-useEffect(() => {
-  loadData();
-}, []);
-
-useEffect(() => {
-  const interval = setInterval(() => {
-    const modalOpen = showForm || requestingProduct;
-    if (!modalOpen) {
-      loadData(true); // silent = no loading spinner flash
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true);
+    const calls = [getProducts(), getCategories()];
+    if (isAdmin) {
+      calls.push(getRequests());
+      calls.push(getStockMovements());
     }
-  }, 5000);
+    const results = await Promise.all(calls);
+    setProducts(results[0]);
+    setCategories(results[1]);
+    if (isAdmin) {
+      setRequests(results[2]);
+      setStockMovements(results[3]);
+    }
+    if (!silent) setLoading(false);
+  };
 
-  return () => clearInterval(interval);
-}, [showForm, requestingProduct]);
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const modalOpen = showForm || requestingProduct || restockingProduct;
+      if (!modalOpen) {
+        loadData(true); // silent = no loading spinner flash
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [showForm, requestingProduct, restockingProduct]);
 
   const handleCreate = async (formValues, imageFiles) => {
     await createProduct(formValues, imageFiles);
@@ -593,6 +859,11 @@ useEffect(() => {
 
   const handleReject = async (id) => {
     await rejectRequest(id);
+    await loadData();
+  };
+
+  const handleRestock = async (id, quantity, note) => {
+    await restockProduct(id, quantity, note);
     await loadData();
   };
 
@@ -647,6 +918,15 @@ useEffect(() => {
                 </span>
               )}
             </button>
+            <button
+              onClick={() => setActiveTab("history")}
+              className={`pb-2 text-sm font-medium border-b-2 flex items-center gap-1.5 ${
+                activeTab === "history" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              <History size={14} />
+              Stock History
+            </button>
           </div>
         )}
       </header>
@@ -656,6 +936,8 @@ useEffect(() => {
           <p className="text-gray-400 text-center py-16">Loading...</p>
         ) : activeTab === "requests" ? (
           <RequestsPanel requests={requests} onApprove={handleApprove} onReject={handleReject} />
+        ) : activeTab === "history" ? (
+          <StockHistoryPanel movements={stockMovements} />
         ) : (
           <>
             <FilterBar
@@ -672,6 +954,7 @@ useEffect(() => {
               onDelete={handleDelete}
               onEdit={(product) => { setEditingProduct(product); setShowForm(true); }}
               onRequest={(product) => setRequestingProduct(product)}
+              onRestock={(product) => setRestockingProduct(product)}
             />
           </>
         )}
@@ -692,6 +975,14 @@ useEffect(() => {
           product={requestingProduct}
           onSubmit={handleRequestSubmit}
           onClose={() => setRequestingProduct(null)}
+        />
+      )}
+
+      {restockingProduct && (
+        <RestockModal
+          product={restockingProduct}
+          onSubmit={handleRestock}
+          onClose={() => setRestockingProduct(null)}
         />
       )}
     </div>
@@ -726,11 +1017,14 @@ function FilterBar({ categories, searchTerm, onSearchChange, selectedCategory, o
 // ---------- App with routes ----------
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<InventoryView isAdmin={false} />} />
-      <Route path="/admin" element={<InventoryView isAdmin={true} />} />
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+    <>
+      <ManifestSync />
+      <Routes>
+        <Route path="/" element={<InventoryView isAdmin={false} />} />
+        <Route path="/admin" element={<InventoryView isAdmin={true} />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </>
   );
 }
 

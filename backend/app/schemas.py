@@ -70,3 +70,17 @@ class ItemRequestOut(BaseModel):
     created_at: datetime
     resolved_at: Optional[datetime]
     product: Optional[ProductOut] = None
+
+class StockAdjustment(BaseModel):
+    quantity: int
+    note: Optional[str] = None
+
+class StockMovementOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    product_id: int
+    quantity: int
+    movement_type: str
+    note: Optional[str]
+    created_at: datetime
+    product: Optional[ProductOut] = None
