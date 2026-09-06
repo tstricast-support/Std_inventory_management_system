@@ -1016,11 +1016,12 @@ function FilterBar({ categories, searchTerm, onSearchChange, selectedCategory, o
 
 // ---------- App with routes ----------
 export default function App() {
+  const isAdminEntry = window.location.pathname.startsWith("/admin");
   return (
     <>
       <ManifestSync />
       <Routes>
-        <Route path="/" element={<InventoryView isAdmin={false} />} />
+        <Route path="/" element={<InventoryView isAdmin={isAdminEntry} />} />
         <Route path="/admin" element={<InventoryView isAdmin={true} />} />
         <Route path="*" element={<NotFound />} />
       </Routes>

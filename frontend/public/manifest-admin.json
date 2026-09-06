@@ -1,10 +1,10 @@
 {
-  "id": "/admin",
+  "id": "/admin.html",
   "name": "STD Stock Manager - Admin",
   "short_name": "Stock Admin",
   "description": "Manage products, stock, and requests",
-  "start_url": "/admin",
-  "scope": "/admin",
+  "start_url": "/admin.html",
+  "scope": "/admin.html",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#7c3aed",
