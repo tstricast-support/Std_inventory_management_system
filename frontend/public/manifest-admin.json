@@ -1,6 +1,6 @@
 {
   "id": "/admin",
-  "name": "STD Stock Manager - Admin",
+  "name": "STD STOCK MANAGER - Admin",
   "short_name": "Stock Admin",
   "description": "Manage products, stock, and requests",
   "start_url": "/admin",

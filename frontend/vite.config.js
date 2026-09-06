@@ -15,9 +15,9 @@ export default defineConfig({
   workbox: {
     navigateFallback: "/index.html",
     navigateFallbackDenylist: [/^\/admin/],
-  },
-}),
-  ],
+        },
+      }),
+        ],
 
   build: {
     rollupOptions: {
