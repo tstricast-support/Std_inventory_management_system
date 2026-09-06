@@ -14,7 +14,7 @@ function ManifestSync() {
   useEffect(() => {
     const isAdminRoute = location.pathname.startsWith("/admin");
     const manifestHref = isAdminRoute ? "/manifest-admin.json" : "/manifest-employee.json";
-    const title = isAdminRoute ? "STD Stock Manager — Admin" : "STD Stock Manager";
+    const title = isAdminRoute ? "STD STOCK MANAGER - Admin" : "STD STOCK MANAGER";
     const themeColor = isAdminRoute ? "#7c3aed" : "#2563eb";
     const appleTitle = isAdminRoute ? "Stock Admin" : "Stock Manager";
 
