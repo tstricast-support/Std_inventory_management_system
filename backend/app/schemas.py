@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from decimal import Decimal
 from datetime import datetime
 from typing import Optional, List
@@ -44,6 +44,13 @@ class ProductUpdate(BaseModel):
     quantity: Optional[int] = None
     price: Optional[Decimal] = None
     category_id: Optional[int] = None
+
+    @field_validator("category_id", mode="before")
+    @classmethod
+    def empty_string_to_none(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
 
 class ProductOut(ProductBase):
     model_config = ConfigDict(from_attributes=True)

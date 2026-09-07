@@ -854,7 +854,7 @@ function ProductForm({ categories, initialData, onSubmit, onClose, onCreateCateg
           )}
           {isEditMode && (
             <p className="text-xs text-gray-400">
-              Quantity here is a manual override (use it for corrections). To receive new stock, use the "Add stock" button on the product card instead — it logs the addition with a timestamp under Stock History.
+              Quantity here is a manual override (use it for corrections). To receive new stock, use the "Add stock" button on the product card instead - it logs the addition with a timestamp under Stock History.
             </p>
           )}
 

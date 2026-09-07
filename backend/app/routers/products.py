@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional, List
 from .. import models, schemas
@@ -68,9 +69,21 @@ def update_product(product_id: int, payload: schemas.ProductUpdate, db: Session 
     product = db.query(models.Product).get(product_id)
     if not product:
         raise HTTPException(404, "Product not found")
+
+    if payload.category_id is not None:
+        category = db.query(models.Category).get(payload.category_id)
+        if not category:
+            raise HTTPException(400, f"Category {payload.category_id} does not exist")
+
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(product, field, value)
-    db.commit()
+
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(400, f"Could not update product: {str(e.orig)}")
+
     db.refresh(product)
     return product
 
@@ -92,7 +105,7 @@ def restock_product(product_id: int, payload: schemas.StockAdjustment, db: Sessi
         raise HTTPException(400, "Quantity must be greater than 0")
 
     product = db.query(models.Product).get(product_id)
-    if not product:
+    if not product: 
         raise HTTPException(404, "Product not found")
 
     product.quantity += payload.quantity
