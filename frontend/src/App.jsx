@@ -494,28 +494,83 @@ function CategorySelect({ categories, value, onChange, onCreateCategory }) {
   );
 }
 
-function RequestModal({ product, onSubmit, onClose }) {
-  const [quantity, setQuantity] = useState(1);
+function RequestModal({ products, initialProductId, onSubmit, onClose }) {
+  const [items, setItems] = useState([{ product_id: initialProductId, quantity: 1 }]);
   const [requestedBy, setRequestedBy] = useState("");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
+  const requestableProducts = products.filter((p) => p.quantity > 0);
+
+  const getProduct = (id) => products.find((p) => p.id === Number(id));
+
+  const handleItemChange = (index, field, value) => {
+    setItems((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, [field]: value } : item))
+    );
+  };
+
+  const handleAddItem = () => {
+    const usedIds = items.map((i) => Number(i.product_id));
+    const nextProduct = requestableProducts.find((p) => !usedIds.includes(p.id));
+    setItems((prev) => [
+      ...prev,
+      { product_id: nextProduct ? nextProduct.id : "", quantity: 1 },
+    ]);
+  };
+
+  const handleRemoveItem = (index) => {
+    setItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError(null);
+
     if (!requestedBy.trim()) {
       setError("Please enter your name");
       return;
     }
+    if (items.length === 0) {
+      setError("Add at least one item");
+      return;
+    }
+    for (const item of items) {
+      if (!item.product_id) {
+        setError("Select a product for every item");
+        return;
+      }
+      const product = getProduct(item.product_id);
+      const qty = Number(item.quantity);
+      if (!qty || qty <= 0) {
+        setError("Enter a quantity greater than 0 for every item");
+        return;
+      }
+      if (product && qty > product.quantity) {
+        setError(`Only ${product.quantity} of "${product.name}" in stock`);
+        return;
+      }
+    }
+    const ids = items.map((i) => Number(i.product_id));
+    if (new Set(ids).size !== ids.length) {
+      setError("Each product can only appear once — adjust the quantity instead");
+      return;
+    }
+
     setSubmitting(true);
-    setError(null);
     try {
-      await onSubmit({
-        product_id: product.id,
-        quantity: Number(quantity),
-        requested_by: requestedBy.trim(),
-        note: note.trim() || null,
-      });
+      // Option A: no batch endpoint, so send one request per item, in parallel
+      await Promise.all(
+        items.map((item) =>
+          onSubmit({
+            product_id: Number(item.product_id),
+            quantity: Number(item.quantity),
+            requested_by: requestedBy.trim(),
+            note: note.trim() || null,
+          })
+        )
+      );
       onClose();
     } catch (err) {
       setError(err.message);
@@ -526,9 +581,9 @@ function RequestModal({ product, onSubmit, onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-        <h2 className="text-lg font-semibold mb-1">Request Item</h2>
-        <p className="text-sm text-gray-500 mb-4">{product.name} — {product.quantity} in stock</p>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-1">Request Items</h2>
+        <p className="text-sm text-gray-500 mb-4">Add one or more items to your request</p>
 
         {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
 
@@ -543,17 +598,56 @@ function RequestModal({ product, onSubmit, onClose }) {
             />
           </div>
 
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Quantity</label>
-            <input
-              type="number"
-              min="1"
-              max={product.quantity}
-              required
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+          <div className="space-y-2">
+            <label className="block text-xs text-gray-500">Items *</label>
+            {items.map((item, index) => {
+              const selectedProduct = getProduct(item.product_id);
+              return (
+                <div key={index} className="flex gap-2 items-start">
+                  <select
+                    required
+                    value={item.product_id}
+                    onChange={(e) => handleItemChange(index, "product_id", e.target.value)}
+                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select product</option>
+                    {requestableProducts.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.quantity} in stock)
+                      </option>
+                    ))}
+                  </select>
+
+                  <input
+                    type="number"
+                    min="1"
+                    max={selectedProduct?.quantity || undefined}
+                    required
+                    value={item.quantity}
+                    onChange={(e) => handleItemChange(index, "quantity", e.target.value)}
+                    className="w-20 border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveItem(index)}
+                    disabled={items.length === 1}
+                    title="Remove item"
+                    className="p-2 text-gray-400 hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={handleAddItem}
+              className="text-xs text-blue-600 font-medium hover:underline"
+            >
+              + Add item
+            </button>
           </div>
 
           <div>
@@ -970,9 +1064,10 @@ function InventoryView({ isAdmin }) {
         />
       )}
 
-      {requestingProduct && (
+     {requestingProduct && (
         <RequestModal
-          product={requestingProduct}
+          products={products}
+          initialProductId={requestingProduct.id}
           onSubmit={handleRequestSubmit}
           onClose={() => setRequestingProduct(null)}
         />
