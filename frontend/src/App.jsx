@@ -11,7 +11,6 @@ const DEPARTMENTS = [
   { slug: "dd-engineering", name: "DD Engineering", logo: "/logos/dd-engineering.png" },
   { slug: "i-lab", name: "I Lab", logo: "/logos/i-lab.png" },
   { slug: "i-lab-std", name: "I Lab STD", logo: "/logos/i-lab-std.png" },
-  { slug: "i-photobook", name: "I Photobook", logo: "/logos/i-photobook.png" },
 ];
 
 // ---------- API helpers ----------

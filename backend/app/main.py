@@ -18,6 +18,14 @@ def add_department_column():
 
 add_department_column() # creates tables on startup if they don't exist
 
+def merge_photobook_into_i_lab():
+    """I Photobook was merged into I Lab: move any products still using the old department."""
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE products SET department = 'i-lab' WHERE department = 'i-photobook'"))
+
+
+merge_photobook_into_i_lab()
+
 app = FastAPI(
     title="STD Stock Manager API",
     version="1.0.0"
