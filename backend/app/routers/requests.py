@@ -8,12 +8,14 @@ router = APIRouter(prefix="/api/requests", tags=["requests"])
 
 
 @router.get("/", response_model=list[schemas.ItemRequestOut])
-def list_requests(status: str | None = None, db: Session = Depends(get_db)):
+def list_requests(status: str | None = None, department: str | None = None, db: Session = Depends(get_db)):
     query = db.query(models.ItemRequest).options(
         joinedload(models.ItemRequest.product).joinedload(models.Product.images)
     )
     if status:
         query = query.filter(models.ItemRequest.status == status)
+    if department:
+        query = query.filter(models.ItemRequest.product.has(models.Product.department == department))
     return query.order_by(models.ItemRequest.created_at.desc()).all()
 
 

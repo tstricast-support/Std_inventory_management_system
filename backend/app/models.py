@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Text, Numeric, Boolean, ForeignKey, TIMESTAMP, func
 from sqlalchemy.orm import relationship
 from .database import Base
+from .departments import DEFAULT_DEPARTMENT
 
 class Category(Base):
     __tablename__ = "categories"
@@ -22,6 +23,7 @@ class Product(Base):
     quantity = Column(Integer, nullable=False, default=0)
     price = Column(Numeric(10, 2), nullable=False, default=0)
     category_id = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"))
+    department = Column(String(50), nullable=False, default=DEFAULT_DEPARTMENT, server_default=DEFAULT_DEPARTMENT)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 

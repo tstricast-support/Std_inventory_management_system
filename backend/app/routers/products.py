@@ -5,17 +5,19 @@ from typing import Optional, List
 from .. import models, schemas
 from ..database import get_db
 from ..imagekit_client import upload_image, delete_image
+from ..departments import validate_department, DEFAULT_DEPARTMENT
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
 
 @router.get("/", response_model=list[schemas.ProductOut])
-def list_products(db: Session = Depends(get_db)):
-    return (
-        db.query(models.Product)
-        .options(joinedload(models.Product.images), joinedload(models.Product.category))
-        .all()
+def list_products(department: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(models.Product).options(
+        joinedload(models.Product.images), joinedload(models.Product.category)
     )
+    if department:
+        query = query.filter(models.Product.department == department)
+    return query.all()
 
 
 @router.get("/{product_id}", response_model=schemas.ProductOut)
@@ -39,12 +41,15 @@ def create_product(
     quantity: int = Form(0),
     price: float = Form(0),
     category_id: Optional[int] = Form(None),
+    department: str = Form(DEFAULT_DEPARTMENT),
     images: List[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
 ):
+    validate_department(department)
     product = models.Product(
         name=name, sku=sku, description=description,
         quantity=quantity, price=price, category_id=category_id,
+        department=department,
     )
     db.add(product)
     db.commit()
@@ -69,6 +74,9 @@ def update_product(product_id: int, payload: schemas.ProductUpdate, db: Session 
     product = db.query(models.Product).get(product_id)
     if not product:
         raise HTTPException(404, "Product not found")
+
+    if payload.department is not None:
+        validate_department(payload.department)
 
     if payload.category_id is not None:
         category = db.query(models.Category).get(payload.category_id)

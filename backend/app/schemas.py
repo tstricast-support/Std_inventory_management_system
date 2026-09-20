@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from decimal import Decimal
 from datetime import datetime
 from typing import Optional, List
+from .departments import DEFAULT_DEPARTMENT
 
 
 # ---------- Category ----------
@@ -33,6 +34,7 @@ class ProductBase(BaseModel):
     quantity: int = 0
     price: Decimal = Decimal("0")
     category_id: Optional[int] = None
+    department: str = DEFAULT_DEPARTMENT
 
 class ProductCreate(ProductBase):
     pass
@@ -44,6 +46,7 @@ class ProductUpdate(BaseModel):
     quantity: Optional[int] = None
     price: Optional[Decimal] = None
     category_id: Optional[int] = None
+    department: Optional[str] = None
 
     @field_validator("category_id", mode="before")
     @classmethod

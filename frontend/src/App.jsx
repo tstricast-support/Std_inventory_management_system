@@ -1,14 +1,25 @@
 import { useEffect, useState } from "react";
-import { Routes, Route, Link } from "react-router-dom";
-import { Pencil, Trash2, PackagePlus, History } from "lucide-react";
-
+import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
+import { Pencil, Trash2, PackagePlus, History, ChevronRight, ArrowLeft } from "lucide-react";
 import "./index.css";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
+// ---------- Departments ----------
+// slug must match backend/app/departments.py and the logo file name in public/logos/
+const DEPARTMENTS = [
+  { slug: "dd-engineering", name: "DD Engineering", logo: "/logos/dd-engineering.png" },
+  { slug: "i-lab", name: "I Lab", logo: "/logos/i-lab.png" },
+  { slug: "i-lab-std", name: "I Lab STD", logo: "/logos/i-lab-std.png" },
+  { slug: "i-photobook", name: "I Photobook", logo: "/logos/i-photobook.png" },
+];
+
 // ---------- API helpers ----------
-async function getProducts() {
-  const res = await fetch(`${BASE_URL}/products/`);
+async function getProducts(department) {
+  const url = department
+    ? `${BASE_URL}/products/?department=${department}`
+    : `${BASE_URL}/products/`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error("Failed to fetch products");
   return res.json();
 }
@@ -36,6 +47,8 @@ async function createProduct(formValues, imageFiles) {
   formData.append("description", formValues.description || "");
   formData.append("quantity", formValues.quantity || 0);
   formData.append("price", formValues.price || 0);
+  formData.append("department", formValues.department);
+
   if (formValues.category_id) {
     formData.append("category_id", formValues.category_id);
   }
@@ -62,9 +75,12 @@ async function deleteProduct(id) {
   return res.json();
 }
 
-async function getRequests(status) {
-  const url = status ? `${BASE_URL}/requests/?status=${status}` : `${BASE_URL}/requests/`;
-  const res = await fetch(url);
+async function getRequests(status, department) {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (department) params.set("department", department);
+  const qs = params.toString();
+  const res = await fetch(`${BASE_URL}/requests/${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error("Failed to fetch requests");
   return res.json();
 }
@@ -110,8 +126,11 @@ async function restockProduct(id, quantity, note) {
   return res.json();
 }
 
-async function getStockMovements() {
-  const res = await fetch(`${BASE_URL}/stock-movements/`);
+async function getStockMovements(department) {
+  const url = department
+    ? `${BASE_URL}/stock-movements/?department=${department}`
+    : `${BASE_URL}/stock-movements/`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error("Failed to fetch stock history");
   return res.json();
 }
@@ -743,7 +762,7 @@ function RequestsPanel({ requests, onApprove, onReject }) {
 }
 
 // ---------- ProductForm (handles both Create and Edit) ----------
-function ProductForm({ categories, initialData, onSubmit, onClose, onCreateCategory }) {
+function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onClose, onCreateCategory }) {
   const isEditMode = Boolean(initialData);
   const [form, setForm] = useState({
     name: initialData?.name || "",
@@ -752,6 +771,7 @@ function ProductForm({ categories, initialData, onSubmit, onClose, onCreateCateg
     quantity: initialData?.quantity ?? 0,
     price: initialData?.price ?? 0,
     category_id: initialData?.category?.id ? String(initialData.category.id) : "",
+    department: initialData?.department || defaultDepartment,
   });
   const [imageFiles, setImageFiles] = useState([]);
   const [submitting, setSubmitting] = useState(false);
@@ -808,6 +828,19 @@ function ProductForm({ categories, initialData, onSubmit, onClose, onCreateCateg
             </div>
           </div>
 
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Department</label>
+            <select
+              value={form.department}
+              onChange={(e) => handleChange("department", e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {DEPARTMENTS.map((d) => (
+                <option key={d.slug} value={d.slug}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+
           <CategorySelect categories={categories} value={form.category_id} onChange={(val) => handleChange("category_id", val)} onCreateCategory={onCreateCategory} />
 
           {!isEditMode && (
@@ -837,7 +870,7 @@ function ProductForm({ categories, initialData, onSubmit, onClose, onCreateCateg
 }
 
 // ---------- Shared inventory view (used by both routes) ----------
-function InventoryView({ isAdmin }) {
+function InventoryView({ isAdmin, department, onBack }) {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [requests, setRequests] = useState([]);
@@ -853,10 +886,10 @@ function InventoryView({ isAdmin }) {
 
   const loadData = async (silent = false) => {
     if (!silent) setLoading(true);
-    const calls = [getProducts(), getCategories()];
+    const calls = [getProducts(department.slug), getCategories()];
     if (isAdmin) {
-      calls.push(getRequests());
-      calls.push(getStockMovements());
+      calls.push(getRequests(undefined, department.slug));
+      calls.push(getStockMovements(department.slug));
     }
     const results = await Promise.all(calls);
     setProducts(results[0]);
@@ -926,6 +959,9 @@ function InventoryView({ isAdmin }) {
   };
 
   const pendingCount = requests.filter((r) => r.status === "pending").length;
+  
+    // categories are shared by all departments; only offer the ones used here
+  const usedCategories = categories.filter((c) => products.some((p) => p.category?.id === c.id));
 
   const filteredProducts = products.filter((p) => {
     const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -938,12 +974,26 @@ function InventoryView({ isAdmin }) {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
-        <div className="flex flex-wrap gap-3 justify-between items-center mb-3">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">STD Stock Manager</h1>
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isAdmin ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}>
-              {isAdmin ? "Admin" : "Employee (Read Only)"}
-            </span>
+                <div className="flex flex-wrap gap-3 justify-between items-center mb-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onBack}
+              aria-label="Back to departments"
+              className="p-2 -ml-2 rounded-full text-gray-500 hover:bg-gray-100"
+            >
+              <ArrowLeft size={20} />
+            </button>
+            <img
+              src={department.logo}
+              alt=""
+              className="w-10 h-10 object-contain rounded-lg border border-gray-200 bg-white p-1"
+            />
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">{department.name}</h1>
+              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isAdmin ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}>
+                {isAdmin ? "Admin" : "Employee (Read Only)"}
+              </span>
+            </div>
           </div>
           {isAdmin && activeTab === "products" && (
             <button onClick={() => { setEditingProduct(null); setShowForm(true); }}
@@ -999,7 +1049,7 @@ function InventoryView({ isAdmin }) {
         ) : (
           <>
             <FilterBar
-              categories={categories}
+              categories={usedCategories}
               searchTerm={searchTerm}
               onSearchChange={setSearchTerm}
               selectedCategory={selectedCategory}
@@ -1022,6 +1072,7 @@ function InventoryView({ isAdmin }) {
         <ProductForm
           categories={categories}
           initialData={editingProduct}
+          defaultDepartment={department.slug}
           onSubmit={editingProduct ? handleUpdate : handleCreate}
           onClose={() => { setShowForm(false); setEditingProduct(null); }}
           onCreateCategory={handleCreateCategory}
@@ -1073,18 +1124,113 @@ function FilterBar({ categories, searchTerm, onSearchChange, selectedCategory, o
   );
 }
 
+// ---------- Department home screen ----------
+function DepartmentHome({ isAdmin, onSelect }) {
+  const [itemCounts, setItemCounts] = useState({});
+  const [pendingCounts, setPendingCounts] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [products, pending] = await Promise.all([
+          getProducts(),
+          isAdmin ? getRequests("pending") : Promise.resolve([]),
+        ]);
+        if (cancelled) return;
+        const items = {};
+        products.forEach((p) => { items[p.department] = (items[p.department] || 0) + 1; });
+        const waiting = {};
+        pending.forEach((r) => {
+          const d = r.product?.department;
+          if (d) waiting[d] = (waiting[d] || 0) + 1;
+        });
+        setItemCounts(items);
+        setPendingCounts(waiting);
+      } catch {
+        // counts are optional - the cards still work without them
+      }
+    };
+    load();
+    const interval = setInterval(load, 10000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [isAdmin]);
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
+        <h1 className="text-xl font-bold text-gray-900">STD Stock Manager</h1>
+        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isAdmin ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}>
+          {isAdmin ? "Admin" : "Employee (Read Only)"}
+        </span>
+      </header>
+
+      <main className="p-4 sm:p-6">
+        <p className="text-sm text-gray-500 mb-4">Select a department</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-4xl">
+          {DEPARTMENTS.map((d) => {
+            const count = itemCounts[d.slug] || 0;
+            const waiting = pendingCounts[d.slug] || 0;
+            return (
+              <button
+                key={d.slug}
+                onClick={() => onSelect(d.slug)}
+                className="flex items-center gap-4 bg-white border border-gray-200 rounded-2xl p-4 text-left hover:shadow-md hover:border-gray-300 active:scale-[0.99] transition"
+              >
+                <div className="w-14 h-14 shrink-0 rounded-xl border border-gray-200 bg-white flex items-center justify-center overflow-hidden p-1.5">
+                  <img src={d.logo} alt="" className="max-w-full max-h-full object-contain" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-gray-900 uppercase truncate">{d.name}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{count} {count === 1 ? "item" : "items"}</p>
+                </div>
+                {isAdmin && waiting > 0 && (
+                  <span
+                    title="Pending requests"
+                    className="bg-red-500 text-white text-[11px] font-medium rounded-full min-w-5 h-5 px-1.5 flex items-center justify-center"
+                  >
+                    {waiting}
+                  </span>
+                )}
+                <ChevronRight size={18} className="text-gray-400 shrink-0" />
+              </button>
+            );
+          })}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ---------- Picks home screen or a department, using ?dept=slug in the URL ----------
+function AppShell() {
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isAdmin = location.pathname.startsWith("/admin");
+  const department = DEPARTMENTS.find((d) => d.slug === searchParams.get("dept"));
+
+  if (!department) {
+    return <DepartmentHome isAdmin={isAdmin} onSelect={(slug) => setSearchParams({ dept: slug })} />;
+  }
+  return (
+    <InventoryView
+      key={department.slug}
+      isAdmin={isAdmin}
+      department={department}
+      onBack={() => setSearchParams({})}
+    />
+  );
+}
+
 // ---------- App with routes ----------
 export default function App() {
-  const isAdminEntry = window.location.pathname.startsWith("/admin");
   return (
-    <>
-      <Routes>
-        <Route path="/" element={<InventoryView isAdmin={isAdminEntry} />} />
-        <Route path="/admin" element={<InventoryView isAdmin={true} />} />
-        <Route path="/admin.html" element={<InventoryView isAdmin={true} />} />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
-    </>
+    <Routes>
+      <Route path="/" element={<AppShell />} />
+      <Route path="/admin" element={<AppShell />} />
+      <Route path="/admin.html" element={<AppShell />} />
+      <Route path="*" element={<NotFound />} />
+    </Routes>
   );
 }
 
