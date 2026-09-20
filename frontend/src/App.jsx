@@ -1,43 +1,8 @@
 import { useEffect, useState } from "react";
-import { Routes, Route, Link, useLocation } from "react-router-dom";
+import { Routes, Route, Link } from "react-router-dom";
 import { Pencil, Trash2, PackagePlus, History } from "lucide-react";
 
 import "./index.css";
-
-// ---------- ManifestSync ----------
-// Swaps the linked PWA manifest (and title/theme-color) based on the current
-// route, so "Install this site as an app" / "Add to Home Screen" produces a
-// separate installable app for /admin vs / with its own start_url.
-function ManifestSync() {
-  const location = useLocation();
-
-  useEffect(() => {
-    const isAdminRoute = location.pathname.startsWith("/admin");
-    const manifestHref = isAdminRoute ? "/manifest-admin.json" : "/manifest-employee.json";
-    const title = isAdminRoute ? "Admin" : "Home";
-    const themeColor = isAdminRoute ? "#7c3aed" : "#2563eb";
-    const appleTitle = isAdminRoute ? "Stock Admin" : "Stock Manager";
-
-    let link = document.getElementById("app-manifest");
-    if (!link) {
-      link = document.createElement("link");
-      link.id = "app-manifest";
-      link.rel = "manifest";
-      document.head.appendChild(link);
-    }
-    link.setAttribute("href", manifestHref);
-
-    document.title = title;
-
-    const themeMeta = document.querySelector('meta[name="theme-color"]');
-    if (themeMeta) themeMeta.setAttribute("content", themeColor);
-
-    const appleTitleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-    if (appleTitleMeta) appleTitleMeta.setAttribute("content", appleTitle);
-  }, [location.pathname]);
-
-  return null;
-}
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
@@ -560,7 +525,6 @@ function RequestModal({ products, initialProductId, onSubmit, onClose }) {
 
     setSubmitting(true);
     try {
-      // Option A: no batch endpoint, so send one request per item, in parallel
       await Promise.all(
         items.map((item) =>
           onSubmit({
@@ -1114,10 +1078,10 @@ export default function App() {
   const isAdminEntry = window.location.pathname.startsWith("/admin");
   return (
     <>
-      <ManifestSync />
       <Routes>
         <Route path="/" element={<InventoryView isAdmin={isAdminEntry} />} />
         <Route path="/admin" element={<InventoryView isAdmin={true} />} />
+        <Route path="/admin.html" element={<InventoryView isAdmin={true} />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </>
