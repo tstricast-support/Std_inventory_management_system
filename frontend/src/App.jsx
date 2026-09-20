@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
-import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star } from "lucide-react";
+import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check } from "lucide-react";
 import "./index.css";
 
 
@@ -1793,25 +1793,144 @@ const inputCls =
 
 function FieldLabel({ children, action }) {
   return (
-    <div className="flex items-center justify-between mb-1.5">
+    <div className="flex items-center justify-between gap-2 mb-2">
       <label className="text-sm font-semibold text-gray-700">{children}</label>
       {action}
     </div>
   );
 }
 
-function LinkButton({ onClick, disabled, title, children }) {
+// Solid blue button that matches "+ Add Product"
+function FieldButton({ onClick, disabled, title, children }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className="text-xs font-medium text-blue-600 hover:underline flex items-center gap-1 disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed"
+      className="inline-flex items-center gap-1.5 bg-blue-600 text-white px-3.5 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap hover:bg-blue-700 active:scale-[0.98] transition disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed disabled:active:scale-100"
     >
-      <Plus size={13} />
+      <Plus size={15} />
       {children}
     </button>
+  );
+}
+
+// Dropdown you can search in, then pick from
+function SearchSelect({
+  value,
+  onChange,
+  options, // [{ value, label, hint? }]
+  placeholder = "Select",
+  searchPlaceholder = "Search...",
+  emptyText = "No results found",
+  disabled = false,
+  searchable = true,
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const rootRef = useRef(null);
+
+  const selected = options.find((o) => o.value === value);
+  const q = query.trim().toLowerCase();
+  const filtered = q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
+
+  const close = () => {
+    setOpen(false);
+    setQuery("");
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const onOutside = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) close();
+    };
+    document.addEventListener("mousedown", onOutside);
+    document.addEventListener("touchstart", onOutside);
+    return () => {
+      document.removeEventListener("mousedown", onOutside);
+      document.removeEventListener("touchstart", onOutside);
+    };
+  }, [open]);
+
+  useEffect(() => { if (disabled) close(); }, [disabled]);
+  useEffect(() => { setActive(0); }, [query, open]);
+
+  const choose = (option) => {
+    onChange(option.value);
+    close();
+  };
+
+  const handleKeyDown = (e) => {
+    if (!open) return;
+    if (e.key === "Escape") close();
+    else if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(i + 1, filtered.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
+    else if (e.key === "Enter") { e.preventDefault(); if (filtered[active]) choose(filtered[active]); }
+  };
+
+  return (
+    <div ref={rootRef} onKeyDown={handleKeyDown} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={`w-full flex items-center justify-between gap-2 border rounded-lg px-3 py-2.5 text-sm text-left bg-white transition focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:border-gray-300 ${
+          open ? "border-blue-500 ring-2 ring-blue-100" : "border-gray-300 hover:border-gray-400"
+        }`}
+      >
+        <span className={`truncate ${selected ? "text-gray-900" : "text-gray-400"}`}>
+          {selected ? selected.label : placeholder}
+        </span>
+        <ChevronDown size={16} className={`shrink-0 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+          {searchable && (
+            <div className="p-2 border-b border-gray-100">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={searchPlaceholder}
+                  className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          )}
+          <ul role="listbox" className="max-h-56 overflow-y-auto py-1">
+            {filtered.length === 0 ? (
+              <li className="px-3 py-4 text-sm text-gray-400 text-center">{emptyText}</li>
+            ) : (
+              filtered.map((o, i) => (
+                <li
+                  key={o.value}
+                  role="option"
+                  aria-selected={o.value === value}
+                  onClick={() => choose(o)}
+                  onMouseEnter={() => setActive(i)}
+                  className={`flex items-center justify-between gap-3 px-3 py-2 text-sm cursor-pointer ${
+                    i === active ? "bg-blue-50" : ""
+                  } ${o.value === value ? "font-medium text-blue-700" : "text-gray-800"}`}
+                >
+                  <span className="truncate">{o.label}</span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    {o.hint && <span className="text-xs text-gray-400 font-normal">{o.hint}</span>}
+                    {o.value === value && <Check size={14} />}
+                  </span>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1946,7 +2065,6 @@ function SubmitBillModal({ lines, onSubmit, onClose }) {
     </div>
   );
 }
-
 // ---------- New bill form ----------
 function NewBillForm({ onBack, onSaved }) {
   const [products, setProducts] = useState([]);
@@ -1980,6 +2098,12 @@ function NewBillForm({ onBack, onSaved }) {
     .sort((a, b) => compareNames(a.name, b.name));
   const selectedItem = categoryItems.find((p) => String(p.id) === itemId);
   const totalUnits = lines.reduce((sum, l) => sum + l.quantity, 0);
+  const qtyNumber = Number(quantity);
+  const qtyValid = Number.isInteger(qtyNumber) && qtyNumber > 0;
+
+  const departmentOptions = DEPARTMENTS.map((d) => ({ value: d.slug, label: d.name }));
+  const categoryOptions = sortedCategories.map((c) => ({ value: String(c.id), label: c.name }));
+  const itemOptions = categoryItems.map((p) => ({ value: String(p.id), label: p.name, hint: `${p.quantity} in stock` }));
 
   const handleDepartment = (slug) => {
     setDepartment(slug);
@@ -2029,19 +2153,20 @@ function NewBillForm({ onBack, onSaved }) {
   const handleAddToList = () => {
     setFormError(null);
     if (!selectedItem) return setFormError("Select an item first");
-    const qty = Number(quantity);
-    if (!Number.isInteger(qty) || qty <= 0) return setFormError("Enter a whole quantity greater than 0");
+    if (!qtyValid) return setFormError("Enter a whole quantity greater than 0");
 
     setLines((prev) => {
       const existing = prev.find((l) => l.product.id === selectedItem.id);
       if (existing) {
-        return prev.map((l) => (l.product.id === selectedItem.id ? { ...l, quantity: l.quantity + qty } : l));
+        return prev.map((l) => (l.product.id === selectedItem.id ? { ...l, quantity: l.quantity + qtyNumber } : l));
       }
-      return [...prev, { product: selectedItem, quantity: qty }];
+      return [...prev, { product: selectedItem, quantity: qtyNumber }];
     });
     setItemId("");
     setQuantity("");
   };
+
+  const stepQuantity = (delta) => setQuantity(String(Math.max(1, (Number(quantity) || 0) + delta)));
 
   const handleLineQty = (productId, value) => {
     const qty = Math.max(1, Math.floor(Number(value)) || 1);
@@ -2071,18 +2196,19 @@ function NewBillForm({ onBack, onSaved }) {
           <p className="text-red-500 text-center py-16">{loadError}</p>
         ) : (
           <>
-            <div className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
+            <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 space-y-5">
               {formError && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2">{formError}</div>}
 
               {/* Department */}
               <div>
                 <FieldLabel>Department</FieldLabel>
-                <select value={department} onChange={(e) => handleDepartment(e.target.value)} className={inputCls}>
-                  <option value="">Select department</option>
-                  {DEPARTMENTS.map((d) => (
-                    <option key={d.slug} value={d.slug}>{d.name}</option>
-                  ))}
-                </select>
+                <SearchSelect
+                  value={department}
+                  onChange={handleDepartment}
+                  options={departmentOptions}
+                  placeholder="Select department"
+                  searchable={false}
+                />
               </div>
 
               {/* Category */}
@@ -2090,36 +2216,51 @@ function NewBillForm({ onBack, onSaved }) {
                 <FieldLabel
                   action={
                     !creatingCategory && (
-                      <LinkButton onClick={() => setCreatingCategory(true)}>New category</LinkButton>
+                      <FieldButton onClick={() => setCreatingCategory(true)}>New Category</FieldButton>
                     )
                   }
                 >
                   Category
                 </FieldLabel>
                 {creatingCategory ? (
-                  <div className="flex gap-2">
+                  <div className="border border-blue-200 bg-blue-50/50 rounded-xl p-3 space-y-2">
+                    <p className="text-xs font-medium text-blue-700">New category</p>
                     <input
                       autoFocus
-                      placeholder="New category name"
+                      placeholder="Category name"
                       value={newCategoryName}
                       onChange={(e) => setNewCategoryName(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleCreateCategory())}
-                      className={`${inputCls} flex-1`}
+                      className={inputCls}
                     />
-                    <button type="button" onClick={handleCreateCategory} disabled={savingCategory} className="bg-blue-600 text-white px-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-                      {savingCategory ? "..." : "Add"}
-                    </button>
-                    <button type="button" onClick={() => { setCreatingCategory(false); setNewCategoryName(""); }} aria-label="Cancel" className="border border-gray-300 px-3 rounded-lg text-sm hover:bg-gray-50">
-                      ✕
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setCreatingCategory(false); setNewCategoryName(""); }}
+                        className="flex-1 border border-gray-300 bg-white rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCreateCategory}
+                        disabled={savingCategory || !newCategoryName.trim()}
+                        className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {savingCategory ? "Creating..." : "Create category"}
+                      </button>
+                    </div>
                   </div>
                 ) : (
-                  <select value={categoryId} onChange={(e) => handleCategory(e.target.value)} disabled={!department} className={inputCls}>
-                    <option value="">{department ? "Select category" : "Select a department first"}</option>
-                    {sortedCategories.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
+                  <SearchSelect
+                    value={categoryId}
+                    onChange={handleCategory}
+                    options={categoryOptions}
+                    disabled={!department}
+                    placeholder={department ? "Search or select category" : "Select a department first"}
+                    searchPlaceholder="Search categories..."
+                    emptyText="No category found — use “New Category”"
+                  />
                 )}
               </div>
 
@@ -2127,13 +2268,13 @@ function NewBillForm({ onBack, onSaved }) {
               <div>
                 <FieldLabel
                   action={
-                    <LinkButton
+                    <FieldButton
                       onClick={() => setShowCreateItem((v) => !v)}
                       disabled={!department || !categoryId}
                       title={!categoryId ? "Select a department and category first" : undefined}
                     >
-                      Create item
-                    </LinkButton>
+                      Create Item
+                    </FieldButton>
                   }
                 >
                   Item
@@ -2149,46 +2290,85 @@ function NewBillForm({ onBack, onSaved }) {
                   />
                 )}
 
-                <select value={itemId} onChange={(e) => setItemId(e.target.value)} disabled={!department || !categoryId} className={inputCls}>
-                  <option value="">
-                    {!categoryId ? "Select a category first" : categoryItems.length ? "Select item" : "No items yet"}
-                  </option>
-                  {categoryItems.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.quantity} in stock)</option>
-                  ))}
-                </select>
+                <SearchSelect
+                  value={itemId}
+                  onChange={setItemId}
+                  options={itemOptions}
+                  disabled={!department || !categoryId}
+                  placeholder={
+                    !categoryId ? "Select a category first" : categoryItems.length ? "Search or select item" : "No items yet"
+                  }
+                  searchPlaceholder="Search items..."
+                  emptyText={categoryItems.length ? "No item found" : "No items in this category yet"}
+                />
                 {department && categoryId && categoryItems.length === 0 && !showCreateItem && (
                   <p className="text-xs text-gray-400 mt-1.5">
-                    Nothing in this category for {deptName} yet — use “Create item” to add one.
+                    Nothing in this category for {deptName} yet — use “Create Item” to add one.
                   </p>
                 )}
 
                 {/* Quantity + add to list, right under the item select */}
-                <div className="flex gap-2 mt-3">
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="Quantity"
-                    value={quantity}
-                    disabled={!selectedItem}
-                    onChange={(e) => setQuantity(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddToList())}
-                    className={`${inputCls} w-28`}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddToList}
-                    disabled={!selectedItem}
-                    className="flex-1 border border-blue-600 text-blue-600 rounded-lg py-2 text-sm font-medium hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    + Add to list
-                  </button>
+                <div className={`mt-4 rounded-xl border p-3 sm:p-4 transition ${selectedItem ? "border-gray-200 bg-gray-50" : "border-gray-100 bg-gray-50/60"}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Quantity</span>
+                    {selectedItem && (
+                      <span className="text-xs text-gray-500">
+                        In stock: <span className="font-medium text-gray-700">{selectedItem.quantity}</span>
+                        {qtyValid && (
+                          <> → <span className="font-medium text-green-600">{selectedItem.quantity + qtyNumber}</span></>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className={`flex items-stretch rounded-lg border border-gray-300 bg-white overflow-hidden sm:w-44 ${!selectedItem ? "opacity-50" : ""}`}>
+                      <button
+                        type="button"
+                        onClick={() => stepQuantity(-1)}
+                        disabled={!selectedItem}
+                        aria-label="Decrease quantity"
+                        className="w-11 text-lg text-gray-600 hover:bg-gray-100 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                      >
+                        −
+                      </button>
+                      <input
+                        type="number"
+                        min="1"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={quantity}
+                        disabled={!selectedItem}
+                        onChange={(e) => setQuantity(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddToList())}
+                        aria-label="Quantity"
+                        className="flex-1 min-w-0 text-center text-sm font-medium border-x border-gray-200 py-2.5 focus:outline-none focus:bg-blue-50 disabled:bg-transparent [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => stepQuantity(1)}
+                        disabled={!selectedItem}
+                        aria-label="Increase quantity"
+                        className="w-11 text-lg text-gray-600 hover:bg-gray-100 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                      >
+                        +
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddToList}
+                      disabled={!selectedItem || !qtyValid}
+                      className="sm:flex-1 inline-flex items-center justify-center gap-1.5 bg-blue-600 text-white rounded-lg px-4 py-2.5 text-sm font-medium whitespace-nowrap hover:bg-blue-700 active:scale-[0.99] transition disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed disabled:active:scale-100"
+                    >
+                      <Plus size={16} />
+                      Add to list
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
 
             {/* Bill item list */}
-            <div className="bg-white border border-gray-200 rounded-2xl p-4">
+            <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5">
               <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
                 Bill items <span className="text-gray-400 font-normal">({lines.length} · {totalUnits} units)</span>
               </h2>
@@ -2215,7 +2395,7 @@ function NewBillForm({ onBack, onSaved }) {
                           value={l.quantity}
                           onChange={(e) => handleLineQty(l.product.id, e.target.value)}
                           aria-label={`Quantity for ${l.product.name}`}
-                          className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                         <button type="button" onClick={() => handleRemoveLine(l.product.id)} aria-label="Remove" className="p-1.5 rounded-full text-red-500 hover:bg-red-50">
                           <Trash2 size={16} />
