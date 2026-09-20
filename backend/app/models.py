@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Numeric, Boolean, ForeignKey, TIMESTAMP, func
+from sqlalchemy import Column, Integer, String, Text, Numeric, Boolean, ForeignKey, TIMESTAMP, Date, func
 from sqlalchemy.orm import relationship
 from .database import Base
 from .departments import DEFAULT_DEPARTMENT
@@ -88,4 +88,27 @@ class BillItem(Base):
     quantity = Column(Integer, nullable=False)
 
     bill = relationship("Bill", back_populates="items")
+    product = relationship("Product")
+
+class IssuedList(Base):
+    __tablename__ = "issued_lists"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    issued_date = Column(Date, nullable=False)          # the day the items were taken
+    description = Column(Text, nullable=True)
+    responsible_by = Column(String(100), nullable=False)  # who created this list
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    items = relationship("IssuedItem", back_populates="issued_list", cascade="all, delete-orphan")
+
+
+class IssuedItem(Base):
+    __tablename__ = "issued_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    issued_list_id = Column(Integer, ForeignKey("issued_lists.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    quantity = Column(Integer, nullable=False)
+
+    issued_list = relationship("IssuedList", back_populates="items")
     product = relationship("Product")

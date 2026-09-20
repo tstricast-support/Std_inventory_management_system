@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
-import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check } from "lucide-react";
+import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList } from "lucide-react";
 import "./index.css";
 
 
@@ -161,6 +161,25 @@ async function setPrimaryImage(id, imageId) {
 async function deleteProductImage(id, imageId) {
   const res = await fetch(`${BASE_URL}/products/${id}/images/${imageId}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete image");
+  return res.json();
+}
+
+async function getIssuedLists() {
+  const res = await fetch(`${BASE_URL}/issued/`);
+  if (!res.ok) throw new Error("Failed to fetch issued lists");
+  return res.json();
+}
+
+async function createIssuedList(payload) {
+  const res = await fetch(`${BASE_URL}/issued/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to save issued list");
+  }
   return res.json();
 }
 
@@ -1366,6 +1385,7 @@ function HomeTabs({ active, onChange, isAdmin }) {
       {tab("home", "Home", LayoutGrid)}
       {tab("items", "Items", Tag)}
       {isAdmin && tab("bill", "Bill", Receipt)}
+      {isAdmin && tab("issued", "Issued", ClipboardList)}
     </div>
   );
 }
@@ -1834,8 +1854,7 @@ function SearchSelect({
 
   const selected = options.find((o) => o.value === value);
   const q = query.trim().toLowerCase();
-  const filtered = q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
-
+  const filtered = q ? options.filter((o) => (o.search || o.label).toLowerCase().includes(q)) : options;
   const close = () => {
     setOpen(false);
     setQuery("");
@@ -2547,6 +2566,452 @@ function BillPage({ go }) {
   );
 }
 
+// ---------- Issued (decrease stock from a list of items employees took, admin only) ----------
+const toISODate = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+function formatIssuedDate(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const pretty = new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    weekday: "short", year: "numeric", month: "short", day: "numeric",
+  });
+  const now = new Date();
+  if (iso === toISODate(now)) return `Today · ${pretty}`;
+  if (iso === toISODate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))) return `Yesterday · ${pretty}`;
+  return pretty;
+}
+
+// ---------- Create issued list form ----------
+function NewIssuedForm({ onBack, onSaved }) {
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+
+  const [issuedDate, setIssuedDate] = useState(toISODate(new Date()));
+  const [itemId, setItemId] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [lines, setLines] = useState([]); // [{ product, quantity }]
+  const [description, setDescription] = useState("");
+  const [responsibleBy, setResponsibleBy] = useState("");
+  const [formError, setFormError] = useState(null);
+  const [showProductForm, setShowProductForm] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    Promise.all([getProducts(), getCategories()])
+      .then(([p, c]) => { setProducts(p); setCategories(c); })
+      .catch((err) => setLoadError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const sortedProducts = [...products].sort((a, b) => compareNames(a.name, b.name));
+  const itemOptions = sortedProducts.map((p) => {
+    const deptName = getDepartment(p.department)?.name || p.department;
+    return { value: String(p.id), label: p.name, hint: `${deptName} · ${p.quantity} in stock`, search: `${p.name} ${deptName}` };
+  });
+  const selectedItem = products.find((p) => String(p.id) === itemId);
+  const alreadyInList = lines.find((l) => l.product.id === selectedItem?.id)?.quantity || 0;
+  const qtyNumber = Number(quantity);
+  const qtyValid = Number.isInteger(qtyNumber) && qtyNumber > 0;
+  const totalUnits = lines.reduce((sum, l) => sum + l.quantity, 0);
+
+  const handleCreateCategory = async (name) => {
+    const created = await createCategory(name);
+    setCategories((prev) => [...prev, created]);
+    return created;
+  };
+
+  // "+ Create Product" uses the same form as the main product screen
+  const handleCreateProduct = async (values, imageFiles) => {
+    const created = await createProduct(values, imageFiles);
+    setProducts((prev) => [...prev, created]);
+    setItemId(String(created.id));
+  };
+
+  const stepQuantity = (delta) => setQuantity(String(Math.max(1, (Number(quantity) || 0) + delta)));
+
+  const handleAddToList = () => {
+    setFormError(null);
+    if (!selectedItem) return setFormError("Select an item first");
+    if (!qtyValid) return setFormError("Enter a whole quantity greater than 0");
+    if (alreadyInList + qtyNumber > selectedItem.quantity) {
+      return setFormError(
+        `Only ${selectedItem.quantity} of "${selectedItem.name}" in stock` +
+          (alreadyInList ? ` (${alreadyInList} already in this list)` : "")
+      );
+    }
+    setLines((prev) => {
+      const existing = prev.find((l) => l.product.id === selectedItem.id);
+      if (existing) {
+        return prev.map((l) => (l.product.id === selectedItem.id ? { ...l, quantity: l.quantity + qtyNumber } : l));
+      }
+      return [...prev, { product: selectedItem, quantity: qtyNumber }];
+    });
+    setItemId("");
+    setQuantity("");
+  };
+
+  const handleLineQty = (productId, value) => {
+    setLines((prev) =>
+      prev.map((l) => {
+        if (l.product.id !== productId) return l;
+        const qty = Math.min(l.product.quantity, Math.max(1, Math.floor(Number(value)) || 1));
+        return { ...l, quantity: qty };
+      })
+    );
+  };
+
+  const handleRemoveLine = (productId) => setLines((prev) => prev.filter((l) => l.product.id !== productId));
+
+  const handleSubmit = async () => {
+    setFormError(null);
+    if (lines.length === 0) return setFormError("Add at least one item to the list");
+    if (!issuedDate) return setFormError("Select the issued date");
+    if (!responsibleBy.trim()) return setFormError("Responsible by is required");
+
+    setSubmitting(true);
+    try {
+      await createIssuedList({
+        issued_date: issuedDate,
+        description: description.trim() || null,
+        responsible_by: responsibleBy.trim().replace(/\s+/g, " "),
+        items: lines.map((l) => ({ product_id: l.product.id, quantity: l.quantity })),
+      });
+      onSaved();
+    } catch (err) {
+      setFormError(err.message);
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <SubHeader title="Create Issued List" subtitle="Reduce stock for items employees took" onBack={onBack} />
+
+      <main className="p-4 sm:p-6 max-w-2xl space-y-4">
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : loadError ? (
+          <p className="text-red-500 text-center py-16">{loadError}</p>
+        ) : (
+          <>
+            <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 space-y-5">
+              {formError && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2">{formError}</div>}
+
+              {/* Date (native mini calendar) */}
+              <div>
+                <FieldLabel>Issued date</FieldLabel>
+                <input
+                  type="date"
+                  value={issuedDate}
+                  max={toISODate(new Date())}
+                  onChange={(e) => setIssuedDate(e.target.value)}
+                  className={inputCls}
+                />
+                <p className="text-xs text-gray-400 mt-1.5">The day the employees took these items.</p>
+              </div>
+
+              {/* Item */}
+              <div>
+                <FieldLabel action={<FieldButton onClick={() => setShowProductForm(true)}>Create Product</FieldButton>}>
+                  Item
+                </FieldLabel>
+                <SearchSelect
+                  value={itemId}
+                  onChange={setItemId}
+                  options={itemOptions}
+                  placeholder="Search or select item"
+                  searchPlaceholder="Search by item or department..."
+                  emptyText={products.length ? "No item found — use “Create Product”" : "No products yet — use “Create Product”"}
+                />
+
+                {/* Quantity + add to list */}
+                <div className={`mt-4 rounded-xl border p-3 sm:p-4 transition ${selectedItem ? "border-gray-200 bg-gray-50" : "border-gray-100 bg-gray-50/60"}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Quantity taken</span>
+                    {selectedItem && (
+                      <span className="text-xs text-gray-500">
+                        In stock: <span className="font-medium text-gray-700">{selectedItem.quantity - alreadyInList}</span>
+                        {qtyValid && (
+                          <> → <span className={`font-medium ${selectedItem.quantity - alreadyInList - qtyNumber < 0 ? "text-red-600" : "text-amber-600"}`}>
+                            {selectedItem.quantity - alreadyInList - qtyNumber}
+                          </span></>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className={`flex items-stretch rounded-lg border border-gray-300 bg-white overflow-hidden sm:w-44 ${!selectedItem ? "opacity-50" : ""}`}>
+                      <button type="button" onClick={() => stepQuantity(-1)} disabled={!selectedItem} aria-label="Decrease quantity"
+                        className="w-11 text-lg text-gray-600 hover:bg-gray-100 disabled:hover:bg-transparent disabled:cursor-not-allowed">−</button>
+                      <input
+                        type="number"
+                        min="1"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={quantity}
+                        disabled={!selectedItem}
+                        onChange={(e) => setQuantity(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddToList())}
+                        aria-label="Quantity"
+                        className="flex-1 min-w-0 text-center text-sm font-medium border-x border-gray-200 py-2.5 focus:outline-none focus:bg-blue-50 disabled:bg-transparent [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                      />
+                      <button type="button" onClick={() => stepQuantity(1)} disabled={!selectedItem} aria-label="Increase quantity"
+                        className="w-11 text-lg text-gray-600 hover:bg-gray-100 disabled:hover:bg-transparent disabled:cursor-not-allowed">+</button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddToList}
+                      disabled={!selectedItem || !qtyValid}
+                      className="sm:flex-1 inline-flex items-center justify-center gap-1.5 bg-blue-600 text-white rounded-lg px-4 py-2.5 text-sm font-medium whitespace-nowrap hover:bg-blue-700 active:scale-[0.99] transition disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed disabled:active:scale-100"
+                    >
+                      <Plus size={16} />
+                      Add to list
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Issued item list */}
+            <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5">
+              <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
+                Issued items <span className="text-gray-400 font-normal">({lines.length} · {totalUnits} units)</span>
+              </h2>
+              {lines.length === 0 ? (
+                <p className="text-sm text-gray-400">No items added yet. Pick an item and quantity above, then “Add to list”.</p>
+              ) : (
+                <div className="space-y-2">
+                  {lines.map((l) => {
+                    const dept = getDepartment(l.product.department);
+                    return (
+                      <div key={l.product.id} className="flex items-center gap-3 border border-gray-200 rounded-lg p-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-900 truncate">{l.product.name}</p>
+                          <p className="text-xs text-gray-400 truncate">
+                            {[dept?.name, l.product.category?.name].filter(Boolean).join(" · ")}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {l.product.quantity} → <span className="font-medium text-amber-600">{l.product.quantity - l.quantity}</span>
+                          </p>
+                        </div>
+                        <input
+                          type="number"
+                          min="1"
+                          max={l.product.quantity}
+                          value={l.quantity}
+                          onChange={(e) => handleLineQty(l.product.id, e.target.value)}
+                          aria-label={`Quantity for ${l.product.name}`}
+                          className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <button type="button" onClick={() => handleRemoveLine(l.product.id)} aria-label="Remove" className="p-1.5 rounded-full text-red-500 hover:bg-red-50">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Description + responsible */}
+            <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 space-y-5">
+              <div>
+                <FieldLabel>Description <span className="text-gray-400 font-normal">(optional)</span></FieldLabel>
+                <textarea
+                  rows={3}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="e.g. Items from QuickBooks report"
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <FieldLabel>Responsible by <span className="text-red-500">*</span></FieldLabel>
+                <input
+                  value={responsibleBy}
+                  onChange={(e) => setResponsibleBy(e.target.value)}
+                  placeholder="Name of the person who created this list"
+                  className={inputCls}
+                />
+              </div>
+            </div>
+
+            <div>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={submitting || lines.length === 0}
+                className="w-full bg-green-600 text-white rounded-xl py-3 text-sm font-semibold hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {submitting ? "Saving..." : "Create Issued List"}
+              </button>
+              {lines.length > 0 && (
+                <p className="text-xs text-gray-400 text-center mt-2">
+                  This will reduce stock for {lines.length} {lines.length === 1 ? "item" : "items"} ({totalUnits} units).
+                </p>
+              )}
+            </div>
+          </>
+        )}
+      </main>
+
+      {showProductForm && (
+        <ProductForm
+          categories={categories}
+          defaultDepartment={DEPARTMENTS[0].slug}
+          onSubmit={handleCreateProduct}
+          onClose={() => setShowProductForm(false)}
+          onCreateCategory={handleCreateCategory}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------- Issued page: lists grouped by the selected date (newest first) ----------
+function IssuedPage({ go }) {
+  const [creating, setCreating] = useState(false);
+  const [lists, setLists] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedMonth, setSelectedMonth] = useState("");
+  const [openId, setOpenId] = useState(null);
+
+  const load = async () => {
+    try {
+      setLists(await getIssuedLists());
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (creating) {
+    return (
+      <NewIssuedForm
+        onBack={() => setCreating(false)}
+        onSaved={() => { setCreating(false); setLoading(true); load(); }}
+      />
+    );
+  }
+
+  const monthOptions = getMonthOptions(lists.map((l) => l.issued_date));
+  const shown = selectedMonth ? lists.filter((l) => l.issued_date.slice(0, 7) === selectedMonth) : lists;
+
+  // the server already sorts by issued_date (newest first); group neighbours that share a date
+  const groups = [];
+  shown.forEach((l) => {
+    const last = groups[groups.length - 1];
+    if (last && last.date === l.issued_date) last.lists.push(l);
+    else groups.push({ date: l.issued_date, lists: [l] });
+  });
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader
+        isAdmin
+        active="issued"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+        actions={
+          <button onClick={() => setCreating(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
+            + Create Issued List
+          </button>
+        }
+      />
+
+      <main className="p-4 sm:p-6 max-w-4xl">
+        <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
+          <h2 className="text-sm font-semibold text-gray-500 uppercase">
+            Issued lists <span className="text-gray-400 font-normal">({shown.length})</span>
+          </h2>
+          <MonthSelect options={monthOptions} value={selectedMonth} onChange={setSelectedMonth} />
+        </div>
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error && lists.length === 0 ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : shown.length === 0 ? (
+          <p className="text-gray-400 text-sm text-center py-16">
+            {lists.length === 0 ? "No issued lists yet. Tap “Create Issued List” to reduce stock from a list." : "No issued lists for this month."}
+          </p>
+        ) : (
+          <div className="space-y-6">
+            {groups.map((g) => (
+              <section key={g.date}>
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{formatIssuedDate(g.date)}</h3>
+                <div className="space-y-2">
+                  {g.lists.map((list) => {
+                    const open = openId === list.id;
+                    const units = list.items.reduce((sum, m) => sum + m.quantity, 0);
+                    return (
+                      <div key={list.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                        <button
+                          onClick={() => setOpenId(open ? null : list.id)}
+                          aria-expanded={open}
+                          className="w-full flex items-center gap-3 p-4 text-left hover:bg-gray-50"
+                        >
+                          <div className="p-2 rounded-full bg-amber-50 text-amber-600 shrink-0">
+                            <ClipboardList size={16} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-gray-900 truncate">{list.responsible_by}</p>
+                            <p className="text-xs text-gray-400 truncate">
+                              {list.description || `Created ${formatDateTime(list.created_at)}`}
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-sm font-semibold text-amber-600">−{units}</p>
+                            <p className="text-xs text-gray-400">{list.items.length} {list.items.length === 1 ? "item" : "items"}</p>
+                          </div>
+                          <ChevronDown size={18} className={`text-gray-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+                        </button>
+
+                        {open && (
+                          <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-2">
+                            {list.description && <p className="text-sm text-gray-600 whitespace-pre-line">{list.description}</p>}
+                            <p className="text-xs text-gray-400">Created {formatDateTime(list.created_at)}</p>
+                            <div className="space-y-2 pt-1">
+                              {list.items
+                                .slice()
+                                .sort((a, b) => compareNames(a.product?.name || "", b.product?.name || ""))
+                                .map((m) => (
+                                  <div key={m.id} className="flex justify-between items-center gap-3 text-sm">
+                                    <div className="min-w-0">
+                                      <p className="text-gray-900 truncate">{m.product?.name || `Product #${m.product_id}`}</p>
+                                      {m.product?.department && (
+                                        <p className="text-xs text-gray-400 truncate">{getDepartment(m.product.department)?.name || m.product.department}</p>
+                                      )}
+                                    </div>
+                                    <span className="font-semibold text-amber-600 shrink-0">−{m.quantity}</span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
 // ---------- Picks home / items / a department, using the URL query ----------
 //   /?dept=i-lab                 -> department stock
 //   /?view=items                 -> all categories
@@ -2574,6 +3039,11 @@ function AppShell() {
   // Bill is admin-only: on the employee route it falls through to the home screen
   if (searchParams.get("view") === "bill" && isAdmin) {
     return <BillPage go={setSearchParams} />;
+  }
+
+    // Issued is admin-only too
+  if (searchParams.get("view") === "issued" && isAdmin) {
+    return <IssuedPage go={setSearchParams} />;
   }
 
   if (searchParams.get("view") === "items") {

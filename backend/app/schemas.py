@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, field_validator
 from decimal import Decimal
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional, List
 from .departments import DEFAULT_DEPARTMENT
 
@@ -133,3 +133,30 @@ class BillOut(BaseModel):
     adder_name: str
     created_at: datetime
     items: List[BillItemOut] = []
+
+# ---------- Issued list ----------
+class IssuedItemCreate(BaseModel):
+    product_id: int
+    quantity: int
+
+class IssuedListCreate(BaseModel):
+    issued_date: date
+    description: Optional[str] = None
+    responsible_by: str
+    items: List[IssuedItemCreate]
+
+class IssuedItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    product_id: int
+    quantity: int
+    product: Optional[BillProductOut] = None
+
+class IssuedListOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    issued_date: date
+    description: Optional[str] = None
+    responsible_by: str
+    created_at: datetime
+    items: List[IssuedItemOut] = []
