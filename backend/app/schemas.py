@@ -104,3 +104,32 @@ class StockMovementOut(BaseModel):
     note: Optional[str]
     created_at: datetime
     product: Optional[ProductOut] = None
+
+# ---------- Bill ----------
+class BillItemCreate(BaseModel):
+    product_id: int
+    quantity: int
+
+class BillCreate(BaseModel):
+    adder_name: str
+    items: List[BillItemCreate]
+
+class BillProductOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    department: str
+
+class BillItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    product_id: int
+    quantity: int
+    product: Optional[BillProductOut] = None
+
+class BillOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    adder_name: str
+    created_at: datetime
+    items: List[BillItemOut] = []

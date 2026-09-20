@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
-import { Pencil, Trash2, PackagePlus, History, ChevronRight, ArrowLeft, LayoutGrid, Tag, Search } from "lucide-react";
+import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star } from "lucide-react";
 import "./index.css";
 
 
@@ -138,6 +138,48 @@ async function getStockMovements(department) {
     : `${BASE_URL}/stock-movements/`;
   const res = await fetch(url);
   if (!res.ok) throw new Error("Failed to fetch stock history");
+  return res.json();
+}
+
+async function addProductImages(id, files) {
+  const formData = new FormData();
+  files.forEach((file) => formData.append("images", file));
+  const res = await fetch(`${BASE_URL}/products/${id}/images`, { method: "POST", body: formData });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to upload images");
+  }
+  return res.json();
+}
+
+async function setPrimaryImage(id, imageId) {
+  const res = await fetch(`${BASE_URL}/products/${id}/images/${imageId}/primary`, { method: "PUT" });
+  if (!res.ok) throw new Error("Failed to set main image");
+  return res.json();
+}
+
+async function deleteProductImage(id, imageId) {
+  const res = await fetch(`${BASE_URL}/products/${id}/images/${imageId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete image");
+  return res.json();
+}
+
+async function getBills() {
+  const res = await fetch(`${BASE_URL}/bills/`);
+  if (!res.ok) throw new Error("Failed to fetch bills");
+  return res.json();
+}
+
+async function createBill(adderName, items) {
+  const res = await fetch(`${BASE_URL}/bills/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ adder_name: adderName, items }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to save bill");
+  }
   return res.json();
 }
 
@@ -767,8 +809,92 @@ function RequestsPanel({ requests, onApprove, onReject }) {
   );
 }
 
+// ---------- ImageManager (edit mode: add / change main / delete images) ----------
+function ImageManager({ productId, images, onChange }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const sorted = [...images].sort((a, b) => Number(b.is_primary) - Number(a.is_primary));
+
+  const run = async (action) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const product = await action();
+      onChange(product.images || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleFiles = (e) => {
+    const files = Array.from(e.target.files);
+    e.target.value = ""; // lets the same file be picked again later
+    if (files.length) run(() => addProductImages(productId, files));
+  };
+
+  const handleDelete = (img) => {
+    if (!confirm("Delete this image?")) return;
+    run(() => deleteProductImage(productId, img.id));
+  };
+
+  return (
+    <div>
+      <label className="block text-sm text-gray-600 mb-1">Product images</label>
+      {error && <div className="bg-red-50 text-red-600 text-xs rounded-lg px-3 py-2 mb-2">{error}</div>}
+
+      {sorted.length === 0 ? (
+        <p className="text-xs text-gray-400 mb-2">No images yet.</p>
+      ) : (
+        <div className="grid grid-cols-3 gap-2 mb-2">
+          {sorted.map((img) => (
+            <div key={img.id} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-100">
+              <img src={img.image_url} alt="" className="w-full h-full object-cover" />
+              {img.is_primary && (
+                <span className="absolute top-1 left-1 bg-blue-600 text-white text-[10px] font-medium px-1.5 py-0.5 rounded-full">Main</span>
+              )}
+              <div className="absolute bottom-1 right-1 flex gap-1">
+                {!img.is_primary && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => run(() => setPrimaryImage(productId, img.id))}
+                    title="Make main image"
+                    aria-label="Make main image"
+                    className="p-1.5 rounded-full bg-white/90 text-amber-500 hover:bg-white shadow disabled:opacity-50"
+                  >
+                    <Star size={14} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => handleDelete(img)}
+                  title="Delete image"
+                  aria-label="Delete image"
+                  className="p-1.5 rounded-full bg-white/90 text-red-500 hover:bg-white shadow disabled:opacity-50"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <label className={`inline-flex items-center gap-1 text-xs font-medium text-blue-600 ${busy ? "opacity-50" : "cursor-pointer hover:underline"}`}>
+        <Plus size={13} />
+        {busy ? "Working..." : "Add images"}
+        <input type="file" accept="image/*" multiple disabled={busy} onChange={handleFiles} className="hidden" />
+      </label>
+      <p className="text-[11px] text-gray-400 mt-1">Images save straight away — no need to press Save Changes.</p>
+    </div>
+  );
+}
+
 // ---------- ProductForm (handles both Create and Edit) ----------
-function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onClose, onCreateCategory }) {
+function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onClose, onCreateCategory,onImagesChanged  }) {
   const isEditMode = Boolean(initialData);
   const [form, setForm] = useState({
     name: initialData?.name || "",
@@ -780,6 +906,7 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
     department: initialData?.department || defaultDepartment,
   });
   const [imageFiles, setImageFiles] = useState([]);
+  const [images, setImages] = useState(initialData?.images || []); 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
@@ -855,6 +982,15 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
               <input type="file" accept="image/*" multiple onChange={handleFileChange} className="w-full text-sm" />
             </div>
           )}
+
+          {isEditMode && (
+            <ImageManager
+              productId={initialData.id}
+              images={images}
+              onChange={(imgs) => { setImages(imgs); onImagesChanged?.(); }}
+            />
+          )}
+
           {isEditMode && (
             <p className="text-xs text-gray-400">
               Quantity here is a manual override (use it for corrections). To receive new stock, use the "Add stock" button on the product card instead - it logs the addition with a timestamp under Stock History.
@@ -1082,6 +1218,7 @@ function InventoryView({ isAdmin, department, onBack }) {
           onSubmit={editingProduct ? handleUpdate : handleCreate}
           onClose={() => { setShowForm(false); setEditingProduct(null); }}
           onCreateCategory={handleCreateCategory}
+          onImagesChanged={() => loadData(true)}
         />
       )}
 
@@ -1130,13 +1267,88 @@ function FilterBar({ categories, searchTerm, onSearchChange, selectedCategory, o
   );
 }
 
+
+// ---------- "+ Add Product" from any admin page (pick the department inside the form) ----------
+function AddProductButton({ onCreated }) {
+  const [open, setOpen] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const handleOpen = async () => {
+    setLoading(true);
+    try {
+      setCategories(await getCategories());
+      setOpen(true);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreate = async (values, imageFiles) => {
+    await createProduct(values, imageFiles);
+    onCreated?.();
+  };
+
+  const handleCreateCategory = async (name) => {
+    const created = await createCategory(name);
+    setCategories((prev) => [...prev, created]);
+    return created;
+  };
+
+  return (
+    <>
+      <button
+        onClick={handleOpen}
+        disabled={loading}
+        className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+      >
+        {loading ? "Loading..." : "+ Add Product"}
+      </button>
+      {open && (
+        <ProductForm
+          categories={categories}
+          defaultDepartment={DEPARTMENTS[0].slug}
+          onSubmit={handleCreate}
+          onClose={() => setOpen(false)}
+          onCreateCategory={handleCreateCategory}
+        />
+      )}
+    </>
+  );
+}
+
+// ---------- Shared top header (title + admin buttons + tabs) ----------
+function AppHeader({ isAdmin, active, onTab, onProductAdded, actions }) {
+  return (
+    <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
+      <div className="flex flex-wrap gap-3 justify-between items-start">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">STD Stock Manager</h1>
+          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isAdmin ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}>
+            {isAdmin ? "Admin" : "Employee (Read Only)"}
+          </span>
+        </div>
+        {isAdmin && (
+          <div className="flex items-center gap-2">
+            {actions}
+            <AddProductButton onCreated={onProductAdded} />
+          </div>
+        )}
+      </div>
+      <HomeTabs active={active} isAdmin={isAdmin} onChange={onTab} />
+    </header>
+  );
+}
+
 // ---------- Shared helpers for the home tabs / items browser ----------
 const UNCATEGORIZED = "uncategorized";
 const nameCollator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
 const compareNames = (a, b) => nameCollator.compare(a, b); // A-Z, ignores upper/lower case
 const getDepartment = (slug) => DEPARTMENTS.find((d) => d.slug === slug);
 
-function HomeTabs({ active, onChange }) {
+function HomeTabs({ active, onChange, isAdmin }) {
   const tab = (id, label, Icon) => (
     <button
       key={id}
@@ -1153,6 +1365,7 @@ function HomeTabs({ active, onChange }) {
     <div className="flex gap-5 border-b border-gray-100 -mb-4 mt-3">
       {tab("home", "Home", LayoutGrid)}
       {tab("items", "Items", Tag)}
+      {isAdmin && tab("bill", "Bill", Receipt)}
     </div>
   );
 }
@@ -1353,7 +1566,7 @@ function CategoryItemsPage({ group, catKey, loading, go }) {
 }
 
 // ---------- Items page: categories (A-Z) -> items -> full item card ----------
-function ItemsPage({ isAdmin, catKey, itemId, go }) {
+function ItemsPage({ isAdmin, catKey, itemId, go, refreshToken, onProductAdded }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -1376,7 +1589,7 @@ function ItemsPage({ isAdmin, catKey, itemId, go }) {
     load();
     const interval = setInterval(load, 10000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, []);
+  }, [refreshToken]);
 
   // group items by category, then sort A-Z ("Uncategorized" always last)
   const groupMap = {};
@@ -1425,13 +1638,12 @@ function ItemsPage({ isAdmin, catKey, itemId, go }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
-        <h1 className="text-xl font-bold text-gray-900">STD Stock Manager</h1>
-        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isAdmin ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}>
-          {isAdmin ? "Admin" : "Employee (Read Only)"}
-        </span>
-        <HomeTabs active="items" onChange={(tab) => tab === "home" && go({})} />
-      </header>
+      <AppHeader
+        isAdmin={isAdmin}
+        active="items"
+        onProductAdded={onProductAdded}
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
 
       <main className="p-4 sm:p-6 max-w-4xl">
         <div className="mb-5">
@@ -1500,8 +1712,9 @@ function ItemsPage({ isAdmin, catKey, itemId, go }) {
   );
 }
 
+
 // ---------- Department home screen ----------
-function DepartmentHome({ isAdmin, onSelect, onTab }) {
+function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded }) {
   const [itemCounts, setItemCounts] = useState({});
   const [pendingCounts, setPendingCounts] = useState({});
 
@@ -1530,17 +1743,11 @@ function DepartmentHome({ isAdmin, onSelect, onTab }) {
     load();
     const interval = setInterval(load, 10000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [isAdmin]);
+  }, [isAdmin, refreshToken]);
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
-        <h1 className="text-xl font-bold text-gray-900">STD Stock Manager</h1>
-        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isAdmin ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}>
-          {isAdmin ? "Admin" : "Employee (Read Only)"}
-        </span>
-        <HomeTabs active="home" onChange={onTab} />
-      </header>
+      <AppHeader isAdmin={isAdmin} active="home" onTab={onTab} onProductAdded={onProductAdded} />
 
       <main className="p-4 sm:p-6">
         <p className="text-sm text-gray-500 mb-4">Select a department</p>
@@ -1579,6 +1786,587 @@ function DepartmentHome({ isAdmin, onSelect, onTab }) {
   );
 }
 
+// ---------- Bill (bulk stock entry, admin only) ----------
+// A "bill" is a batch of restocks saved together (see /api/bills on the backend).
+const inputCls =
+  "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400";
+
+function FieldLabel({ children, action }) {
+  return (
+    <div className="flex items-center justify-between mb-1.5">
+      <label className="text-sm font-semibold text-gray-700">{children}</label>
+      {action}
+    </div>
+  );
+}
+
+function LinkButton({ onClick, disabled, title, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="text-xs font-medium text-blue-600 hover:underline flex items-center gap-1 disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed"
+    >
+      <Plus size={13} />
+      {children}
+    </button>
+  );
+}
+
+// Inline "create item" panel shown under the Item title
+function CreateItemPanel({ department, category, existingNames, onCreate, onCancel }) {
+  const [form, setForm] = useState({ name: "", sku: "", price: "" });
+  const [imageFiles, setImageFiles] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  const handleSave = async () => {
+    const name = form.name.trim();
+    if (!name) return setError("Enter an item name");
+    if (existingNames.includes(name.toLowerCase())) {
+      return setError("This item already exists in this category — select it from the list");
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await onCreate(
+        {
+          name,
+          sku: form.sku.trim(),
+          description: "",
+          quantity: 0, // stock is added through the bill so it is logged with a timestamp
+          price: form.price || 0,
+          department,
+          category_id: category,
+        },
+        imageFiles
+      );
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mb-3 border border-blue-200 bg-blue-50/50 rounded-xl p-3 space-y-2">
+      <p className="text-xs font-medium text-blue-700">New item in this department & category</p>
+      {error && <div className="bg-red-50 text-red-600 text-xs rounded-lg px-3 py-2">{error}</div>}
+      <input
+        autoFocus
+        placeholder="Item name *"
+        value={form.name}
+        onChange={(e) => set("name", e.target.value)}
+        className={inputCls}
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <input placeholder="SKU (optional)" value={form.sku} onChange={(e) => set("sku", e.target.value)} className={inputCls} />
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          placeholder="Price (optional)"
+          value={form.price}
+          onChange={(e) => set("price", e.target.value)}
+          className={inputCls}
+        />
+      </div>
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">Images (optional — you can add them later)</label>
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={(e) => setImageFiles(Array.from(e.target.files))}
+          className="w-full text-xs"
+        />
+      </div>
+      <div className="flex gap-2 pt-1">
+        <button type="button" onClick={onCancel} className="flex-1 border border-gray-300 bg-white rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+          Cancel
+        </button>
+        <button type="button" onClick={handleSave} disabled={saving} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+          {saving ? "Creating..." : "Create item"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Asks for the stock adder's name, then saves the whole bill
+function SubmitBillModal({ lines, onSubmit, onClose }) {
+  const [name, setName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const totalUnits = lines.reduce((sum, l) => sum + l.quantity, 0);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) return setError("Please enter the stock adder's name");
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSubmit(name.trim().replace(/\s+/g, " "));
+    } catch (err) {
+      setError(err.message);
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+        <div className="flex items-center gap-2 mb-1">
+          <Receipt size={18} className="text-green-600" />
+          <h2 className="text-lg font-semibold">Submit Bill</h2>
+        </div>
+        <p className="text-sm text-gray-500 mb-4">
+          {lines.length} {lines.length === 1 ? "item" : "items"} · {totalUnits} units will be added to stock
+        </p>
+
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Stock adder name *</label>
+            <input autoFocus required value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" className={inputCls} />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} disabled={submitting} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50">
+              Cancel
+            </button>
+            <button type="submit" disabled={submitting} className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700 disabled:opacity-50">
+              {submitting ? "Saving..." : "Confirm"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- New bill form ----------
+function NewBillForm({ onBack, onSaved }) {
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+
+  const [department, setDepartment] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [itemId, setItemId] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [lines, setLines] = useState([]); // [{ product, quantity }]
+  const [formError, setFormError] = useState(null);
+
+  const [creatingCategory, setCreatingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [savingCategory, setSavingCategory] = useState(false);
+  const [showCreateItem, setShowCreateItem] = useState(false);
+  const [showSubmit, setShowSubmit] = useState(false);
+
+  useEffect(() => {
+    Promise.all([getProducts(), getCategories()])
+      .then(([p, c]) => { setProducts(p); setCategories(c); })
+      .catch((err) => setLoadError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const sortedCategories = [...categories].sort((a, b) => compareNames(a.name, b.name));
+  const categoryItems = products
+    .filter((p) => p.department === department && String(p.category?.id) === categoryId)
+    .sort((a, b) => compareNames(a.name, b.name));
+  const selectedItem = categoryItems.find((p) => String(p.id) === itemId);
+  const totalUnits = lines.reduce((sum, l) => sum + l.quantity, 0);
+
+  const handleDepartment = (slug) => {
+    setDepartment(slug);
+    setItemId("");
+    setShowCreateItem(false);
+    setFormError(null);
+  };
+
+  const handleCategory = (id) => {
+    setCategoryId(id);
+    setItemId("");
+    setShowCreateItem(false);
+    setFormError(null);
+  };
+
+  const handleCreateCategory = async () => {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    const existing = categories.find((c) => c.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      handleCategory(String(existing.id));
+      setNewCategoryName("");
+      setCreatingCategory(false);
+      return;
+    }
+    setSavingCategory(true);
+    try {
+      const created = await createCategory(name);
+      setCategories((prev) => [...prev, created]);
+      handleCategory(String(created.id));
+      setNewCategoryName("");
+      setCreatingCategory(false);
+    } catch (err) {
+      setFormError(err.message);
+    } finally {
+      setSavingCategory(false);
+    }
+  };
+
+  const handleCreateItem = async (values, imageFiles) => {
+    const created = await createProduct(values, imageFiles);
+    setProducts((prev) => [...prev, created]);
+    setItemId(String(created.id));
+    setShowCreateItem(false);
+  };
+
+  const handleAddToList = () => {
+    setFormError(null);
+    if (!selectedItem) return setFormError("Select an item first");
+    const qty = Number(quantity);
+    if (!Number.isInteger(qty) || qty <= 0) return setFormError("Enter a whole quantity greater than 0");
+
+    setLines((prev) => {
+      const existing = prev.find((l) => l.product.id === selectedItem.id);
+      if (existing) {
+        return prev.map((l) => (l.product.id === selectedItem.id ? { ...l, quantity: l.quantity + qty } : l));
+      }
+      return [...prev, { product: selectedItem, quantity: qty }];
+    });
+    setItemId("");
+    setQuantity("");
+  };
+
+  const handleLineQty = (productId, value) => {
+    const qty = Math.max(1, Math.floor(Number(value)) || 1);
+    setLines((prev) => prev.map((l) => (l.product.id === productId ? { ...l, quantity: qty } : l)));
+  };
+
+  const handleRemoveLine = (productId) => setLines((prev) => prev.filter((l) => l.product.id !== productId));
+
+  const handleSubmitBill = async (adderName) => {
+    await createBill(
+      adderName,
+      lines.map((l) => ({ product_id: l.product.id, quantity: l.quantity }))
+    );
+    onSaved();
+  };
+
+  const deptName = getDepartment(department)?.name;
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <SubHeader title="New Bill" subtitle="Add stock for many items at once" onBack={onBack} />
+
+      <main className="p-4 sm:p-6 max-w-2xl space-y-4">
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : loadError ? (
+          <p className="text-red-500 text-center py-16">{loadError}</p>
+        ) : (
+          <>
+            <div className="bg-white border border-gray-200 rounded-2xl p-4 space-y-4">
+              {formError && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2">{formError}</div>}
+
+              {/* Department */}
+              <div>
+                <FieldLabel>Department</FieldLabel>
+                <select value={department} onChange={(e) => handleDepartment(e.target.value)} className={inputCls}>
+                  <option value="">Select department</option>
+                  {DEPARTMENTS.map((d) => (
+                    <option key={d.slug} value={d.slug}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Category */}
+              <div>
+                <FieldLabel
+                  action={
+                    !creatingCategory && (
+                      <LinkButton onClick={() => setCreatingCategory(true)}>New category</LinkButton>
+                    )
+                  }
+                >
+                  Category
+                </FieldLabel>
+                {creatingCategory ? (
+                  <div className="flex gap-2">
+                    <input
+                      autoFocus
+                      placeholder="New category name"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleCreateCategory())}
+                      className={`${inputCls} flex-1`}
+                    />
+                    <button type="button" onClick={handleCreateCategory} disabled={savingCategory} className="bg-blue-600 text-white px-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+                      {savingCategory ? "..." : "Add"}
+                    </button>
+                    <button type="button" onClick={() => { setCreatingCategory(false); setNewCategoryName(""); }} aria-label="Cancel" className="border border-gray-300 px-3 rounded-lg text-sm hover:bg-gray-50">
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <select value={categoryId} onChange={(e) => handleCategory(e.target.value)} disabled={!department} className={inputCls}>
+                    <option value="">{department ? "Select category" : "Select a department first"}</option>
+                    {sortedCategories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Item */}
+              <div>
+                <FieldLabel
+                  action={
+                    <LinkButton
+                      onClick={() => setShowCreateItem((v) => !v)}
+                      disabled={!department || !categoryId}
+                      title={!categoryId ? "Select a department and category first" : undefined}
+                    >
+                      Create item
+                    </LinkButton>
+                  }
+                >
+                  Item
+                </FieldLabel>
+
+                {showCreateItem && department && categoryId && (
+                  <CreateItemPanel
+                    department={department}
+                    category={categoryId}
+                    existingNames={categoryItems.map((p) => p.name.toLowerCase())}
+                    onCreate={handleCreateItem}
+                    onCancel={() => setShowCreateItem(false)}
+                  />
+                )}
+
+                <select value={itemId} onChange={(e) => setItemId(e.target.value)} disabled={!department || !categoryId} className={inputCls}>
+                  <option value="">
+                    {!categoryId ? "Select a category first" : categoryItems.length ? "Select item" : "No items yet"}
+                  </option>
+                  {categoryItems.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} ({p.quantity} in stock)</option>
+                  ))}
+                </select>
+                {department && categoryId && categoryItems.length === 0 && !showCreateItem && (
+                  <p className="text-xs text-gray-400 mt-1.5">
+                    Nothing in this category for {deptName} yet — use “Create item” to add one.
+                  </p>
+                )}
+
+                {/* Quantity + add to list, right under the item select */}
+                <div className="flex gap-2 mt-3">
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Quantity"
+                    value={quantity}
+                    disabled={!selectedItem}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddToList())}
+                    className={`${inputCls} w-28`}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddToList}
+                    disabled={!selectedItem}
+                    className="flex-1 border border-blue-600 text-blue-600 rounded-lg py-2 text-sm font-medium hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    + Add to list
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Bill item list */}
+            <div className="bg-white border border-gray-200 rounded-2xl p-4">
+              <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
+                Bill items <span className="text-gray-400 font-normal">({lines.length} · {totalUnits} units)</span>
+              </h2>
+              {lines.length === 0 ? (
+                <p className="text-sm text-gray-400">No items added yet. Pick an item and quantity above, then “Add to list”.</p>
+              ) : (
+                <div className="space-y-2">
+                  {lines.map((l) => {
+                    const dept = getDepartment(l.product.department);
+                    return (
+                      <div key={l.product.id} className="flex items-center gap-3 border border-gray-200 rounded-lg p-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-900 truncate">{l.product.name}</p>
+                          <p className="text-xs text-gray-400 truncate">
+                            {[dept?.name, l.product.category?.name].filter(Boolean).join(" · ")}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {l.product.quantity} → <span className="font-medium text-green-600">{l.product.quantity + l.quantity}</span>
+                          </p>
+                        </div>
+                        <input
+                          type="number"
+                          min="1"
+                          value={l.quantity}
+                          onChange={(e) => handleLineQty(l.product.id, e.target.value)}
+                          aria-label={`Quantity for ${l.product.name}`}
+                          className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <button type="button" onClick={() => handleRemoveLine(l.product.id)} aria-label="Remove" className="p-1.5 rounded-full text-red-500 hover:bg-red-50">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowSubmit(true)}
+              disabled={lines.length === 0}
+              className="w-full bg-green-600 text-white rounded-xl py-3 text-sm font-semibold hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Submit Bill
+            </button>
+          </>
+        )}
+      </main>
+
+      {showSubmit && (
+        <SubmitBillModal lines={lines} onSubmit={handleSubmitBill} onClose={() => setShowSubmit(false)} />
+      )}
+    </div>
+  );
+}
+
+// ---------- Bill page: list of submitted bills (newest first) ----------
+function BillPage({ go }) {
+  const [creating, setCreating] = useState(false);
+  const [bills, setBills] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedMonth, setSelectedMonth] = useState("");
+  const [openId, setOpenId] = useState(null);
+
+  const load = async () => {
+    try {
+      setBills(await getBills());
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (creating) {
+    return (
+      <NewBillForm
+        onBack={() => setCreating(false)}
+        onSaved={() => { setCreating(false); setLoading(true); load(); }}
+      />
+    );
+  }
+
+  const monthOptions = getMonthOptions(bills.map((b) => b.created_at));
+  const shown = selectedMonth ? bills.filter((b) => b.created_at?.slice(0, 7) === selectedMonth) : bills;
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader
+        isAdmin
+        active="bill"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+        actions={
+          <button onClick={() => setCreating(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
+            + New Bill
+          </button>
+        }
+      />
+
+      <main className="p-4 sm:p-6 max-w-4xl">
+        <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
+          <h2 className="text-sm font-semibold text-gray-500 uppercase">
+            Bills <span className="text-gray-400 font-normal">({shown.length})</span>
+          </h2>
+          <MonthSelect options={monthOptions} value={selectedMonth} onChange={setSelectedMonth} />
+        </div>
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error && bills.length === 0 ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : shown.length === 0 ? (
+          <p className="text-gray-400 text-sm text-center py-16">
+            {bills.length === 0 ? "No bills yet. Tap “New Bill” to add stock in bulk." : "No bills for this month."}
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {shown.map((bill) => {
+              const open = openId === bill.id;
+              const units = bill.items.reduce((sum, m) => sum + m.quantity, 0);
+              return (
+                <div key={bill.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <button
+                    onClick={() => setOpenId(open ? null : bill.id)}
+                    aria-expanded={open}
+                    className="w-full flex items-center gap-3 p-4 text-left hover:bg-gray-50"
+                  >
+                    <div className="p-2 rounded-full bg-green-50 text-green-600 shrink-0">
+                      <Receipt size={16} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">{bill.adder_name}</p>
+                      <p className="text-xs text-gray-400">{formatDateTime(bill.created_at)}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-semibold text-green-600">+{units}</p>
+                      <p className="text-xs text-gray-400">{bill.items.length} {bill.items.length === 1 ? "item" : "items"}</p>
+                    </div>
+                    <ChevronDown size={18} className={`text-gray-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {open && (
+                    <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-2">
+                      {bill.items
+                        .slice()
+                        .sort((a, b) => compareNames(a.product?.name || "", b.product?.name || ""))
+                        .map((m) => (
+                          <div key={m.id} className="flex justify-between items-center gap-3 text-sm">
+                            <div className="min-w-0">
+                              <p className="text-gray-900 truncate">{m.product?.name || `Product #${m.product_id}`}</p>
+                              {m.product?.department && (
+                                <p className="text-xs text-gray-400 truncate">{getDepartment(m.product.department)?.name || m.product.department}</p>
+                              )}
+                            </div>
+                            <span className="font-semibold text-green-600 shrink-0">+{m.quantity}</span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
 // ---------- Picks home / items / a department, using the URL query ----------
 //   /?dept=i-lab                 -> department stock
 //   /?view=items                 -> all categories
@@ -1588,6 +2376,8 @@ function AppShell() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const isAdmin = location.pathname.startsWith("/admin");
+  const [refreshToken, setRefreshToken] = useState(0); // bumped after "+ Add Product" so lists reload at once
+  const refresh = () => setRefreshToken((n) => n + 1);
   const department = DEPARTMENTS.find((d) => d.slug === searchParams.get("dept"));
 
   if (department) {
@@ -1601,6 +2391,11 @@ function AppShell() {
     );
   }
 
+  // Bill is admin-only: on the employee route it falls through to the home screen
+  if (searchParams.get("view") === "bill" && isAdmin) {
+    return <BillPage go={setSearchParams} />;
+  }
+
   if (searchParams.get("view") === "items") {
     return (
       <ItemsPage
@@ -1608,6 +2403,8 @@ function AppShell() {
         catKey={searchParams.get("cat")}
         itemId={searchParams.get("item")}
         go={setSearchParams}
+        refreshToken={refreshToken}
+        onProductAdded={refresh}
       />
     );
   }
@@ -1616,7 +2413,9 @@ function AppShell() {
     <DepartmentHome
       isAdmin={isAdmin}
       onSelect={(slug) => setSearchParams({ dept: slug })}
-      onTab={(tab) => tab === "items" && setSearchParams({ view: "items" })}
+      refreshToken={refreshToken}
+      onProductAdded={refresh}
+      onTab={(tab) => tab !== "home" && setSearchParams({ view: tab })}
     />
   );
 }

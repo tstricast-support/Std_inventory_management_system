@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 from app.departments import DEFAULT_DEPARTMENT
 from app.database import Base, engine
-from app.routers import products, categories, requests, stock_movements
+from app.routers import products, categories, requests, stock_movements, bills
 Base.metadata.create_all(bind=engine) 
 
 def add_department_column():
@@ -46,6 +46,7 @@ app.include_router(categories.router)
 app.include_router(products.router)
 app.include_router(requests.router)
 app.include_router(stock_movements.router)
+app.include_router(bills.router)
 
 
 @app.get("/")

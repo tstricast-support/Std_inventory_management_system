@@ -68,3 +68,24 @@ class StockMovement(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     product = relationship("Product")
+
+class Bill(Base):
+    __tablename__ = "bills"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    adder_name = Column(String(100), nullable=False)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    items = relationship("BillItem", back_populates="bill", cascade="all, delete-orphan")
+
+
+class BillItem(Base):
+    __tablename__ = "bill_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bill_id = Column(Integer, ForeignKey("bills.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    quantity = Column(Integer, nullable=False)
+
+    bill = relationship("Bill", back_populates="items")
+    product = relationship("Product")
