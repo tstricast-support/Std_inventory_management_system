@@ -55,7 +55,10 @@ async function createProduct(formValues, imageFiles) {
   imageFiles.forEach((file) => formData.append("images", file));
 
   const res = await fetch(`${BASE_URL}/products/`, { method: "POST", body: formData });
-  if (!res.ok) throw new Error("Failed to create product");
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to create product");
+  }
   return res.json();
 }
 
@@ -65,7 +68,10 @@ async function updateProduct(id, updates) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),
   });
-  if (!res.ok) throw new Error("Failed to update product");
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to update product");
+  }
   return res.json();
 }
 

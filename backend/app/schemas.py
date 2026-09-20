@@ -55,6 +55,16 @@ class ProductUpdate(BaseModel):
             return None
         return v
 
+    @field_validator("sku", mode="before")
+    @classmethod
+    def empty_sku_to_none(cls, v):
+        # an empty SKU must be stored as NULL, otherwise two products
+        # without an SKU collide on the unique constraint
+        if v is None:
+            return None
+        v = str(v).strip()
+        return v or None
+
 class ProductOut(ProductBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
