@@ -183,6 +183,21 @@ async function createIssuedList(payload) {
   return res.json();
 }
 
+async function getReconcilableRequests(issuedDate) {
+  const res = await fetch(`${BASE_URL}/issued/reconcilable?issued_date=${issuedDate}`);
+  if (!res.ok) throw new Error("Failed to load approved requests");
+  return res.json();
+}
+
+async function deleteIssuedList(id) {
+  const res = await fetch(`${BASE_URL}/issued/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to undo issued list");
+  }
+  return res.json();
+}
+
 async function getBills() {
   const res = await fetch(`${BASE_URL}/bills/`);
   if (!res.ok) throw new Error("Failed to fetch bills");
@@ -2581,6 +2596,74 @@ function formatIssuedDate(iso) {
   return pretty;
 }
 
+// ---------- Review popup shown before stock is deducted ----------
+function ReviewIssuedModal({ date, responsible, rows, warnings, error, submitting, onBack, onConfirm }) {
+  const totalDeduct = rows.reduce((sum, r) => sum + r.deduct, 0);
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6">
+        <div className="flex items-center gap-2 mb-1">
+          <ClipboardList size={18} className="text-amber-600" />
+          <h2 className="text-lg font-semibold">Review before deducting</h2>
+        </div>
+        <p className="text-sm text-gray-500 mb-4">
+          {formatIssuedDate(date)} · by {responsible}
+        </p>
+
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+
+        <div className="space-y-2 mb-4">
+          {rows.map((r) => (
+            <div key={r.product.id} className="border border-gray-200 rounded-lg p-3">
+              <div className="flex justify-between items-start gap-3">
+                <p className="font-medium text-gray-900 truncate">{r.product.name}</p>
+                <p className="text-sm shrink-0">
+                  {r.product.quantity} → <span className="font-semibold text-amber-600">{r.product.quantity - r.deduct}</span>
+                </p>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {r.covered > 0
+                  ? `List ${r.total} − ${r.covered} already deducted via approved request${r.covered === r.total ? "" : "s"} = ${r.deduct} to deduct now`
+                  : `${r.deduct} to deduct now`}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {warnings.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+            <p className="text-sm font-medium text-amber-800 mb-1">Check for double counting</p>
+            <p className="text-xs text-amber-700 mb-2">
+              These approved requests are for items in this list but are not ticked. If they are part of this list, go
+              back and tick them — otherwise they will be deducted a second time.
+            </p>
+            <ul className="text-xs text-amber-800 space-y-0.5">
+              {warnings.map((w) => (
+                <li key={w.id}>
+                  • {w.product?.name || `Product #${w.product_id}`} × {w.quantity} — {w.requested_by || "unknown"}, approved {formatDateTime(w.resolved_at)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <p className="text-sm text-gray-600 mb-4">
+          Total to deduct: <span className="font-semibold text-amber-600">{totalDeduct}</span> units
+        </p>
+
+        <div className="flex gap-2">
+          <button onClick={onBack} disabled={submitting} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50">
+            Go back
+          </button>
+          <button onClick={onConfirm} disabled={submitting} className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700 disabled:opacity-50">
+            {submitting ? "Saving..." : "Confirm & deduct"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- Create issued list form ----------
 function NewIssuedForm({ onBack, onSaved }) {
   const [products, setProducts] = useState([]);
@@ -2591,12 +2674,19 @@ function NewIssuedForm({ onBack, onSaved }) {
   const [issuedDate, setIssuedDate] = useState(toISODate(new Date()));
   const [itemId, setItemId] = useState("");
   const [quantity, setQuantity] = useState("");
-  const [lines, setLines] = useState([]); // [{ product, quantity }]
+  const [lines, setLines] = useState([]); // [{ product, quantity }]  quantity = total taken (QuickBooks)
   const [description, setDescription] = useState("");
   const [responsibleBy, setResponsibleBy] = useState("");
   const [formError, setFormError] = useState(null);
   const [showProductForm, setShowProductForm] = useState(false);
+  const [showReview, setShowReview] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // approved requests whose stock was already deducted (double-count protection)
+  const [reconcilable, setReconcilable] = useState([]);
+  const [reconcileError, setReconcileError] = useState(false);
+  const [ticked, setTicked] = useState([]); // request ids
+  const [showOthers, setShowOthers] = useState(false);
 
   useEffect(() => {
     Promise.all([getProducts(), getCategories()])
@@ -2605,6 +2695,23 @@ function NewIssuedForm({ onBack, onSaved }) {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    setTicked([]);
+    setReconcileError(false);
+    getReconcilableRequests(issuedDate)
+      .then((data) => { if (!cancelled) setReconcilable(data); })
+      .catch(() => { if (!cancelled) { setReconcilable([]); setReconcileError(true); } });
+    return () => { cancelled = true; };
+  }, [issuedDate]);
+
+  const tickedSet = new Set(ticked);
+  const coveredByProduct = {};
+  reconcilable.forEach((r) => {
+    if (tickedSet.has(r.id)) coveredByProduct[r.product_id] = (coveredByProduct[r.product_id] || 0) + r.quantity;
+  });
+  const covered = (productId) => coveredByProduct[productId] || 0;
+
   const sortedProducts = [...products].sort((a, b) => compareNames(a.name, b.name));
   const itemOptions = sortedProducts.map((p) => {
     const deptName = getDepartment(p.department)?.name || p.department;
@@ -2612,9 +2719,26 @@ function NewIssuedForm({ onBack, onSaved }) {
   });
   const selectedItem = products.find((p) => String(p.id) === itemId);
   const alreadyInList = lines.find((l) => l.product.id === selectedItem?.id)?.quantity || 0;
+  const pendingDeduct = selectedItem ? Math.max(0, alreadyInList - covered(selectedItem.id)) : 0;
+  const availableStock = selectedItem ? selectedItem.quantity - pendingDeduct : 0;
   const qtyNumber = Number(quantity);
   const qtyValid = Number.isInteger(qtyNumber) && qtyNumber > 0;
+
   const totalUnits = lines.reduce((sum, l) => sum + l.quantity, 0);
+  const deductUnits = lines.reduce((sum, l) => sum + (l.quantity - covered(l.product.id)), 0);
+
+  const isSameDay = (r) => r.resolved_at && toISODate(new Date(r.resolved_at)) === issuedDate;
+  const sameDayRequests = reconcilable.filter(isSameDay);
+  const otherRequests = reconcilable.filter((r) => !isSameDay(r));
+
+  const canTick = (r) => {
+    const line = lines.find((l) => l.product.id === r.product_id);
+    return !!line && covered(r.product_id) + r.quantity <= line.quantity;
+  };
+  const toggleTick = (r) => {
+    setFormError(null);
+    setTicked((prev) => (prev.includes(r.id) ? prev.filter((id) => id !== r.id) : [...prev, r.id]));
+  };
 
   const handleCreateCategory = async (name) => {
     const created = await createCategory(name);
@@ -2635,10 +2759,10 @@ function NewIssuedForm({ onBack, onSaved }) {
     setFormError(null);
     if (!selectedItem) return setFormError("Select an item first");
     if (!qtyValid) return setFormError("Enter a whole quantity greater than 0");
-    if (alreadyInList + qtyNumber > selectedItem.quantity) {
+    if (qtyNumber > availableStock) {
       return setFormError(
         `Only ${selectedItem.quantity} of "${selectedItem.name}" in stock` +
-          (alreadyInList ? ` (${alreadyInList} already in this list)` : "")
+          (pendingDeduct ? ` (${pendingDeduct} already in this list)` : "")
       );
     }
     setLines((prev) => {
@@ -2656,33 +2780,85 @@ function NewIssuedForm({ onBack, onSaved }) {
     setLines((prev) =>
       prev.map((l) => {
         if (l.product.id !== productId) return l;
-        const qty = Math.min(l.product.quantity, Math.max(1, Math.floor(Number(value)) || 1));
-        return { ...l, quantity: qty };
+        const min = Math.max(1, covered(productId));
+        const max = l.product.quantity + covered(productId);
+        return { ...l, quantity: Math.min(max, Math.max(min, Math.floor(Number(value)) || 1)) };
       })
     );
   };
 
-  const handleRemoveLine = (productId) => setLines((prev) => prev.filter((l) => l.product.id !== productId));
+  const handleRemoveLine = (productId) => {
+    setLines((prev) => prev.filter((l) => l.product.id !== productId));
+    // ticked requests only make sense while their item is in the list
+    setTicked((prev) => prev.filter((id) => reconcilable.find((r) => r.id === id)?.product_id !== productId));
+  };
 
-  const handleSubmit = async () => {
+  const handleReview = () => {
     setFormError(null);
     if (lines.length === 0) return setFormError("Add at least one item to the list");
     if (!issuedDate) return setFormError("Select the issued date");
     if (!responsibleBy.trim()) return setFormError("Responsible by is required");
+    setShowReview(true);
+  };
 
+  const handleConfirm = async () => {
     setSubmitting(true);
+    setFormError(null);
     try {
       await createIssuedList({
         issued_date: issuedDate,
         description: description.trim() || null,
         responsible_by: responsibleBy.trim().replace(/\s+/g, " "),
         items: lines.map((l) => ({ product_id: l.product.id, quantity: l.quantity })),
+        request_ids: ticked,
       });
       onSaved();
     } catch (err) {
       setFormError(err.message);
       setSubmitting(false);
     }
+  };
+
+  const reviewRows = lines.map((l) => ({
+    product: l.product,
+    total: l.quantity,
+    covered: covered(l.product.id),
+    deduct: l.quantity - covered(l.product.id),
+  }));
+  // only warn about requests approved on the chosen date; nearby-day ones stay optional in the checklist
+  const warnings = sameDayRequests.filter((r) => !tickedSet.has(r.id) && lines.some((l) => l.product.id === r.product_id));
+
+  const renderRequest = (r) => {
+    const isTicked = tickedSet.has(r.id);
+    const hasLine = lines.some((l) => l.product.id === r.product_id);
+    const disabled = !isTicked && !canTick(r);
+    return (
+      <label
+        key={r.id}
+        className={`flex items-start gap-3 border rounded-lg p-3 ${isTicked ? "border-blue-300 bg-blue-50/50" : "border-gray-200"} ${disabled ? "opacity-60" : "cursor-pointer"}`}
+      >
+        <input
+          type="checkbox"
+          checked={isTicked}
+          disabled={disabled}
+          onChange={() => toggleTick(r)}
+          className="mt-1 h-4 w-4 accent-blue-600"
+        />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-900 truncate">
+            {r.product?.name || `Product #${r.product_id}`} <span className="text-gray-500 font-normal">× {r.quantity}</span>
+          </p>
+          <p className="text-xs text-gray-400 truncate">
+            Requested by {r.requested_by || "—"} · approved {formatDateTime(r.resolved_at)}
+          </p>
+          {disabled && (
+            <p className="text-xs text-amber-600 mt-0.5">
+              {hasLine ? "More than the quantity in the list" : "Add this item to the list first"}
+            </p>
+          )}
+        </div>
+      </label>
+    );
   };
 
   return (
@@ -2697,7 +2873,7 @@ function NewIssuedForm({ onBack, onSaved }) {
         ) : (
           <>
             <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 space-y-5">
-              {formError && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2">{formError}</div>}
+              {formError && !showReview && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2">{formError}</div>}
 
               {/* Date (native mini calendar) */}
               <div>
@@ -2732,10 +2908,10 @@ function NewIssuedForm({ onBack, onSaved }) {
                     <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Quantity taken</span>
                     {selectedItem && (
                       <span className="text-xs text-gray-500">
-                        In stock: <span className="font-medium text-gray-700">{selectedItem.quantity - alreadyInList}</span>
+                        In stock: <span className="font-medium text-gray-700">{availableStock}</span>
                         {qtyValid && (
-                          <> → <span className={`font-medium ${selectedItem.quantity - alreadyInList - qtyNumber < 0 ? "text-red-600" : "text-amber-600"}`}>
-                            {selectedItem.quantity - alreadyInList - qtyNumber}
+                          <> → <span className={`font-medium ${availableStock - qtyNumber < 0 ? "text-red-600" : "text-amber-600"}`}>
+                            {availableStock - qtyNumber}
                           </span></>
                         )}
                       </span>
@@ -2785,6 +2961,7 @@ function NewIssuedForm({ onBack, onSaved }) {
                 <div className="space-y-2">
                   {lines.map((l) => {
                     const dept = getDepartment(l.product.department);
+                    const cov = covered(l.product.id);
                     return (
                       <div key={l.product.id} className="flex items-center gap-3 border border-gray-200 rounded-lg p-3">
                         <div className="flex-1 min-w-0">
@@ -2793,13 +2970,17 @@ function NewIssuedForm({ onBack, onSaved }) {
                             {[dept?.name, l.product.category?.name].filter(Boolean).join(" · ")}
                           </p>
                           <p className="text-xs text-gray-500 mt-0.5">
-                            {l.product.quantity} → <span className="font-medium text-amber-600">{l.product.quantity - l.quantity}</span>
+                            {l.product.quantity} → <span className="font-medium text-amber-600">{l.product.quantity - (l.quantity - cov)}</span>
                           </p>
+                          {cov > 0 && (
+                            <p className="text-xs text-blue-600 mt-0.5">
+                              {l.quantity} in list − {cov} already deducted via approved requests
+                            </p>
+                          )}
                         </div>
                         <input
                           type="number"
                           min="1"
-                          max={l.product.quantity}
                           value={l.quantity}
                           onChange={(e) => handleLineQty(l.product.id, e.target.value)}
                           aria-label={`Quantity for ${l.product.name}`}
@@ -2814,6 +2995,43 @@ function NewIssuedForm({ onBack, onSaved }) {
                 </div>
               )}
             </div>
+
+            {/* Approved requests already deducted (prevents counting them twice) */}
+            {(reconcilable.length > 0 || reconcileError) && (
+              <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5">
+                <h2 className="text-sm font-semibold text-gray-500 uppercase mb-1">Already deducted via requests</h2>
+                {reconcileError ? (
+                  <p className="text-sm text-red-500">
+                    Couldn't load approved requests, so double-count protection is off. Reopen this form to try again.
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-xs text-gray-400 mb-3">
+                      Stock for these requests was already reduced when they were approved. If an item on your list was
+                      one of them, tick it so it is not deducted twice.
+                    </p>
+                    <div className="space-y-2">
+                      {sameDayRequests.length === 0 && (
+                        <p className="text-sm text-gray-400">No approved requests on {formatIssuedDate(issuedDate)}.</p>
+                      )}
+                      {sameDayRequests.map(renderRequest)}
+                    </div>
+                    {otherRequests.length > 0 && (
+                      <div className="mt-3">
+                        <button
+                          type="button"
+                          onClick={() => setShowOthers((v) => !v)}
+                          className="text-xs font-medium text-blue-600 hover:underline"
+                        >
+                          {showOthers ? "Hide" : "Show"} {otherRequests.length} other approved {otherRequests.length === 1 ? "request" : "requests"} from nearby days
+                        </button>
+                        {showOthers && <div className="space-y-2 mt-2">{otherRequests.map(renderRequest)}</div>}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
             {/* Description + responsible */}
             <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 space-y-5">
@@ -2841,15 +3059,15 @@ function NewIssuedForm({ onBack, onSaved }) {
             <div>
               <button
                 type="button"
-                onClick={handleSubmit}
-                disabled={submitting || lines.length === 0}
+                onClick={handleReview}
+                disabled={lines.length === 0}
                 className="w-full bg-green-600 text-white rounded-xl py-3 text-sm font-semibold hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {submitting ? "Saving..." : "Create Issued List"}
+                Review & Create
               </button>
               {lines.length > 0 && (
                 <p className="text-xs text-gray-400 text-center mt-2">
-                  This will reduce stock for {lines.length} {lines.length === 1 ? "item" : "items"} ({totalUnits} units).
+                  This will reduce stock by {deductUnits} {deductUnits === 1 ? "unit" : "units"} across {lines.length} {lines.length === 1 ? "item" : "items"}.
                 </p>
               )}
             </div>
@@ -2866,6 +3084,19 @@ function NewIssuedForm({ onBack, onSaved }) {
           onCreateCategory={handleCreateCategory}
         />
       )}
+
+      {showReview && (
+        <ReviewIssuedModal
+          date={issuedDate}
+          responsible={responsibleBy.trim()}
+          rows={reviewRows}
+          warnings={warnings}
+          error={formError}
+          submitting={submitting}
+          onBack={() => { setShowReview(false); setFormError(null); }}
+          onConfirm={handleConfirm}
+        />
+      )}
     </div>
   );
 }
@@ -2878,6 +3109,8 @@ function IssuedPage({ go }) {
   const [error, setError] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState("");
   const [openId, setOpenId] = useState(null);
+  const [undoingId, setUndoingId] = useState(null);
+  const [undoError, setUndoError] = useState(null);
 
   const load = async () => {
     try {
@@ -2895,6 +3128,23 @@ function IssuedPage({ go }) {
     const interval = setInterval(load, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  const handleUndo = async (list) => {
+    const units = list.items.reduce((sum, m) => sum + m.quantity, 0);
+    const extra = list.covered_requests?.length ? " Its approved requests can be counted again." : "";
+    if (!confirm(`Undo this issued list?\n\n${units} units will be added back to stock.${extra}`)) return;
+    setUndoingId(list.id);
+    setUndoError(null);
+    try {
+      await deleteIssuedList(list.id);
+      setOpenId(null);
+      await load();
+    } catch (err) {
+      setUndoError(err.message);
+    } finally {
+      setUndoingId(null);
+    }
+  };
 
   if (creating) {
     return (
@@ -2937,6 +3187,8 @@ function IssuedPage({ go }) {
           <MonthSelect options={monthOptions} value={selectedMonth} onChange={setSelectedMonth} />
         </div>
 
+        {undoError && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{undoError}</div>}
+
         {loading ? (
           <p className="text-gray-400 text-center py-16">Loading...</p>
         ) : error && lists.length === 0 ? (
@@ -2953,7 +3205,9 @@ function IssuedPage({ go }) {
                 <div className="space-y-2">
                   {g.lists.map((list) => {
                     const open = openId === list.id;
+                    const covered = list.covered_requests || [];
                     const units = list.items.reduce((sum, m) => sum + m.quantity, 0);
+                    const productCount = new Set([...list.items.map((m) => m.product_id), ...covered.map((r) => r.product_id)]).size;
                     return (
                       <div key={list.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
                         <button
@@ -2972,30 +3226,65 @@ function IssuedPage({ go }) {
                           </div>
                           <div className="text-right shrink-0">
                             <p className="text-sm font-semibold text-amber-600">−{units}</p>
-                            <p className="text-xs text-gray-400">{list.items.length} {list.items.length === 1 ? "item" : "items"}</p>
+                            <p className="text-xs text-gray-400">
+                              {productCount} {productCount === 1 ? "item" : "items"}
+                              {covered.length > 0 && ` · ${covered.length} via requests`}
+                            </p>
                           </div>
                           <ChevronDown size={18} className={`text-gray-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
                         </button>
 
                         {open && (
-                          <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-2">
+                          <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-3">
                             {list.description && <p className="text-sm text-gray-600 whitespace-pre-line">{list.description}</p>}
                             <p className="text-xs text-gray-400">Created {formatDateTime(list.created_at)}</p>
-                            <div className="space-y-2 pt-1">
-                              {list.items
-                                .slice()
-                                .sort((a, b) => compareNames(a.product?.name || "", b.product?.name || ""))
-                                .map((m) => (
-                                  <div key={m.id} className="flex justify-between items-center gap-3 text-sm">
-                                    <div className="min-w-0">
-                                      <p className="text-gray-900 truncate">{m.product?.name || `Product #${m.product_id}`}</p>
-                                      {m.product?.department && (
-                                        <p className="text-xs text-gray-400 truncate">{getDepartment(m.product.department)?.name || m.product.department}</p>
-                                      )}
+
+                            {list.items.length > 0 && (
+                              <div className="space-y-2">
+                                <p className="text-xs font-semibold text-gray-500 uppercase">Deducted by this list</p>
+                                {list.items
+                                  .slice()
+                                  .sort((a, b) => compareNames(a.product?.name || "", b.product?.name || ""))
+                                  .map((m) => (
+                                    <div key={m.id} className="flex justify-between items-center gap-3 text-sm">
+                                      <div className="min-w-0">
+                                        <p className="text-gray-900 truncate">{m.product?.name || `Product #${m.product_id}`}</p>
+                                        {m.product?.department && (
+                                          <p className="text-xs text-gray-400 truncate">{getDepartment(m.product.department)?.name || m.product.department}</p>
+                                        )}
+                                      </div>
+                                      <span className="font-semibold text-amber-600 shrink-0">−{m.quantity}</span>
                                     </div>
-                                    <span className="font-semibold text-amber-600 shrink-0">−{m.quantity}</span>
+                                  ))}
+                              </div>
+                            )}
+
+                            {covered.length > 0 && (
+                              <div className="space-y-2">
+                                <p className="text-xs font-semibold text-gray-500 uppercase">Already deducted via approved requests</p>
+                                {covered.map((r) => (
+                                  <div key={r.id} className="flex justify-between items-center gap-3 text-sm">
+                                    <div className="min-w-0">
+                                      <p className="text-gray-900 truncate">{r.product?.name || `Product #${r.product_id}`}</p>
+                                      <p className="text-xs text-gray-400 truncate">
+                                        {r.requested_by || "—"}{r.resolved_at ? ` · approved ${formatDateTime(r.resolved_at)}` : ""}
+                                      </p>
+                                    </div>
+                                    <span className="font-medium text-gray-500 shrink-0">{r.quantity}</span>
                                   </div>
                                 ))}
+                              </div>
+                            )}
+
+                            <div className="pt-3 border-t border-gray-200 flex items-center justify-between gap-3">
+                              <p className="text-xs text-gray-400">Entered by mistake? Undo puts the deducted stock back.</p>
+                              <button
+                                onClick={() => handleUndo(list)}
+                                disabled={undoingId === list.id}
+                                className="shrink-0 text-sm font-medium text-red-600 border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-50 disabled:opacity-50"
+                              >
+                                {undoingId === list.id ? "Undoing..." : "Undo list"}
+                              </button>
                             </div>
                           </div>
                         )}

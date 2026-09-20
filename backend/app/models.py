@@ -100,6 +100,12 @@ class IssuedList(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     items = relationship("IssuedItem", back_populates="issued_list", cascade="all, delete-orphan")
+        # approved requests that this list already counted (so they are not deducted twice)
+    request_links = relationship("IssuedRequestLink", back_populates="issued_list", cascade="all, delete-orphan")
+
+    @property
+    def covered_requests(self):
+        return [link.request for link in self.request_links if link.request]
 
 
 class IssuedItem(Base):
@@ -112,3 +118,14 @@ class IssuedItem(Base):
 
     issued_list = relationship("IssuedList", back_populates="items")
     product = relationship("Product")
+
+class IssuedRequestLink(Base):
+    __tablename__ = "issued_request_links"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    issued_list_id = Column(Integer, ForeignKey("issued_lists.id", ondelete="CASCADE"), nullable=False)
+    # unique: one approved request can be counted by only ONE issued list
+    request_id = Column(Integer, ForeignKey("item_requests.id", ondelete="CASCADE"), nullable=False, unique=True)
+
+    issued_list = relationship("IssuedList", back_populates="request_links")
+    request = relationship("ItemRequest")

@@ -137,19 +137,29 @@ class BillOut(BaseModel):
 # ---------- Issued list ----------
 class IssuedItemCreate(BaseModel):
     product_id: int
-    quantity: int
+    quantity: int          # total taken (the number on the QuickBooks list)
 
 class IssuedListCreate(BaseModel):
     issued_date: date
     description: Optional[str] = None
     responsible_by: str
     items: List[IssuedItemCreate]
+    request_ids: List[int] = []   # approved requests already deducted earlier (ticked in the form)
 
 class IssuedItemOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     product_id: int
+    quantity: int          # amount actually deducted by this list
+    product: Optional[BillProductOut] = None
+
+class CoveredRequestOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    product_id: int
     quantity: int
+    requested_by: Optional[str] = None
+    resolved_at: Optional[datetime] = None
     product: Optional[BillProductOut] = None
 
 class IssuedListOut(BaseModel):
@@ -160,3 +170,4 @@ class IssuedListOut(BaseModel):
     responsible_by: str
     created_at: datetime
     items: List[IssuedItemOut] = []
+    covered_requests: List[CoveredRequestOut] = []
