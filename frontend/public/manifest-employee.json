@@ -1,6 +1,6 @@
 {
   "id": "/",
-  "name": "STD Stock Manager",
+  "name": "Tricast Stock Manager",
   "short_name": "Stock Manager",
   "description": "Browse inventory and request items",
   "start_url": "/",

@@ -1344,7 +1344,7 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions }) {
     <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
       <div className="flex flex-wrap gap-3 justify-between items-start">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">STD Stock Manager</h1>
+          <h1 className="text-xl font-bold text-gray-900">Tricast Stock Manager</h1>
           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isAdmin ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}>
             {isAdmin ? "Admin" : "Employee (Read Only)"}
           </span>

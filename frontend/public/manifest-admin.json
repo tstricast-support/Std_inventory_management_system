@@ -1,6 +1,6 @@
 {
   "id": "/admin.html",
-  "name": "STD Stock Admin",
+  "name": "Tricast Stock Admin",
   "short_name": "Stock Admin",
   "start_url": "/admin.html",
   "scope": "/admin.html",
