@@ -2689,7 +2689,7 @@ function NewBillForm({ onBack, onSaved }) {
 }
 
 // ---------- Bill page: list of submitted bills (newest first) ----------
-function BillPage({ go }) {
+function BillPage({ go, autoCreateToken }) {
   const [creating, setCreating] = useState(false);
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2713,6 +2713,10 @@ function BillPage({ go }) {
     const interval = setInterval(load, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (autoCreateToken) setCreating(true);
+  }, [autoCreateToken]);
 
   if (creating) {
     return (
@@ -3330,7 +3334,7 @@ function NewIssuedForm({ onBack, onSaved }) {
 }
 
 // ---------- Issued page: lists grouped by the selected date (newest first) ----------
-function IssuedPage({ go }) {
+function IssuedPage({ go, autoCreateToken }) {
   const [creating, setCreating] = useState(false);
   const [lists, setLists] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -3356,6 +3360,10 @@ function IssuedPage({ go }) {
     const interval = setInterval(load, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (autoCreateToken) setCreating(true);
+  }, [autoCreateToken]);
 
   const handleUndo = async (list) => {
     const units = list.items.reduce((sum, m) => sum + m.quantity, 0);
@@ -3529,27 +3537,36 @@ function IssuedPage({ go }) {
   );
 }
 
-// ---------- Ctrl+N / Cmd+N anywhere in the admin app -> open "+ Add Product" ----------
-function GlobalAddProductShortcut({ isAdmin, defaultDepartment, onCreated }) {
+// ---------- Ctrl+N / Ctrl+B / Ctrl+I admin shortcuts, anywhere in the app ----------
+function GlobalAdminShortcuts({ isAdmin, defaultDepartment, onProductCreated, onNewBill, onNewIssued }) {
   const [open, setOpen] = useState(false);
   const [categories, setCategories] = useState([]);
 
   useEffect(() => {
     if (!isAdmin) return;
     const onKeyDown = async (e) => {
-      const isShortcut = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n";
-      if (!isShortcut) return;
-      e.preventDefault(); // stop the browser's own Ctrl+N ("new window")
-      try {
-        setCategories(await getCategories());
-        setOpen(true);
-      } catch (err) {
-        alert(err.message);
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+
+      if (key === "n") {
+        e.preventDefault(); // stop the browser's own "new window"
+        try {
+          setCategories(await getCategories());
+          setOpen(true);
+        } catch (err) {
+          alert(err.message);
+        }
+      } else if (key === "b") {
+        e.preventDefault(); // stop Chrome's "toggle bookmarks bar"
+        onNewBill();
+      } else if (key === "i") {
+        e.preventDefault();
+        onNewIssued();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isAdmin]);
+  }, [isAdmin, onNewBill, onNewIssued]);
 
   if (!open) return null;
 
@@ -3559,7 +3576,7 @@ function GlobalAddProductShortcut({ isAdmin, defaultDepartment, onCreated }) {
       defaultDepartment={defaultDepartment}
       onSubmit={async (values, imageFiles) => {
         await createProduct(values, imageFiles);
-        onCreated?.();
+        onProductCreated?.();
       }}
       onClose={() => setOpen(false)}
       onCreateCategory={async (name) => {
@@ -3582,7 +3599,12 @@ function AppShell() {
   const isAdmin = location.pathname.startsWith("/admin");
   const [refreshToken, setRefreshToken] = useState(0);
   const refresh = () => setRefreshToken((n) => n + 1);
+  const [quickBillToken, setQuickBillToken] = useState(0);
+  const [quickIssuedToken, setQuickIssuedToken] = useState(0);
   const department = DEPARTMENTS.find((d) => d.slug === searchParams.get("dept"));
+
+  const goNewBill = () => { setSearchParams({ view: "bill" }); setQuickBillToken((n) => n + 1); };
+  const goNewIssued = () => { setSearchParams({ view: "issued" }); setQuickIssuedToken((n) => n + 1); };
 
   let page;
   if (department) {
@@ -3595,9 +3617,9 @@ function AppShell() {
       />
     );
   } else if (searchParams.get("view") === "bill" && isAdmin) {
-    page = <BillPage go={setSearchParams} />;
+    page = <BillPage go={setSearchParams} autoCreateToken={quickBillToken} />;
   } else if (searchParams.get("view") === "issued" && isAdmin) {
-    page = <IssuedPage go={setSearchParams} />;
+    page = <IssuedPage go={setSearchParams} autoCreateToken={quickIssuedToken} />;
   } else if (searchParams.get("view") === "items") {
     page = (
       <ItemsPage
@@ -3624,10 +3646,12 @@ function AppShell() {
   return (
     <>
       {page}
-      <GlobalAddProductShortcut
+      <GlobalAdminShortcuts
         isAdmin={isAdmin}
         defaultDepartment={department ? department.slug : DEPARTMENTS[0].slug}
-        onCreated={refresh}
+        onProductCreated={refresh}
+        onNewBill={goNewBill}
+        onNewIssued={goNewIssued}
       />
     </>
   );
