@@ -1059,6 +1059,8 @@ function InventoryView({ isAdmin, department, onBack }) {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [catKey, setCatKey] = useState(null);
+  const [itemId, setItemId] = useState(null);
 
   const loadData = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -1133,20 +1135,155 @@ function InventoryView({ isAdmin, department, onBack }) {
     await restockProduct(id, quantity, note);
     await loadData();
   };
-
-  const pendingCount = requests.filter((r) => r.status === "pending").length;
   
-    // categories are shared by all departments; only offer the ones used here
-  const usedCategories = categories.filter((c) => products.some((p) => p.category?.id === c.id));
+  const pendingCount = requests.filter((r) => r.status === "pending").length;
+  const groups = groupByCategory(products);
 
-  const filteredProducts = products.filter((p) => {
-    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory =
-      !selectedCategory ||
-      (selectedCategory === "uncategorized" ? !p.category : String(p.category?.id) === selectedCategory);
-    return matchesSearch && matchesCategory;
-  });
+    let content;
 
+  if (activeTab === "products" && itemId) {
+    const selectedItem = products.find((p) => String(p.id) === itemId);
+    content = selectedItem ? (
+      <ItemDetail
+        item={selectedItem}
+        onBack={() => setItemId(null)}
+        isAdmin={isAdmin}
+        onEdit={isAdmin ? (p) => { setEditingProduct(p); setShowForm(true); } : undefined}
+        onDelete={isAdmin ? handleDelete : undefined}
+        onRestock={isAdmin ? (p) => setRestockingProduct(p) : undefined}
+        onRequest={!isAdmin ? (p) => setRequestingProduct(p) : undefined}
+      />
+    ) : (
+      <div className="min-h-screen bg-gray-50">
+        <SubHeader title="Item details" onBack={() => setItemId(null)} />
+        <p className="text-gray-400 text-center py-16">This item no longer exists.</p>
+      </div>
+    );
+  } else if (activeTab === "products" && catKey) {
+    content = (
+      <CategoryItemsPage
+        group={groups.find((g) => g.key === catKey)}
+        catKey={catKey}
+        loading={loading}
+        go={(next) => { setCatKey(next.cat ?? null); setItemId(next.item ?? null); }}
+      />
+    );
+  } else {
+    content = (
+      <div className="min-h-screen bg-gray-50">
+        <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
+          <div className="flex flex-wrap gap-3 justify-between items-center mb-3">
+            <div className="flex items-center gap-3">
+              <button onClick={onBack} aria-label="Back to departments"
+                className="p-2 -ml-2 rounded-full text-gray-500 hover:bg-gray-100">
+                <ArrowLeft size={20} />
+              </button>
+              <img src={department.logo} alt="" className="w-10 h-10 object-contain rounded-lg border border-gray-200 bg-white p-1" />
+              <div>
+                <h1 className="text-xl font-bold text-gray-900">{department.name}</h1>
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isAdmin ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}>
+                  {isAdmin ? "Admin" : "Employee (Read Only)"}
+                </span>
+              </div>
+            </div>
+            {isAdmin && activeTab === "products" && (
+              <button onClick={() => { setEditingProduct(null); setShowForm(true); }}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
+                + Add Product
+              </button>
+            )}
+          </div>
+
+          {isAdmin && (
+            <div className="flex gap-4 border-b border-gray-100 -mb-4">
+              <button onClick={() => setActiveTab("products")}
+                className={`pb-2 text-sm font-medium border-b-2 ${activeTab === "products" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
+                Products
+              </button>
+              <button onClick={() => setActiveTab("requests")}
+                className={`pb-2 text-sm font-medium border-b-2 flex items-center gap-1.5 ${activeTab === "requests" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
+                Requests
+                {pendingCount > 0 && (
+                  <span className="bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center">
+                    {pendingCount}
+                  </span>
+                )}
+              </button>
+              <button onClick={() => setActiveTab("history")}
+                className={`pb-2 text-sm font-medium border-b-2 flex items-center gap-1.5 ${activeTab === "history" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
+                <History size={14} />
+                Stock History
+              </button>
+            </div>
+          )}
+        </header>
+
+        <main className="p-4 sm:p-6">
+          {loading ? (
+            <p className="text-gray-400 text-center py-16">Loading...</p>
+          ) : activeTab === "requests" ? (
+            <RequestsPanel requests={requests} onApprove={handleApprove} onReject={handleReject} />
+          ) : activeTab === "history" ? (
+            <StockHistoryPanel movements={stockMovements} />
+          ) : (
+            <>
+              <div className="mb-5">
+                <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search categories or items..." />
+              </div>
+              {groups.length === 0 ? (
+                <p className="text-gray-400 text-center py-16">No products yet.</p>
+              ) : (
+                <CategoryGrid
+                  groups={
+                    searchTerm.trim()
+                      ? groups.filter((g) => g.name.toLowerCase().includes(searchTerm.trim().toLowerCase()))
+                      : groups
+                  }
+                  onSelect={setCatKey}
+                />
+              )}
+            </>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {content}
+
+      {showForm && (
+        <ProductForm
+          categories={categories}
+          initialData={editingProduct}
+          defaultDepartment={department.slug}
+          onSubmit={editingProduct ? handleUpdate : handleCreate}
+          onClose={() => { setShowForm(false); setEditingProduct(null); }}
+          onCreateCategory={handleCreateCategory}
+          onImagesChanged={() => loadData(true)}
+        />
+      )}
+
+      {requestingProduct && (
+        <RequestModal
+          products={products}
+          initialProductId={requestingProduct.id}
+          onSubmit={handleRequestSubmit}
+          onClose={() => setRequestingProduct(null)}
+        />
+      )}
+
+      {restockingProduct && (
+        <RestockModal
+          product={restockingProduct}
+          onSubmit={handleRestock}
+          onClose={() => setRestockingProduct(null)}
+        />
+      )}
+    </>
+  );
+  
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
@@ -1382,6 +1519,48 @@ const nameCollator = new Intl.Collator(undefined, { sensitivity: "base", numeric
 const compareNames = (a, b) => nameCollator.compare(a, b); // A-Z, ignores upper/lower case
 const getDepartment = (slug) => DEPARTMENTS.find((d) => d.slug === slug);
 
+// ---------- group products by category, A-Z, "Uncategorized" last ----------
+function groupByCategory(products) {
+  const groupMap = {};
+  products.forEach((p) => {
+    const key = p.category ? String(p.category.id) : UNCATEGORIZED;
+    if (!groupMap[key]) groupMap[key] = { key, name: p.category ? p.category.name : "Uncategorized", items: [] };
+    groupMap[key].items.push(p);
+  });
+  const groups = Object.values(groupMap);
+  groups.forEach((g) => g.items.sort((a, b) => compareNames(a.name, b.name)));
+  groups.sort((a, b) =>
+    a.key === UNCATEGORIZED ? 1 : b.key === UNCATEGORIZED ? -1 : compareNames(a.name, b.name)
+  );
+  return groups;
+}
+
+// ---------- category grid (A-Z), shared by ItemsPage and InventoryView ----------
+function CategoryGrid({ groups, onSelect }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {groups.map((g) => (
+        <button
+          key={g.key}
+          onClick={() => onSelect(g.key)}
+          className="flex items-center gap-4 bg-white border border-gray-200 rounded-2xl p-4 text-left hover:shadow-md hover:border-gray-300 active:scale-[0.99] transition"
+        >
+          <div className="w-12 h-12 shrink-0 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+            <Tag size={20} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-gray-900 truncate">{g.name}</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {g.items.length} {g.items.length === 1 ? "item" : "items"}
+            </p>
+          </div>
+          <ChevronRight size={18} className="text-gray-400 shrink-0" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function HomeTabs({ active, onChange, isAdmin }) {
   const tab = (id, label, Icon) => (
     <button
@@ -1486,7 +1665,7 @@ function DetailRow({ label, value }) {
 }
 
 // ---------- Full item card ----------
-function ItemDetail({ item, onBack }) {
+function ItemDetail({ item, onBack, isAdmin, onEdit, onDelete, onRestock, onRequest }) {
   const [imageIndex, setImageIndex] = useState(0);
   const images = [...(item.images || [])].sort((a, b) => Number(b.is_primary) - Number(a.is_primary));
   const current = images[Math.min(imageIndex, images.length - 1)];
@@ -1529,8 +1708,37 @@ function ItemDetail({ item, onBack }) {
                 Rs.{Number(item.price).toFixed(2)}
               </span>
             </div>
-            <div className="mt-2">
+            <div className="mt-2 flex items-center gap-2">
               <StockBadge quantity={item.quantity} />
+              {isAdmin ? (
+                <div className="ml-auto flex items-center gap-1">
+                  {onRestock && (
+                    <button onClick={() => onRestock(item)} title="Add stock" aria-label="Add stock"
+                      className="p-2 rounded-full text-green-600 hover:bg-green-50 transition-colors">
+                      <PackagePlus size={18} />
+                    </button>
+                  )}
+                  {onEdit && (
+                    <button onClick={() => onEdit(item)} title="Edit product" aria-label="Edit product"
+                      className="p-2 rounded-full text-blue-600 hover:bg-blue-50 transition-colors">
+                      <Pencil size={18} />
+                    </button>
+                  )}
+                  {onDelete && (
+                    <button onClick={() => onDelete(item.id)} title="Delete product" aria-label="Delete product"
+                      className="p-2 rounded-full text-red-500 hover:bg-red-50 transition-colors">
+                      <Trash2 size={18} />
+                    </button>
+                  )}
+                </div>
+              ) : (
+                onRequest && (
+                  <button onClick={() => onRequest(item)} disabled={item.quantity === 0}
+                    className="ml-auto text-xs bg-blue-600 text-white px-3 py-1.5 rounded-full font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                    Request
+                  </button>
+                )
+              )}
             </div>
 
             <dl className="mt-4 space-y-3 text-sm">
