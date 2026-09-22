@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
-import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList } from "lucide-react";
+import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck } from "lucide-react";
 import "./index.css";
 
 
@@ -46,18 +46,81 @@ async function createCategory(name) {
   return res.json();
 }
 
+// ---------- Vendors ----------
+async function getVendors() {
+  const res = await fetch(`${BASE_URL}/vendors/`);
+  if (!res.ok) throw new Error("Failed to fetch vendors");
+  return res.json();
+}
+
+async function createVendor(payload) {
+  const res = await fetch(`${BASE_URL}/vendors/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to create vendor");
+  }
+  return res.json();
+}
+
+async function deleteVendor(id) {
+  const res = await fetch(`${BASE_URL}/vendors/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete vendor");
+  return res.json();
+}
+
+// ---------- Accounts (chart of accounts) ----------
+async function getAccounts(accountType) {
+  const url = accountType ? `${BASE_URL}/accounts/?account_type=${accountType}` : `${BASE_URL}/accounts/`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch accounts");
+  return res.json();
+}
+
+async function createAccount(payload) {
+  const res = await fetch(`${BASE_URL}/accounts/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to create account");
+  }
+  return res.json();
+}
+
+async function deleteAccount(id) {
+  const res = await fetch(`${BASE_URL}/accounts/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete account");
+  return res.json();
+}
+
 async function createProduct(formValues, imageFiles) {
   const formData = new FormData();
   formData.append("name", formValues.name);
   formData.append("sku", formValues.sku || "");
   formData.append("description", formValues.description || "");
+  formData.append("purchase_description", formValues.purchase_description || "");
   formData.append("quantity", formValues.quantity || 0);
   formData.append("price", formValues.price || 0);
+  formData.append("cost", formValues.cost || 0);
   formData.append("department", formValues.department);
+  formData.append("item_type", formValues.item_type || "Inventory Part");
+  formData.append("manufacturer_part_number", formValues.manufacturer_part_number || "");
 
-  if (formValues.category_id) {
-    formData.append("category_id", formValues.category_id);
-  }
+  if (formValues.category_id) formData.append("category_id", formValues.category_id);
+  if (formValues.parent_id) formData.append("parent_id", formValues.parent_id);
+  if (formValues.cogs_account_id) formData.append("cogs_account_id", formValues.cogs_account_id);
+  if (formValues.income_account_id) formData.append("income_account_id", formValues.income_account_id);
+  if (formValues.asset_account_id) formData.append("asset_account_id", formValues.asset_account_id);
+  if (formValues.preferred_vendor_id) formData.append("preferred_vendor_id", formValues.preferred_vendor_id);
+  if (formValues.reorder_min !== "" && formValues.reorder_min != null) formData.append("reorder_min", formValues.reorder_min);
+  if (formValues.reorder_max !== "" && formValues.reorder_max != null) formData.append("reorder_max", formValues.reorder_max);
+
   imageFiles.forEach((file) => formData.append("images", file));
 
   const res = await fetch(`${BASE_URL}/products/`, { method: "POST", body: formData });
@@ -933,22 +996,73 @@ function ImageManager({ productId, images, onChange }) {
   );
 }
 
-// ---------- ProductForm (handles both Create and Edit) ----------
-function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onClose, onCreateCategory,onImagesChanged  }) {
+// ---------- ProductForm (QuickBooks-style item form; handles both Create and Edit) ----------
+const ITEM_TYPES = ["Inventory Part", "Non-Inventory Part", "Service", "Inventory Assembly"];
+
+function AccountSelect({ accounts, accountType, value, onChange, placeholder }) {
+  const options = accounts.filter((a) => a.account_type === accountType);
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}
+      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <option value="">{placeholder}</option>
+      {options.map((a) => (
+        <option key={a.id} value={a.id}>{a.name}</option>
+      ))}
+    </select>
+  );
+}
+
+function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onClose, onCreateCategory, onImagesChanged }) {
   const isEditMode = Boolean(initialData);
   const [form, setForm] = useState({
+    item_type: initialData?.item_type || "Inventory Part",
     name: initialData?.name || "",
-    sku: initialData?.sku || "",
+    manufacturer_part_number: initialData?.manufacturer_part_number || "",
+    is_subitem: Boolean(initialData?.parent_id),
+    parent_id: initialData?.parent_id ? String(initialData.parent_id) : "",
+
+    purchase_description: initialData?.purchase_description || "",
+    cost: initialData?.cost ?? 0,
+    cogs_account_id: initialData?.cogs_account?.id ? String(initialData.cogs_account.id) : "",
+    preferred_vendor_id: initialData?.preferred_vendor?.id ? String(initialData.preferred_vendor.id) : "",
+
     description: initialData?.description || "",
-    quantity: initialData?.quantity ?? 0,
     price: initialData?.price ?? 0,
+    income_account_id: initialData?.income_account?.id ? String(initialData.income_account.id) : "",
+
+    asset_account_id: initialData?.asset_account?.id ? String(initialData.asset_account.id) : "",
+    reorder_min: initialData?.reorder_min ?? "",
+    reorder_max: initialData?.reorder_max ?? "",
+    quantity: initialData?.quantity ?? 0,
+
+    sku: initialData?.sku || "",
     category_id: initialData?.category?.id ? String(initialData.category.id) : "",
     department: initialData?.department || defaultDepartment,
   });
+
+  const [vendors, setVendors] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [parentOptions, setParentOptions] = useState([]);
   const [imageFiles, setImageFiles] = useState([]);
-  const [images, setImages] = useState(initialData?.images || []); 
+  const [images, setImages] = useState(initialData?.images || []);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+
+  // load the dropdown data the QuickBooks-style fields need (vendors, accounts, possible parents)
+  useEffect(() => {
+    (async () => {
+      try {
+        const [v, a, p] = await Promise.all([getVendors(), getAccounts(), getProducts()]);
+        setVendors(v);
+        setAccounts(a);
+        // getProducts() only returns top-level items (subitems are nested), so this list
+        // already excludes anything that's already a subitem - matches QuickBooks' one-level rule
+        setParentOptions(isEditMode ? p.filter((prod) => prod.id !== initialData.id) : p);
+      } catch {
+        // non-fatal: selects just show "None" if this fails
+      }
+    })();
+  }, []);
 
   const handleChange = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
   const handleFileChange = (e) => setImageFiles(Array.from(e.target.files));
@@ -958,10 +1072,12 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
     setSubmitting(true);
     setError(null);
     try {
+      const { is_subitem, ...rest } = form;
+      const values = { ...rest, parent_id: is_subitem ? form.parent_id : "" };
       if (isEditMode) {
-        await onSubmit(initialData.id, form);
+        await onSubmit(initialData.id, values);
       } else {
-        await onSubmit(form, imageFiles);
+        await onSubmit(values, imageFiles);
       }
       onClose();
     } catch (err) {
@@ -973,33 +1089,134 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">{isEditMode ? "Edit Product" : "Add Product"}</h2>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-4">{isEditMode ? "Edit Item" : "New Item"}</h2>
 
         {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
 
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <input required placeholder="Product name" value={form.name} onChange={(e) => handleChange("name", e.target.value)}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* ---- TYPE ---- */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Type</label>
+            <select
+              value={form.item_type}
+              onChange={(e) => handleChange("item_type", e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {ITEM_TYPES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* ---- Item Name/Number + Subitem of ---- */}
+          <input required placeholder="Item Name/Number" value={form.name} onChange={(e) => handleChange("name", e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
 
-          <input placeholder="SKU (optional)" value={form.sku} onChange={(e) => handleChange("sku", e.target.value)}
+          <div className="flex items-center gap-2">
+            <input
+              id="is_subitem"
+              type="checkbox"
+              checked={form.is_subitem}
+              onChange={(e) => handleChange("is_subitem", e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            <label htmlFor="is_subitem" className="text-sm text-gray-700">Subitem of</label>
+            <select
+              disabled={!form.is_subitem}
+              value={form.parent_id}
+              onChange={(e) => handleChange("parent_id", e.target.value)}
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
+            >
+              <option value="">Select parent item...</option>
+              {parentOptions.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <input placeholder="Manufacturer's Part Number" value={form.manufacturer_part_number}
+            onChange={(e) => handleChange("manufacturer_part_number", e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
 
-          <textarea placeholder="Description" value={form.description} onChange={(e) => handleChange("description", e.target.value)} rows={2}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Quantity</label>
-              <input type="number" min="0" value={form.quantity} onChange={(e) => handleChange("quantity", e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          {/* ---- PURCHASE INFORMATION ---- */}
+          <div className="border border-gray-200 rounded-lg p-3 space-y-2">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase">Purchase Information</h3>
+            <textarea placeholder="Description on Purchase Transactions" rows={2}
+              value={form.purchase_description} onChange={(e) => handleChange("purchase_description", e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Cost</label>
+                <input type="number" step="0.01" min="0" value={form.cost} onChange={(e) => handleChange("cost", e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Preferred Vendor</label>
+                <select value={form.preferred_vendor_id} onChange={(e) => handleChange("preferred_vendor_id", e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">None</option>
+                  {vendors.map((v) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Price</label>
+              <label className="block text-xs text-gray-500 mb-1">COGS Account</label>
+              <AccountSelect accounts={accounts} accountType="cogs" placeholder="Select COGS account..."
+                value={form.cogs_account_id} onChange={(val) => handleChange("cogs_account_id", val)} />
+            </div>
+          </div>
+
+          {/* ---- SALES INFORMATION ---- */}
+          <div className="border border-gray-200 rounded-lg p-3 space-y-2">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase">Sales Information</h3>
+            <textarea placeholder="Description on Sales Transactions" rows={2}
+              value={form.description} onChange={(e) => handleChange("description", e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Sales Price</label>
               <input type="number" step="0.01" min="0" value={form.price} onChange={(e) => handleChange("price", e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Income Account</label>
+              <AccountSelect accounts={accounts} accountType="income" placeholder="Select income account..."
+                value={form.income_account_id} onChange={(val) => handleChange("income_account_id", val)} />
+            </div>
           </div>
+
+          {/* ---- INVENTORY INFORMATION ---- */}
+          <div className="border border-gray-200 rounded-lg p-3 space-y-2">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase">Inventory Information</h3>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Asset Account</label>
+              <AccountSelect accounts={accounts} accountType="asset" placeholder="Select asset account..."
+                value={form.asset_account_id} onChange={(val) => handleChange("asset_account_id", val)} />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Reorder Point (Min)</label>
+                <input type="number" min="0" value={form.reorder_min} onChange={(e) => handleChange("reorder_min", e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Max</label>
+                <input type="number" min="0" value={form.reorder_max} onChange={(e) => handleChange("reorder_max", e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">On Hand</label>
+                <input type="number" min="0" value={form.quantity} onChange={(e) => handleChange("quantity", e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+          </div>
+
+          {/* ---- existing app fields: SKU, Category, Department ---- */}
+          <input placeholder="SKU (optional)" value={form.sku} onChange={(e) => handleChange("sku", e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
 
           <div>
             <label className="block text-xs text-gray-500 mb-1">Department</label>
@@ -1033,7 +1250,7 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
 
           {isEditMode && (
             <p className="text-xs text-gray-400">
-              Quantity here is a manual override (use it for corrections). To receive new stock, use the "Add stock" button on the product card instead - it logs the addition with a timestamp under Stock History.
+              "On Hand" here is a manual override (use it for corrections). To receive new stock, use the "Add stock" button on the product card instead - it logs the addition with a timestamp under Stock History.
             </p>
           )}
 
@@ -1042,7 +1259,7 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
               Cancel
             </button>
             <button type="submit" disabled={submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-              {submitting ? "Saving..." : isEditMode ? "Save Changes" : "Save Product"}
+              {submitting ? "Saving..." : isEditMode ? "Save Changes" : "Save Item"}
             </button>
           </div>
         </form>
@@ -1050,7 +1267,6 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
     </div>
   );
 }
-
 // ---------- Shared inventory view (used by both routes) ----------
 function InventoryView({ isAdmin, department, onBack }) {
   const [products, setProducts] = useState([]);
@@ -1580,10 +1796,12 @@ function HomeTabs({ active, onChange, isAdmin }) {
       {label}
     </button>
   );
-  return (
-    <div className="flex gap-5 border-b border-gray-100 -mb-4 mt-3">
+   return (
+    <div className="flex gap-5 border-b border-gray-100 -mb-4 mt-3 overflow-x-auto">
       {tab("home", "Home", LayoutGrid)}
+      {isAdmin && tab("accounting", "Accounting", Landmark)}
       {tab("items", "Items", Tag)}
+      {isAdmin && tab("vendors", "Vendors", Truck)}
       {isAdmin && tab("bill", "Bill", Receipt)}
       {isAdmin && tab("issued", "Issued", ClipboardList)}
     </div>
@@ -2045,6 +2263,292 @@ function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded
           })}
         </div>
       </main>
+    </div>
+  );
+}
+
+// ---------- Vendors (admin only) ----------
+function VendorsPage({ isAdmin, go }) {
+  const [vendors, setVendors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
+
+  const load = async () => {
+    try {
+      setVendors(await getVendors());
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleDelete = async (id) => {
+    if (!confirm("Delete this vendor?")) return;
+    try {
+      await deleteVendor(id);
+      load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const sorted = [...vendors].sort((a, b) => compareNames(a.name, b.name));
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader
+        isAdmin={isAdmin}
+        active="vendors"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+        actions={
+          <button onClick={() => setFormOpen(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
+            + Add Vendor
+          </button>
+        }
+      />
+
+      <main className="p-4 sm:p-6 max-w-3xl">
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : sorted.length === 0 ? (
+          <p className="text-gray-400 text-center py-16">No vendors yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {sorted.map((v) => (
+              <div key={v.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-gray-900 truncate">{v.name}</p>
+                  <p className="text-xs text-gray-400 truncate">
+                    {[v.contact_person, v.phone, v.email].filter(Boolean).join(" · ") || "No contact details"}
+                  </p>
+                </div>
+                <button onClick={() => handleDelete(v.id)} title="Delete vendor" aria-label="Delete vendor"
+                  className="p-2 rounded-full text-red-500 hover:bg-red-50 transition-colors">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {formOpen && (
+        <VendorForm
+          onClose={() => setFormOpen(false)}
+          onSubmit={async (payload) => { await createVendor(payload); await load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function VendorForm({ onClose, onSubmit }) {
+  const [form, setForm] = useState({ name: "", contact_person: "", phone: "", email: "", address: "" });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const handleChange = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSubmit(form);
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-4">Add Vendor</h2>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <input required placeholder="Vendor name" value={form.name} onChange={(e) => handleChange("name", e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <input placeholder="Contact person" value={form.contact_person} onChange={(e) => handleChange("contact_person", e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <div className="grid grid-cols-2 gap-3">
+            <input placeholder="Phone" value={form.phone} onChange={(e) => handleChange("phone", e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <input placeholder="Email" value={form.email} onChange={(e) => handleChange("email", e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <textarea placeholder="Address" value={form.address} onChange={(e) => handleChange("address", e.target.value)} rows={2}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+              Cancel
+            </button>
+            <button type="submit" disabled={submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+              {submitting ? "Saving..." : "Save Vendor"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Accounting: chart of accounts (COGS / Income / Asset), admin only ----------
+const ACCOUNT_TYPES = [
+  { key: "cogs", label: "Cost of Goods Sold (COGS) Accounts" },
+  { key: "income", label: "Income Accounts" },
+  { key: "asset", label: "Asset Accounts" },
+];
+
+function AccountingPage({ isAdmin, go }) {
+  const [accounts, setAccounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
+
+  const load = async () => {
+    try {
+      setAccounts(await getAccounts());
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleDelete = async (id) => {
+    if (!confirm("Delete this account?")) return;
+    try {
+      await deleteAccount(id);
+      load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader
+        isAdmin={isAdmin}
+        active="accounting"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+        actions={
+          <button onClick={() => setFormOpen(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
+            + Add Account
+          </button>
+        }
+      />
+
+      <main className="p-4 sm:p-6 max-w-3xl space-y-8">
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : (
+          ACCOUNT_TYPES.map(({ key, label }) => {
+            const list = accounts
+              .filter((a) => a.account_type === key)
+              .sort((a, b) => compareNames(a.name, b.name));
+            return (
+              <div key={key}>
+                <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
+                  {label} <span className="text-gray-400 font-normal">({list.length})</span>
+                </h2>
+                {list.length === 0 ? (
+                  <p className="text-gray-400 text-sm">No accounts yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {list.map((a) => (
+                      <div key={a.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3">
+                        <div className="w-9 h-9 shrink-0 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                          <Landmark size={16} />
+                        </div>
+                        <p className="flex-1 min-w-0 font-medium text-gray-900 truncate">{a.name}</p>
+                        <button onClick={() => handleDelete(a.id)} title="Delete account" aria-label="Delete account"
+                          className="p-2 rounded-full text-red-500 hover:bg-red-50 transition-colors">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </main>
+
+      {formOpen && (
+        <AccountForm
+          onClose={() => setFormOpen(false)}
+          onSubmit={async (payload) => { await createAccount(payload); await load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function AccountForm({ onClose, onSubmit }) {
+  const [form, setForm] = useState({ name: "", account_type: "cogs" });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const handleChange = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSubmit(form);
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+        <h2 className="text-lg font-semibold mb-4">Add Account</h2>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <input required placeholder="Account name" value={form.name} onChange={(e) => handleChange("name", e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Account type</label>
+            <select
+              value={form.account_type}
+              onChange={(e) => handleChange("account_type", e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {ACCOUNT_TYPES.map((t) => (
+                <option key={t.key} value={t.key}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+              Cancel
+            </button>
+            <button type="submit" disabled={submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+              {submitting ? "Saving..." : "Save Account"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -3618,8 +4122,12 @@ function AppShell() {
     );
   } else if (searchParams.get("view") === "bill" && isAdmin) {
     page = <BillPage go={setSearchParams} autoCreateToken={quickBillToken} />;
-  } else if (searchParams.get("view") === "issued" && isAdmin) {
+   } else if (searchParams.get("view") === "issued" && isAdmin) {
     page = <IssuedPage go={setSearchParams} autoCreateToken={quickIssuedToken} />;
+  } else if (searchParams.get("view") === "accounting" && isAdmin) {
+    page = <AccountingPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "vendors" && isAdmin) {
+    page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "items") {
     page = (
       <ItemsPage

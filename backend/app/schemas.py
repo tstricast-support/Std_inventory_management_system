@@ -18,6 +18,37 @@ class CategoryOut(CategoryBase):
     created_at: datetime
 
 
+# ---------- Account (chart of accounts) ----------
+class AccountBase(BaseModel):
+    name: str
+    account_type: str  # "cogs" | "income" | "asset"
+
+class AccountCreate(AccountBase):
+    pass
+
+class AccountOut(AccountBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    created_at: datetime
+
+
+# ---------- Vendor ----------
+class VendorBase(BaseModel):
+    name: str
+    contact_person: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+
+class VendorCreate(VendorBase):
+    pass
+
+class VendorOut(VendorBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    created_at: datetime
+
+
 # ---------- Product Image ----------
 class ProductImageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -30,11 +61,24 @@ class ProductImageOut(BaseModel):
 class ProductBase(BaseModel):
     name: str
     sku: Optional[str] = None
-    description: Optional[str] = None
+    description: Optional[str] = None                 # Description on Sales Transactions
+    purchase_description: Optional[str] = None         # Description on Purchase Transactions
     quantity: int = 0
-    price: Decimal = Decimal("0")
+    price: Decimal = Decimal("0")                      # Sales Price
+    cost: Decimal = Decimal("0")                        # Cost
     category_id: Optional[int] = None
     department: str = DEFAULT_DEPARTMENT
+
+    item_type: str = "Inventory Part"
+    manufacturer_part_number: Optional[str] = None
+    reorder_min: Optional[int] = None
+    reorder_max: Optional[int] = None
+
+    parent_id: Optional[int] = None
+    cogs_account_id: Optional[int] = None
+    income_account_id: Optional[int] = None
+    asset_account_id: Optional[int] = None
+    preferred_vendor_id: Optional[int] = None
 
 class ProductCreate(ProductBase):
     pass
@@ -43,12 +87,28 @@ class ProductUpdate(BaseModel):
     name: Optional[str] = None
     sku: Optional[str] = None
     description: Optional[str] = None
+    purchase_description: Optional[str] = None
     quantity: Optional[int] = None
     price: Optional[Decimal] = None
+    cost: Optional[Decimal] = None
     category_id: Optional[int] = None
     department: Optional[str] = None
 
-    @field_validator("category_id", mode="before")
+    item_type: Optional[str] = None
+    manufacturer_part_number: Optional[str] = None
+    reorder_min: Optional[int] = None
+    reorder_max: Optional[int] = None
+
+    parent_id: Optional[int] = None
+    cogs_account_id: Optional[int] = None
+    income_account_id: Optional[int] = None
+    asset_account_id: Optional[int] = None
+    preferred_vendor_id: Optional[int] = None
+
+    @field_validator(
+        "category_id", "parent_id", "cogs_account_id", "income_account_id",
+        "asset_account_id", "preferred_vendor_id", mode="before",
+    )
     @classmethod
     def empty_string_to_none(cls, v):
         if v == "" or v is None:
@@ -72,6 +132,15 @@ class ProductOut(ProductBase):
     updated_at: datetime
     images: List[ProductImageOut] = []
     category: Optional[CategoryOut] = None
+
+    cogs_account: Optional[AccountOut] = None
+    income_account: Optional[AccountOut] = None
+    asset_account: Optional[AccountOut] = None
+    preferred_vendor: Optional[VendorOut] = None
+    subitems: List["ProductOut"] = []
+
+# resolves the "ProductOut" forward reference used in `subitems` above
+ProductOut.model_rebuild()
 
 class ItemRequestCreate(BaseModel):
     product_id: int

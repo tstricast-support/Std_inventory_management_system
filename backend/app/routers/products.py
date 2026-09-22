@@ -9,14 +9,23 @@ from ..departments import validate_department, DEFAULT_DEPARTMENT
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
+PRODUCT_RELATIONS = (
+    joinedload(models.Product.images),
+    joinedload(models.Product.category),
+    joinedload(models.Product.cogs_account),
+    joinedload(models.Product.income_account),
+    joinedload(models.Product.asset_account),
+    joinedload(models.Product.preferred_vendor),
+    joinedload(models.Product.subitems),
+)
 
 @router.get("/", response_model=list[schemas.ProductOut])
 def list_products(department: Optional[str] = None, db: Session = Depends(get_db)):
-    query = db.query(models.Product).options(
-        joinedload(models.Product.images), joinedload(models.Product.category)
-    )
+    query = db.query(models.Product).options(*PRODUCT_RELATIONS)
     if department:
         query = query.filter(models.Product.department == department)
+    # only top-level items; subitems ride along nested inside `subitems`
+    query = query.filter(models.Product.parent_id.is_(None))
     return query.all()
 
 
@@ -24,7 +33,7 @@ def list_products(department: Optional[str] = None, db: Session = Depends(get_db
 def get_product(product_id: int, db: Session = Depends(get_db)):
     product = (
         db.query(models.Product)
-        .options(joinedload(models.Product.images), joinedload(models.Product.category))
+        .options(*PRODUCT_RELATIONS)
         .filter(models.Product.id == product_id)
         .first()
     )
@@ -38,18 +47,39 @@ def create_product(
     name: str = Form(...),
     sku: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
+    purchase_description: Optional[str] = Form(None),
     quantity: int = Form(0),
     price: float = Form(0),
+    cost: float = Form(0),
     category_id: Optional[int] = Form(None),
     department: str = Form(DEFAULT_DEPARTMENT),
+    item_type: str = Form("Inventory Part"),
+    manufacturer_part_number: Optional[str] = Form(None),
+    reorder_min: Optional[int] = Form(None),
+    reorder_max: Optional[int] = Form(None),
+    parent_id: Optional[int] = Form(None),
+    cogs_account_id: Optional[int] = Form(None),
+    income_account_id: Optional[int] = Form(None),
+    asset_account_id: Optional[int] = Form(None),
+    preferred_vendor_id: Optional[int] = Form(None),
     images: List[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
 ):
     validate_department(department)
+
+    if parent_id is not None:
+        parent = db.query(models.Product).get(parent_id)
+        if not parent:
+            raise HTTPException(400, f"Parent item {parent_id} does not exist")
+
     product = models.Product(
-        name=name, sku=sku, description=description,
-        quantity=quantity, price=price, category_id=category_id,
-        department=department,
+        name=name, sku=sku, description=description, purchase_description=purchase_description,
+        quantity=quantity, price=price, cost=cost, category_id=category_id,
+        department=department, item_type=item_type,
+        manufacturer_part_number=manufacturer_part_number,
+        reorder_min=reorder_min, reorder_max=reorder_max, parent_id=parent_id,
+        cogs_account_id=cogs_account_id, income_account_id=income_account_id,
+        asset_account_id=asset_account_id, preferred_vendor_id=preferred_vendor_id,
     )
     db.add(product)
     db.commit()
@@ -82,6 +112,13 @@ def update_product(product_id: int, payload: schemas.ProductUpdate, db: Session 
         category = db.query(models.Category).get(payload.category_id)
         if not category:
             raise HTTPException(400, f"Category {payload.category_id} does not exist")
+
+    if payload.parent_id is not None:
+        if payload.parent_id == product_id:
+            raise HTTPException(400, "An item cannot be a subitem of itself")
+        parent = db.query(models.Product).get(payload.parent_id)
+        if not parent:
+            raise HTTPException(400, f"Parent item {payload.parent_id} does not exist")
 
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(product, field, value)

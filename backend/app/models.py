@@ -12,6 +12,26 @@ class Category(Base):
 
     products = relationship("Product", back_populates="category")
 
+class Account(Base):
+    """Simple chart-of-accounts entry: a COGS, Income or Asset account (QuickBooks style)."""
+    __tablename__ = "accounts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(150), nullable=False)
+    account_type = Column(String(20), nullable=False)  # "cogs" | "income" | "asset"
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+
+class Vendor(Base):
+    __tablename__ = "vendors"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(150), nullable=False, unique=True)
+    contact_person = Column(String(150))
+    phone = Column(String(50))
+    email = Column(String(150))
+    address = Column(Text)
+    created_at = Column(TIMESTAMP, server_default=func.now())
 
 class Product(Base):
     __tablename__ = "products"
@@ -19,18 +39,40 @@ class Product(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(200), nullable=False)
     sku = Column(String(100), unique=True)
-    description = Column(Text)
+    description = Column(Text)                 # "Description on Sales Transactions"
+    purchase_description = Column(Text)         # "Description on Purchase Transactions"
     quantity = Column(Integer, nullable=False, default=0)
-    price = Column(Numeric(10, 2), nullable=False, default=0)
+    price = Column(Numeric(10, 2), nullable=False, default=0)          # Sales Price
+    cost = Column(Numeric(10, 2), nullable=False, default=0, server_default="0")  # Cost
     category_id = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"))
     department = Column(String(50), nullable=False, default=DEFAULT_DEPARTMENT, server_default=DEFAULT_DEPARTMENT)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
+    # ---- QuickBooks-style item fields ----
+    item_type = Column(String(30), nullable=False, default="Inventory Part", server_default="Inventory Part")
+    manufacturer_part_number = Column(String(100))
+    reorder_min = Column(Integer, nullable=True)
+    reorder_max = Column(Integer, nullable=True)
+
+    parent_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=True)
+    cogs_account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True)
+    income_account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True)
+    asset_account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True)
+    preferred_vendor_id = Column(Integer, ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True)
+
     category = relationship("Category", back_populates="products")
     images = relationship("ProductImage", back_populates="product", cascade="all, delete-orphan")
 
+    cogs_account = relationship("Account", foreign_keys=[cogs_account_id])
+    income_account = relationship("Account", foreign_keys=[income_account_id])
+    asset_account = relationship("Account", foreign_keys=[asset_account_id])
+    preferred_vendor = relationship("Vendor")
 
+    parent = relationship("Product", remote_side=[id], back_populates="subitems")
+    subitems = relationship("Product", back_populates="parent", cascade="all, delete-orphan")
+
+    
 class ProductImage(Base):
     __tablename__ = "product_images"
 
