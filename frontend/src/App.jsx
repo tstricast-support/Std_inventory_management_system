@@ -3529,6 +3529,48 @@ function IssuedPage({ go }) {
   );
 }
 
+// ---------- Ctrl+N / Cmd+N anywhere in the admin app -> open "+ Add Product" ----------
+function GlobalAddProductShortcut({ isAdmin, defaultDepartment, onCreated }) {
+  const [open, setOpen] = useState(false);
+  const [categories, setCategories] = useState([]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const onKeyDown = async (e) => {
+      const isShortcut = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n";
+      if (!isShortcut) return;
+      e.preventDefault(); // stop the browser's own Ctrl+N ("new window")
+      try {
+        setCategories(await getCategories());
+        setOpen(true);
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isAdmin]);
+
+  if (!open) return null;
+
+  return (
+    <ProductForm
+      categories={categories}
+      defaultDepartment={defaultDepartment}
+      onSubmit={async (values, imageFiles) => {
+        await createProduct(values, imageFiles);
+        onCreated?.();
+      }}
+      onClose={() => setOpen(false)}
+      onCreateCategory={async (name) => {
+        const created = await createCategory(name);
+        setCategories((prev) => [...prev, created]);
+        return created;
+      }}
+    />
+  );
+}
+
 // ---------- Picks home / items / a department, using the URL query ----------
 //   /?dept=i-lab                 -> department stock
 //   /?view=items                 -> all categories
@@ -3538,12 +3580,13 @@ function AppShell() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const isAdmin = location.pathname.startsWith("/admin");
-  const [refreshToken, setRefreshToken] = useState(0); // bumped after "+ Add Product" so lists reload at once
+  const [refreshToken, setRefreshToken] = useState(0);
   const refresh = () => setRefreshToken((n) => n + 1);
   const department = DEPARTMENTS.find((d) => d.slug === searchParams.get("dept"));
 
+  let page;
   if (department) {
-    return (
+    page = (
       <InventoryView
         key={department.slug}
         isAdmin={isAdmin}
@@ -3551,20 +3594,12 @@ function AppShell() {
         onBack={() => setSearchParams({})}
       />
     );
-  }
-
-  // Bill is admin-only: on the employee route it falls through to the home screen
-  if (searchParams.get("view") === "bill" && isAdmin) {
-    return <BillPage go={setSearchParams} />;
-  }
-
-    // Issued is admin-only too
-  if (searchParams.get("view") === "issued" && isAdmin) {
-    return <IssuedPage go={setSearchParams} />;
-  }
-
-  if (searchParams.get("view") === "items") {
-    return (
+  } else if (searchParams.get("view") === "bill" && isAdmin) {
+    page = <BillPage go={setSearchParams} />;
+  } else if (searchParams.get("view") === "issued" && isAdmin) {
+    page = <IssuedPage go={setSearchParams} />;
+  } else if (searchParams.get("view") === "items") {
+    page = (
       <ItemsPage
         isAdmin={isAdmin}
         catKey={searchParams.get("cat")}
@@ -3574,16 +3609,27 @@ function AppShell() {
         onProductAdded={refresh}
       />
     );
+  } else {
+    page = (
+      <DepartmentHome
+        isAdmin={isAdmin}
+        onSelect={(slug) => setSearchParams({ dept: slug })}
+        refreshToken={refreshToken}
+        onProductAdded={refresh}
+        onTab={(tab) => tab !== "home" && setSearchParams({ view: tab })}
+      />
+    );
   }
 
   return (
-    <DepartmentHome
-      isAdmin={isAdmin}
-      onSelect={(slug) => setSearchParams({ dept: slug })}
-      refreshToken={refreshToken}
-      onProductAdded={refresh}
-      onTab={(tab) => tab !== "home" && setSearchParams({ view: tab })}
-    />
+    <>
+      {page}
+      <GlobalAddProductShortcut
+        isAdmin={isAdmin}
+        defaultDepartment={department ? department.slug : DEPARTMENTS[0].slug}
+        onCreated={refresh}
+      />
+    </>
   );
 }
 
