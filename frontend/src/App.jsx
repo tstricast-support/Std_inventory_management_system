@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
-import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck, CornerDownRight } from "lucide-react";
+import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck, CornerDownRight,Bell } from "lucide-react";
 import "./index.css";
 
 
@@ -1716,6 +1716,86 @@ function AddProductButton({ onCreated }) {
   );
 }
 
+function LowStockBell() {
+  const [items, setItems] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [, setSearchParams] = useSearchParams();
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const products = await getProducts(); // every department, top-level items with nested subitems
+        const flat = [];
+        const walk = (list) => list.forEach((p) => {
+          flat.push(p);
+          if (p.subitems?.length) walk(p.subitems);
+        });
+        walk(products);
+        if (!cancelled) setItems(flat.filter(isLowStock));
+      } catch {
+        // notifications are best-effort - a failed fetch just leaves the bell as-is
+      }
+    };
+    load();
+    const interval = setInterval(load, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
+  const goToItem = (item) => {
+    setOpen(false);
+    // ItemsPage resolves an item by id alone (searching nested subitems too),
+    // so "cat" isn't needed here - this works for any item in any department.
+    setSearchParams({ view: "items", item: String(item.id) });
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Low stock notifications"
+        className="relative p-2 rounded-full text-gray-500 hover:bg-gray-100 transition-colors"
+      >
+        <Bell size={18} />
+        {items.length > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[10px] font-medium rounded-full min-w-4 h-4 px-1 flex items-center justify-center">
+            {items.length}
+          </span>
+        )}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 rounded-xl shadow-lg z-20 max-h-80 overflow-y-auto">
+            <p className="px-3 py-2 text-xs font-semibold text-gray-500 border-b border-gray-100 sticky top-0 bg-white">
+              Low stock ({items.length})
+            </p>
+            {items.length === 0 ? (
+              <p className="px-3 py-4 text-sm text-gray-400 text-center">All items are above their reorder point.</p>
+            ) : (
+              items.map((item) => {
+                const dept = getDepartment(item.department);
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => goToItem(item)}
+                    className="w-full text-left px-3 py-2 border-b border-gray-50 last:border-b-0 hover:bg-gray-50 transition-colors"
+                  >
+                    <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
+                    <p className="text-xs text-gray-400">
+                      {dept?.name} · {item.quantity} left (min {item.reorder_min})
+                    </p>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ---------- Shared top header (title + admin buttons + tabs) ----------
 function AppHeader({ isAdmin, active, onTab, onProductAdded, actions }) {
   return (
@@ -1730,6 +1810,7 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions }) {
         {isAdmin && (
           <div className="flex items-center gap-2">
             {actions}
+            <LowStockBell />
             <AddProductButton onCreated={onProductAdded} />
           </div>
         )}
@@ -1856,26 +1937,34 @@ function SubHeader({ title, subtitle, onBack }) {
   );
 }
 
-function StockBadge({ quantity }) {
-  return (
-    <span
-      className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${
-        quantity > 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-      }`}
-    >
-      {quantity > 0 ? `${quantity} in stock` : "Out of stock"}
-    </span>
-  );
+// an item is "low stock" once its quantity drops to (or below) the reorder
+// minimum set on it - items with no reorder_min set are never flagged.
+function isLowStock(item) {
+  return item.reorder_min != null && item.quantity <= item.reorder_min;
+}
+
+function StockBadge({ quantity, lowStock }) {
+  const colorClass =
+    quantity <= 0
+      ? "bg-red-100 text-red-700"
+      : lowStock
+      ? "bg-amber-100 text-amber-700"
+      : "bg-green-100 text-green-700";
+  const label = quantity <= 0 ? "Out of stock" : lowStock ? `${quantity} · Low stock` : `${quantity} in stock`;
+  return <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${colorClass}`}>{label}</span>;
 }
 
 function ItemRow({ item, showCategory, onClick }) {
   const image = item.images?.find((i) => i.is_primary) || item.images?.[0];
   const dept = getDepartment(item.department);
   const subtitle = [dept?.name, showCategory ? item.category?.name : null].filter(Boolean).join(" · ");
+  const low = isLowStock(item);
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:shadow-md hover:border-gray-300 transition"
+      className={`w-full flex items-center gap-3 border rounded-xl p-3 text-left hover:shadow-md transition ${
+        low ? "bg-red-50 border-red-200 hover:border-red-300" : "bg-white border-gray-200 hover:border-gray-300"
+      }`}
     >
       <div className="w-12 h-12 shrink-0 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center">
         {image ? (
@@ -1888,7 +1977,7 @@ function ItemRow({ item, showCategory, onClick }) {
         <p className="font-medium text-gray-900 truncate">{item.name}</p>
         {subtitle && <p className="text-xs text-gray-400 truncate">{subtitle}</p>}
       </div>
-      <StockBadge quantity={item.quantity} />
+      <StockBadge quantity={item.quantity} lowStock={low} />
       <ChevronRight size={18} className="text-gray-400 shrink-0" />
     </button>
   );
@@ -1948,7 +2037,7 @@ function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRes
               </span>
             </div>
             <div className="mt-2 flex items-center gap-2">
-              <StockBadge quantity={item.quantity} />
+              <StockBadge quantity={item.quantity} lowStock={isLowStock(item)} />
               {isAdmin ? (
                 <div className="ml-auto flex items-center gap-1">
                   {onRestock && (
@@ -1978,10 +2067,16 @@ function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRes
                   </button>
                 )
               )}
-            </div>
+              </div>
+
+            {isLowStock(item) && (
+              <p className="mt-3 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                Stock is at or below the reorder point ({item.reorder_min}). Consider restocking.
+              </p>
+            )}
 
             <dl className="mt-4 space-y-3 text-sm">
-               <DetailRow label="SKU" value={item.sku || "—"} />
+              <DetailRow label="SKU" value={item.sku || "—"} />
               <DetailRow label="Category" value={item.category?.name || "Uncategorized"} />
               {parentName && <DetailRow label="Subitem of" value={parentName} />}
               {isAdmin && (
@@ -2031,14 +2126,17 @@ function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRes
 }
 
 function SubitemRow({ item, onClick }) {
+  const low = isLowStock(item);
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-2 bg-white border border-gray-200 rounded-xl pl-3 pr-3 py-2.5 text-left hover:shadow-md hover:border-gray-300 transition"
+      className={`w-full flex items-center gap-2 border rounded-xl pl-3 pr-3 py-2.5 text-left hover:shadow-md transition ${
+        low ? "bg-red-50 border-red-200 hover:border-red-300" : "bg-white border-gray-200 hover:border-gray-300"
+      }`}
     >
       <CornerDownRight size={14} className="text-gray-300 shrink-0" />
       <p className="flex-1 min-w-0 text-sm font-medium text-gray-900 truncate">{item.name}</p>
-      <StockBadge quantity={item.quantity} />
+      <StockBadge quantity={item.quantity} lowStock={low} />
       <ChevronRight size={16} className="text-gray-400 shrink-0" />
     </button>
   );
@@ -2317,7 +2415,7 @@ function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded
 
       <main className="p-4 sm:p-6">
         <p className="text-sm text-gray-500 mb-4">Select a department</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-4xl">
+        <div className="flex flex-col gap-4 max-w-4xl">
           {DEPARTMENTS.map((d) => {
             const count = itemCounts[d.slug] || 0;
             const waiting = pendingCounts[d.slug] || 0;
