@@ -10,7 +10,13 @@ const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 // slug must match backend/app/departments.py and the logo file name in public/logos/
 const DEPARTMENTS = [
   { slug: "dd-engineering", name: "DD Engineering", logo: "/logos/dd-engineering.png" },
-  { slug: "i-lab", name: "I Lab", logo: "/logos/i-lab.png" },
+  {
+    slug: "i-lab",
+    name: "I Lab",
+    logo: "/logos/i-lab.png",
+    extraName: "I Photobook",
+    extraLogo: "/logos/i-photobook.png",
+  },
   { slug: "i-lab-std", name: "I Lab STD", logo: "/logos/i-lab-std.png" },
 ];
 
@@ -1999,18 +2005,32 @@ function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded
             const count = itemCounts[d.slug] || 0;
             const waiting = pendingCounts[d.slug] || 0;
             return (
-              <button
+                            <button
                 key={d.slug}
                 onClick={() => onSelect(d.slug)}
-                className="flex items-center gap-4 bg-white border border-gray-200 rounded-2xl p-4 text-left hover:shadow-md hover:border-gray-300 active:scale-[0.99] transition"
+                className="flex items-center gap-3 bg-white border border-gray-200 rounded-2xl p-4 text-left hover:shadow-md hover:border-gray-300 active:scale-[0.99] transition"
               >
-                <div className="w-14 h-14 shrink-0 rounded-xl border border-gray-200 bg-white flex items-center justify-center overflow-hidden p-1.5">
-                  <img src={d.logo} alt="" className="max-w-full max-h-full object-contain" />
-                </div>
-                <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className="w-14 h-14 shrink-0 rounded-xl border border-gray-200 bg-white flex items-center justify-center overflow-hidden p-1.5">
+                    <img src={d.logo} alt="" className="max-w-full max-h-full object-contain" />
+                  </div>
                   <p className="font-semibold text-gray-900 uppercase truncate">{d.name}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{count} {count === 1 ? "item" : "items"}</p>
+
+                  {d.extraLogo && (
+                    <>
+                      <span className="text-gray-300">|</span>
+                      <div className="w-14 h-14 shrink-0 rounded-xl border border-gray-200 bg-white flex items-center justify-center overflow-hidden p-1.5">
+                        <img src={d.extraLogo} alt="" className="max-w-full max-h-full object-contain" />
+                      </div>
+                      <p className="font-semibold text-gray-900 uppercase truncate">{d.extraName}</p>
+                    </>
+                  )}
                 </div>
+
+                <p className="shrink-0 text-xs text-gray-400">
+                  {count} {count === 1 ? "item" : "items"}
+                </p>
+
                 {isAdmin && waiting > 0 && (
                   <span
                     title="Pending requests"
@@ -3585,7 +3605,7 @@ function NotFound() {
       <div className="text-center">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Page not found</h1>
         <p className="text-gray-500 mb-4">This page doesn't exist.</p>
-        <a href="/" className="text-blue-600 hover:underline text-sm">Go to home</a>
+        <a href="/" className="text-blue-600 hover:underline text-sm">Go to HOME</a>
       </div>
     </div>
   );
