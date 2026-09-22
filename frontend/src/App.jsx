@@ -1308,12 +1308,21 @@ function InventoryView({ isAdmin, department, onBack }) {
   useEffect(() => {
     const interval = setInterval(() => {
       const modalOpen = showForm || requestingProduct || restockingProduct;
-      if (!modalOpen) {
+      if (!modalOpen && !document.hidden) {
         loadData(true); // silent = no loading spinner flash
       }
     }, 5000);
 
-    return () => clearInterval(interval);
+    const onVisible = () => {
+      const modalOpen = showForm || requestingProduct || restockingProduct;
+      if (!document.hidden && !modalOpen) loadData(true);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [showForm, requestingProduct, restockingProduct]);
 
   const handleCreate = async (formValues, imageFiles) => {
@@ -2233,9 +2242,10 @@ function ItemsPage({ isAdmin, catKey, itemId, go, refreshToken, onProductAdded }
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
 
-  useEffect(() => {
+    useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      if (document.hidden) return;
       try {
         const data = await getProducts(); // every department
         if (cancelled) return;
@@ -2249,7 +2259,13 @@ function ItemsPage({ isAdmin, catKey, itemId, go, refreshToken, onProductAdded }
     };
     load();
     const interval = setInterval(load, 10000);
-    return () => { cancelled = true; clearInterval(interval); };
+    const onVisible = () => { if (!document.hidden) load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [refreshToken]);
 
   // group items by category, then sort A-Z ("Uncategorized" always last)
@@ -3411,8 +3427,13 @@ function BillPage({ go, autoCreateToken }) {
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 10000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => { if (!document.hidden) load(); }, 10000);
+    const onVisible = () => { if (!document.hidden) load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   useEffect(() => {
