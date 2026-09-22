@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
-import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck } from "lucide-react";
+import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck, CornerDownRight } from "lucide-react";
 import "./index.css";
 
 
@@ -1364,10 +1364,14 @@ function InventoryView({ isAdmin, department, onBack }) {
     let content;
 
   if (activeTab === "products" && itemId) {
-    const selectedItem = products.find((p) => String(p.id) === itemId);
+    const selectedItem = findItemById(products, itemId);
+    const parentName = selectedItem?.parent_id
+      ? products.find((p) => p.id === selectedItem.parent_id)?.name
+      : null;
     content = selectedItem ? (
       <ItemDetail
         item={selectedItem}
+        parentName={parentName}
         onBack={() => setItemId(null)}
         isAdmin={isAdmin}
         onEdit={isAdmin ? (p) => { setEditingProduct(p); setShowForm(true); } : undefined}
@@ -1757,6 +1761,17 @@ function groupByCategory(products) {
   return groups;
 }
 
+function findItemById(products, id) {
+  for (const p of products) {
+    if (String(p.id) === String(id)) return p;
+    if (p.subitems?.length) {
+      const found = findItemById(p.subitems, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 // ---------- category grid (A-Z), shared by ItemsPage and InventoryView ----------
 function CategoryGrid({ groups, onSelect }) {
   return (
@@ -1799,7 +1814,7 @@ function HomeTabs({ active, onChange, isAdmin }) {
    return (
     <div className="flex gap-5 border-b border-gray-100 -mb-4 mt-3 overflow-x-auto">
       {tab("home", "Home", LayoutGrid)}
-      {isAdmin && tab("accounting", "Accounting", Landmark)}
+      {isAdmin && tab("accounting", "Acc.", Landmark)}
       {tab("items", "Items", Tag)}
       {isAdmin && tab("vendors", "Vendors", Truck)}
       {isAdmin && tab("bill", "Bill", Receipt)}
@@ -1889,7 +1904,7 @@ function DetailRow({ label, value }) {
 }
 
 // ---------- Full item card ----------
-function ItemDetail({ item, onBack, isAdmin, onEdit, onDelete, onRestock, onRequest }) {
+function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRestock, onRequest }) {
   const [imageIndex, setImageIndex] = useState(0);
   const images = [...(item.images || [])].sort((a, b) => Number(b.is_primary) - Number(a.is_primary));
   const current = images[Math.min(imageIndex, images.length - 1)];
@@ -1966,8 +1981,34 @@ function ItemDetail({ item, onBack, isAdmin, onEdit, onDelete, onRestock, onRequ
             </div>
 
             <dl className="mt-4 space-y-3 text-sm">
-              <DetailRow label="SKU" value={item.sku || "—"} />
+               <DetailRow label="SKU" value={item.sku || "—"} />
               <DetailRow label="Category" value={item.category?.name || "Uncategorized"} />
+              {parentName && <DetailRow label="Subitem of" value={parentName} />}
+              {isAdmin && (
+                <>
+                  <DetailRow label="Type" value={item.item_type || "—"} />
+                  {item.manufacturer_part_number && (
+                    <DetailRow label="Mfr. Part #" value={item.manufacturer_part_number} />
+                  )}
+                  <DetailRow label="Cost" value={`Rs.${Number(item.cost).toFixed(2)}`} />
+                  <DetailRow label="COGS Account" value={item.cogs_account?.name || "—"} />
+                  <DetailRow label="Income Account" value={item.income_account?.name || "—"} />
+                  <DetailRow label="Asset Account" value={item.asset_account?.name || "—"} />
+                  <DetailRow label="Preferred Vendor" value={item.preferred_vendor?.name || "—"} />
+                  {(item.reorder_min != null || item.reorder_max != null) && (
+                    <DetailRow
+                      label="Reorder Point"
+                      value={`Min ${item.reorder_min ?? "—"} / Max ${item.reorder_max ?? "—"}`}
+                    />
+                  )}
+                </>
+              )}
+              {item.subitems?.length > 0 && (
+                <DetailRow
+                  label="Subitems"
+                  value={`${item.subitems.length} ${item.subitems.length === 1 ? "item" : "items"}`}
+                />
+              )}
               <div className="flex justify-between gap-4 items-center">
                 <dt className="text-gray-500">Department</dt>
                 <dd className="flex items-center gap-2 text-gray-900 font-medium">
@@ -1989,13 +2030,66 @@ function ItemDetail({ item, onBack, isAdmin, onEdit, onDelete, onRestock, onRequ
   );
 }
 
-// ---------- Items inside one category ----------
+function SubitemRow({ item, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-2 bg-white border border-gray-200 rounded-xl pl-3 pr-3 py-2.5 text-left hover:shadow-md hover:border-gray-300 transition"
+    >
+      <CornerDownRight size={14} className="text-gray-300 shrink-0" />
+      <p className="flex-1 min-w-0 text-sm font-medium text-gray-900 truncate">{item.name}</p>
+      <StockBadge quantity={item.quantity} />
+      <ChevronRight size={16} className="text-gray-400 shrink-0" />
+    </button>
+  );
+}
+
+function ItemRowWithSubitems({ item, expanded, onToggle, onSelect }) {
+  const subitems = item.subitems || [];
+  const sorted = [...subitems].sort((a, b) => compareNames(a.name, b.name));
+
+  return (
+    <div className="space-y-1.5">
+      <ItemRow item={item} onClick={() => onSelect(item.id)} />
+      {sorted.length > 0 && (
+        <div className="ml-6 space-y-1.5">
+          <button
+            onClick={onToggle}
+            className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-700 px-1 py-0.5"
+          >
+            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            {sorted.length} {sorted.length === 1 ? "subitem" : "subitems"}
+          </button>
+          {expanded && (
+            <div className="space-y-1.5">
+              {sorted.map((sub) => (
+                <SubitemRow key={sub.id} item={sub} onClick={() => onSelect(sub.id)} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CategoryItemsPage({ group, catKey, loading, go }) {
   const [search, setSearch] = useState("");
+  const [collapsed, setCollapsed] = useState(() => new Set());
+
+  const toggleCollapsed = (id) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
   const q = search.trim().toLowerCase();
   const shown = group ? group.items.filter((p) => p.name.toLowerCase().includes(q)) : [];
   const title = group ? group.name : catKey === UNCATEGORIZED ? "Uncategorized" : "Category";
   const count = group ? group.items.length : 0;
+  const goToItem = (id) => go({ view: "items", cat: catKey, item: String(id) });
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -2017,10 +2111,12 @@ function CategoryItemsPage({ group, catKey, loading, go }) {
             ) : (
               <div className="space-y-2">
                 {shown.map((item) => (
-                  <ItemRow
+                  <ItemRowWithSubitems
                     key={item.id}
                     item={item}
-                    onClick={() => go({ view: "items", cat: catKey, item: String(item.id) })}
+                    expanded={!collapsed.has(item.id)}
+                    onToggle={() => toggleCollapsed(item.id)}
+                    onSelect={goToItem}
                   />
                 ))}
               </div>
@@ -2072,10 +2168,13 @@ function ItemsPage({ isAdmin, catKey, itemId, go, refreshToken, onProductAdded }
   );
 
   // 3) full item card
-  if (itemId) {
+    if (itemId) {
     const back = () => go(catKey ? { view: "items", cat: catKey } : { view: "items" });
-    const item = products.find((p) => String(p.id) === itemId);
-    if (item) return <ItemDetail item={item} onBack={back} />;
+    const item = findItemById(products, itemId);
+    const parentName = item?.parent_id
+      ? products.find((p) => p.id === item.parent_id)?.name
+      : null;
+    if (item) return <ItemDetail item={item} parentName={parentName} onBack={back} isAdmin={isAdmin} />;
     return (
       <div className="min-h-screen bg-gray-50">
         <SubHeader title="Item details" onBack={back} />
