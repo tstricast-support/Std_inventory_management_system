@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
-import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck, CornerDownRight,Bell } from "lucide-react";
+import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck, CornerDownRight,Bell,Menu } from "lucide-react";
 import "./index.css";
 
 
@@ -629,6 +629,8 @@ function CategorySelect({ categories, value, onChange, onCreateCategory }) {
   );
 }
 
+
+
 function RequestModal({ products, initialProductId, onSubmit, onClose }) {
   const [items, setItems] = useState([{ product_id: initialProductId, quantity: 1 }]);
   const [requestedBy, setRequestedBy] = useState("");
@@ -999,19 +1001,121 @@ function ImageManager({ productId, images, onChange }) {
 // ---------- ProductForm (QuickBooks-style item form; handles both Create and Edit) ----------
 const ITEM_TYPES = ["Inventory Part", "Non-Inventory Part", "Service", "Inventory Assembly"];
 
-function AccountSelect({ accounts, accountType, value, onChange, placeholder }) {
-  const options = accounts.filter((a) => a.account_type === accountType);
+
+// ---------- VendorSelect ----------
+function VendorSelect({ vendors, value, onChange, onCreateVendor }) {
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleCreate = async () => {
+    if (!newName.trim()) return;
+    setSaving(true);
+    try {
+      const newVendor = await onCreateVendor(newName.trim());
+      onChange(String(newVendor.id));
+      setNewName("");
+      setCreating(false);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (creating) {
+    return (
+      <div className="flex gap-2">
+        <input
+          autoFocus
+          placeholder="New vendor name"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleCreate())}
+          className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <button type="button" onClick={handleCreate} disabled={saving} className="shrink-0 bg-blue-600 text-white px-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+          {saving ? "..." : "Add"}
+        </button>
+        <button type="button" onClick={() => setCreating(false)} className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm hover:bg-gray-50">✕</button>
+      </div>
+    );
+  }
+
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)}
-      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-      <option value="">{placeholder}</option>
-      {options.map((a) => (
-        <option key={a.id} value={a.id}>{a.name}</option>
-      ))}
-    </select>
+    <div className="flex gap-2">
+      <select value={value} onChange={(e) => onChange(e.target.value)}
+        className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <option value="">None</option>
+        {vendors.map((v) => (
+          <option key={v.id} value={v.id}>{v.name}</option>
+        ))}
+      </select>
+      <button type="button" onClick={() => setCreating(true)} className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap">
+        + New
+      </button>
+    </div>
   );
 }
 
+// ---------- AccountSelect ----------
+function AccountSelect({ accounts, accountType, value, onChange, placeholder, onCreateAccount }) {
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const options = accounts.filter((a) => a.account_type === accountType);
+
+  const handleCreate = async () => {
+    if (!newName.trim()) return;
+    setSaving(true);
+    try {
+      const created = await onCreateAccount(newName.trim(), accountType);
+      onChange(String(created.id));
+      setNewName("");
+      setCreating(false);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (creating) {
+    return (
+      <div className="flex gap-2">
+        <input
+          autoFocus
+          placeholder="New account name"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleCreate())}
+          className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <button type="button" onClick={handleCreate} disabled={saving} className="shrink-0 bg-blue-600 text-white px-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+          {saving ? "..." : "Add"}
+        </button>
+        <button type="button" onClick={() => setCreating(false)} className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm hover:bg-gray-50">✕</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-2">
+      <select value={value} onChange={(e) => onChange(e.target.value)}
+        className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <option value="">{placeholder}</option>
+        {options.map((a) => (
+          <option key={a.id} value={a.id}>{a.name}</option>
+        ))}
+      </select>
+      <button type="button" onClick={() => setCreating(true)} className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap">
+        + New
+      </button>
+    </div>
+  );
+}
+
+// ---------- ProductForm ----------
 function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onClose, onCreateCategory, onImagesChanged }) {
   const isEditMode = Boolean(initialData);
   const [form, setForm] = useState({
@@ -1066,6 +1170,18 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
 
   const handleChange = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
   const handleFileChange = (e) => setImageFiles(Array.from(e.target.files));
+
+  const handleCreateVendor = async (name) => {
+    const created = await createVendor({ name });
+    setVendors((prev) => [...prev, created]);
+    return created;
+  };
+
+  const handleCreateAccount = async (name, accountType) => {
+    const created = await createAccount({ name, account_type: accountType });
+    setAccounts((prev) => [...prev, created]);
+    return created;
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1145,7 +1261,7 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
             <textarea placeholder="Description on Purchase Transactions" rows={2}
               value={form.purchase_description} onChange={(e) => handleChange("purchase_description", e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Cost</label>
                 <input type="number" step="0.01" min="0" value={form.cost} onChange={(e) => handleChange("cost", e.target.value)}
@@ -1153,19 +1269,14 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Preferred Vendor</label>
-                <select value={form.preferred_vendor_id} onChange={(e) => handleChange("preferred_vendor_id", e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="">None</option>
-                  {vendors.map((v) => (
-                    <option key={v.id} value={v.id}>{v.name}</option>
-                  ))}
-                </select>
+                <VendorSelect vendors={vendors} value={form.preferred_vendor_id}
+                  onChange={(val) => handleChange("preferred_vendor_id", val)} onCreateVendor={handleCreateVendor} />
               </div>
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">COGS Account</label>
               <AccountSelect accounts={accounts} accountType="cogs" placeholder="Select COGS account..."
-                value={form.cogs_account_id} onChange={(val) => handleChange("cogs_account_id", val)} />
+                value={form.cogs_account_id} onChange={(val) => handleChange("cogs_account_id", val)} onCreateAccount={handleCreateAccount} />
             </div>
           </div>
 
@@ -1183,7 +1294,7 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
             <div>
               <label className="block text-xs text-gray-500 mb-1">Income Account</label>
               <AccountSelect accounts={accounts} accountType="income" placeholder="Select income account..."
-                value={form.income_account_id} onChange={(val) => handleChange("income_account_id", val)} />
+                value={form.income_account_id} onChange={(val) => handleChange("income_account_id", val)} onCreateAccount={handleCreateAccount} />
             </div>
           </div>
 
@@ -1193,7 +1304,7 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
             <div>
               <label className="block text-xs text-gray-500 mb-1">Asset Account</label>
               <AccountSelect accounts={accounts} accountType="asset" placeholder="Select asset account..."
-                value={form.asset_account_id} onChange={(val) => handleChange("asset_account_id", val)} />
+                value={form.asset_account_id} onChange={(val) => handleChange("asset_account_id", val)} onCreateAccount={handleCreateAccount} />
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
@@ -1674,8 +1785,7 @@ function FilterBar({ categories, searchTerm, onSearchChange, selectedCategory, o
 }
 
 
-// ---------- "+ Add Product" from any admin page (pick the department inside the form) ----------
-function AddProductButton({ onCreated }) {
+const AddProductButton = forwardRef(function AddProductButton({ onCreated, hideTrigger }, ref) {
   const [open, setOpen] = useState(false);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -1692,6 +1802,8 @@ function AddProductButton({ onCreated }) {
     }
   };
 
+  useImperativeHandle(ref, () => ({ open: handleOpen }));
+
   const handleCreate = async (values, imageFiles) => {
     await createProduct(values, imageFiles);
     onCreated?.();
@@ -1705,13 +1817,15 @@ function AddProductButton({ onCreated }) {
 
   return (
     <>
-      <button
-        onClick={handleOpen}
-        disabled={loading}
-        className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
-      >
-        {loading ? "Loading..." : "+ Add Product"}
-      </button>
+      {!hideTrigger && (
+        <button
+          onClick={handleOpen}
+          disabled={loading}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+        >
+          {loading ? "Loading..." : "+ Add Product"}
+        </button>
+      )}
       {open && (
         <ProductForm
           categories={categories}
@@ -1723,7 +1837,7 @@ function AddProductButton({ onCreated }) {
       )}
     </>
   );
-}
+});
 
 function LowStockBell() {
   const [items, setItems] = useState([]);
@@ -1805,22 +1919,53 @@ function LowStockBell() {
   );
 }
 
-// ---------- Shared top header (title + admin buttons + tabs) ----------
-function AppHeader({ isAdmin, active, onTab, onProductAdded, actions }) {
+function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddProduct, inlineAction }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const addProductRef = useRef(null);
   return (
     <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
-      <div className="flex flex-wrap gap-3 justify-between items-start">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Tricast Stock Manager</h1>
+      <div className="flex flex-nowrap gap-2 justify-between items-start">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl font-bold text-gray-900 truncate">Tricast Stock Manager</h1>
           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isAdmin ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}>
             {isAdmin ? "Admin" : "Employee (Read Only)"}
           </span>
         </div>
         {isAdmin && (
-          <div className="flex items-center gap-2">
-            {actions}
+          <div className="flex items-center gap-2 shrink-0 relative">
+            {inlineAction}
             <LowStockBell />
-            <AddProductButton onCreated={onProductAdded} />
+            {actions && (
+              <>
+                <button
+                  onClick={() => setMenuOpen((v) => !v)}
+                  aria-label="Page actions"
+                  className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
+                >
+                  <Menu size={18} />
+                </button>
+                {menuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                    <div
+                      className="absolute right-0 top-full mt-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-2 flex flex-col gap-2 min-w-[190px]"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      {actions}
+                      {hideAddProduct && (
+                        <button
+                          onClick={() => addProductRef.current?.open()}
+                          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
+                        >
+                          + Add Product
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+            <AddProductButton ref={addProductRef} onCreated={onProductAdded} hideTrigger={hideAddProduct} />
           </div>
         )}
       </div>
@@ -2518,8 +2663,8 @@ function VendorsPage({ isAdmin, go }) {
         isAdmin={isAdmin}
         active="vendors"
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
-        actions={
-          <button onClick={() => setFormOpen(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
+        inlineAction={
+          <button onClick={() => setFormOpen(true)} className="hidden md:inline-flex bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
             + Add Vendor
           </button>
         }
@@ -2656,8 +2801,8 @@ function AccountingPage({ isAdmin, go }) {
         isAdmin={isAdmin}
         active="accounting"
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
-        actions={
-          <button onClick={() => setFormOpen(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
+        inlineAction={
+          <button onClick={() => setFormOpen(true)} className="hidden md:inline-flex bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
             + Add Account
           </button>
         }
@@ -3457,6 +3602,7 @@ function BillPage({ go, autoCreateToken }) {
       <AppHeader
         isAdmin
         active="bill"
+        hideAddProduct
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
         actions={
           <button onClick={() => setCreating(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
@@ -4129,6 +4275,7 @@ function IssuedPage({ go, autoCreateToken }) {
       <AppHeader
         isAdmin
         active="issued"
+        hideAddProduct
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
         actions={
           <button onClick={() => setCreating(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
