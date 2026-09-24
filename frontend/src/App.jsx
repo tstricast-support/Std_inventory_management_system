@@ -960,6 +960,72 @@ function VendorSelect({ vendors, value, onChange, onCreateVendor }) {
   );
 }
 
+// ---------- ParentItemSelect ("Subitem of" dropdown with a + New button) ----------
+function ParentItemSelect({ options, value, onChange, onCreateParent, disabled }) {
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleCreate = async () => {
+    if (!newName.trim()) return;
+    setSaving(true);
+    try {
+      const created = await onCreateParent(newName.trim());
+      onChange(String(created.id));
+      setNewName("");
+      setCreating(false);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (creating) {
+    return (
+      <div className="flex flex-1 min-w-0 gap-2">
+        <input
+          autoFocus
+          placeholder="New parent item name"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleCreate())}
+          className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <button type="button" onClick={handleCreate} disabled={saving} className="shrink-0 bg-blue-600 text-white px-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+          {saving ? "..." : "Add"}
+        </button>
+        <button type="button" onClick={() => setCreating(false)} className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm hover:bg-gray-50">✕</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-1 min-w-0 gap-2">
+      <select
+        disabled={disabled}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
+      >
+        <option value="">Select parent item...</option>
+        {options.map((p) => (
+          <option key={p.id} value={p.id}>{p.name}</option>
+        ))}
+      </select>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setCreating(true)}
+        className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+      >
+        + New
+      </button>
+    </div>
+  );
+}
+
+
 // ---------- AccountSelect ----------
 function AccountSelect({ accounts, accountType, value, onChange, placeholder, onCreateAccount }) {
   const [creating, setCreating] = useState(false);
@@ -1084,6 +1150,20 @@ function ProductForm({ initialData, defaultDepartment, onSubmit, onClose, onImag
     return created;
   };
 
+    // "Subitem of" -> "+ New": create a bare parent item right away (same as vendors/accounts)
+  const handleCreateParent = async (name) => {
+    if (parentOptions.some((p) => p.name.trim().toLowerCase() === name.toLowerCase())) {
+      throw new Error("An item with this name already exists - select it from the list");
+    }
+    const created = await createProduct(
+      { name, department: form.department, item_type: form.item_type },
+      []
+    );
+    setParentOptions((prev) => [...prev, created]);
+    return created;
+  };
+  
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
@@ -1139,17 +1219,13 @@ function ProductForm({ initialData, defaultDepartment, onSubmit, onClose, onImag
               className="rounded border-gray-300"
             />
             <label htmlFor="is_subitem" className="text-sm text-gray-700">Subitem of</label>
-            <select
+              <ParentItemSelect
               disabled={!form.is_subitem}
+              options={parentOptions}
               value={form.parent_id}
-              onChange={(e) => handleChange("parent_id", e.target.value)}
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
-            >
-              <option value="">Select parent item...</option>
-              {parentOptions.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+              onChange={(val) => handleChange("parent_id", val)}
+              onCreateParent={handleCreateParent}
+            />
           </div>
 
           <input placeholder="Manufacturer's Part Number" value={form.manufacturer_part_number}
