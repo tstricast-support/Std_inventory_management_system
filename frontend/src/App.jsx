@@ -83,6 +83,20 @@ async function deleteAccount(id) {
   return res.json();
 }
 
+// every account + its total value (Accounting list page)
+async function getAccountsSummary() {
+  const res = await fetch(`${BASE_URL}/accounts/summary`);
+  if (!res.ok) throw new Error("Failed to fetch accounts");
+  return res.json();
+}
+
+// one account + the items that make up its value (Account detail page)
+async function getAccountDetail(id) {
+  const res = await fetch(`${BASE_URL}/accounts/${id}/detail`);
+  if (!res.ok) throw new Error(res.status === 404 ? "This account no longer exists." : "Failed to fetch account");
+  return res.json();
+}
+
 async function createProduct(formValues, imageFiles) {
   const formData = new FormData();
   formData.append("name", formValues.name);
@@ -2408,6 +2422,107 @@ const ACCOUNT_TYPES = [
   { key: "asset", label: "Asset Accounts" },
 ];
 
+const formatRs = (n) =>
+  `Rs.${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const ACCOUNT_TYPE_NAMES = { cogs: "COGS account", income: "Income account", asset: "Asset account" };
+
+// ---------- Account detail: total value + the items behind it ----------
+//   /?view=accounting&account=3
+function AccountDetail({ accountId, go }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const back = () => go({ view: "accounting" });
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getAccountDetail(accountId)
+      .then((d) => { if (!cancelled) { setData(d); setError(null); } })
+      .catch((err) => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [accountId]);
+
+  const handleDelete = async () => {
+    if (!confirm(`Delete "${data.name}"? Items using it will simply lose this account.`)) return;
+    try {
+      await deleteAccount(data.id);
+      back();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const basisLabel = data?.value_basis === "price" ? "sales price" : "cost";
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <SubHeader
+        title={data?.name || "Account"}
+        subtitle={data ? ACCOUNT_TYPE_NAMES[data.account_type] : undefined}
+        onBack={back}
+      />
+      <main className="p-4 sm:p-6 max-w-3xl space-y-6">
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : (
+          <>
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <dl className="space-y-2 text-sm">
+                <DetailRow label="Total value" value={formatRs(data.total_value)} />
+                <DetailRow label="Items linked" value={data.item_count} />
+                <DetailRow label="Calculated as" value={`Stock quantity × ${basisLabel}`} />
+              </dl>
+            </div>
+
+            <div>
+              <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
+                Items using this account <span className="text-gray-400 font-normal">({data.items.length})</span>
+              </h2>
+              {data.items.length === 0 ? (
+                <p className="text-gray-400 text-sm">No items use this account yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {data.items.map((i) => (
+                    <button
+                      key={i.id}
+                      type="button"
+                      onClick={() => go({ view: "items", item: String(i.id) })}
+                      className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-900 truncate">{i.name}</p>
+                        <p className="text-xs text-gray-400 truncate">
+                          {i.parent_name ? `Subitem of ${i.parent_name} · ` : ""}
+                          {DEPARTMENTS.find((d) => d.slug === i.department)?.name || i.department}
+                          {" · "}{i.quantity} × {formatRs(i.unit_value)}
+                        </p>
+                      </div>
+                      <span className="shrink-0 font-semibold text-gray-900">{formatRs(i.value)}</span>
+                      <ChevronRight size={16} className="shrink-0 text-gray-400" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={handleDelete}
+              className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-50"
+            >
+              <Trash2 size={16} /> Delete account
+            </button>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+
 function AccountingPage({ isAdmin, go }) {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2416,7 +2531,7 @@ function AccountingPage({ isAdmin, go }) {
 
   const load = async () => {
     try {
-      setAccounts(await getAccounts());
+      setAccounts(await getAccountsSummary());
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -2427,15 +2542,6 @@ function AccountingPage({ isAdmin, go }) {
 
   useEffect(() => { load(); }, []);
 
-  const handleDelete = async (id) => {
-    if (!confirm("Delete this account?")) return;
-    try {
-      await deleteAccount(id);
-      load();
-    } catch (err) {
-      alert(err.message);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -2470,16 +2576,19 @@ function AccountingPage({ isAdmin, go }) {
                 ) : (
                   <div className="space-y-2">
                     {list.map((a) => (
-                      <div key={a.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3">
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => go({ view: "accounting", account: String(a.id) })}
+                        className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors"
+                      >
                         <div className="w-9 h-9 shrink-0 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
                           <Landmark size={16} />
                         </div>
                         <p className="flex-1 min-w-0 font-medium text-gray-900 truncate">{a.name}</p>
-                        <button onClick={() => handleDelete(a.id)} title="Delete account" aria-label="Delete account"
-                          className="p-2 rounded-full text-red-500 hover:bg-red-50 transition-colors">
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
+                        <span className="shrink-0 font-semibold text-gray-900">{formatRs(a.total_value)}</span>
+                        <ChevronRight size={16} className="shrink-0 text-gray-400" />
+                      </button>
                     ))}
                   </div>
                 )}
@@ -4043,7 +4152,9 @@ function AppShell() {
    } else if (searchParams.get("view") === "issued" && isAdmin) {
     page = <IssuedPage go={setSearchParams} autoCreateToken={quickIssuedToken} />;
   } else if (searchParams.get("view") === "accounting" && isAdmin) {
-    page = <AccountingPage isAdmin={isAdmin} go={setSearchParams} />;
+      page = searchParams.get("account")
+      ? <AccountDetail accountId={searchParams.get("account")} go={setSearchParams} />
+      : <AccountingPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "vendors" && isAdmin) {
     page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "items") {

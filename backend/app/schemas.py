@@ -18,6 +18,25 @@ class AccountOut(AccountBase):
     id: int
     created_at: datetime
 
+class AccountSummary(AccountOut):
+    """Account + its total value (used by the Accounting list page)."""
+    total_value: float = 0
+    item_count: int = 0
+
+class AccountItemValue(BaseModel):
+    id: int
+    name: str
+    sku: Optional[str] = None
+    department: str
+    quantity: int
+    unit_value: float          # cost (COGS/Asset accounts) or sales price (Income accounts)
+    value: float               # quantity x unit_value
+    parent_name: Optional[str] = None
+
+class AccountDetail(AccountSummary):
+    value_basis: str           # "cost" | "price"
+    items: List[AccountItemValue] = []
+
 
 # ---------- Vendor ----------
 class VendorBase(BaseModel):
