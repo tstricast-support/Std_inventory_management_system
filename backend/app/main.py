@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 from app.departments import DEFAULT_DEPARTMENT
 from app.database import Base, engine
-from app.routers import products, categories, requests, stock_movements, bills, issued, vendors, accounts
+from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts
 Base.metadata.create_all(bind=engine) 
 
 def add_department_column():
@@ -49,6 +49,15 @@ def merge_photobook_into_i_lab():
 
 
 merge_photobook_into_i_lab()
+# Category was removed in favor of QuickBooks-style "Subitem of" (parent_id).
+# Nothing in the app reads products.category_id or the categories table anymore,
+# so they're just harmless leftovers - safe to ignore, no migration needed.
+#
+# We deliberately do NOT auto-drop them here: SQLite's ALTER TABLE DROP COLUMN
+# refuses to drop a column that's part of a FOREIGN KEY constraint (category_id
+# REFERENCES categories(id)) - dropping it properly requires SQLite to rebuild
+# the whole "products" table, which is a heavier, riskier migration than an
+# unused column is worth for a column nothing writes to or reads anymore.
 
 app = FastAPI(
     title="STD Stock Manager API",
@@ -66,7 +75,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(categories.router)
 app.include_router(products.router)
 app.include_router(requests.router)
 app.include_router(stock_movements.router)

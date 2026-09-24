@@ -30,22 +30,6 @@ async function getProducts(department) {
   return res.json();
 }
 
-async function getCategories() {
-  const res = await fetch(`${BASE_URL}/categories/`);
-  if (!res.ok) throw new Error("Failed to fetch categories");
-  return res.json();
-}
-
-async function createCategory(name) {
-  const res = await fetch(`${BASE_URL}/categories/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-  if (!res.ok) throw new Error("Failed to create category");
-  return res.json();
-}
-
 // ---------- Vendors ----------
 async function getVendors() {
   const res = await fetch(`${BASE_URL}/vendors/`);
@@ -112,7 +96,6 @@ async function createProduct(formValues, imageFiles) {
   formData.append("item_type", formValues.item_type || "Inventory Part");
   formData.append("manufacturer_part_number", formValues.manufacturer_part_number || "");
 
-  if (formValues.category_id) formData.append("category_id", formValues.category_id);
   if (formValues.parent_id) formData.append("parent_id", formValues.parent_id);
   if (formValues.cogs_account_id) formData.append("cogs_account_id", formValues.cogs_account_id);
   if (formValues.income_account_id) formData.append("income_account_id", formValues.income_account_id);
@@ -400,50 +383,26 @@ function ProductCard({ product, isAdmin, onDelete, onEdit, onRequest, onRestock 
 }
 
 // ---------- ProductGrid ----------
-function GroupedProductGrid({ products, categories, isAdmin, onDelete, onEdit, onRequest, onRestock }) {
+function GroupedProductGrid({ products, isAdmin, onDelete, onEdit, onRequest, onRestock }) {
   if (products.length === 0) {
     return <div className="text-center py-16 text-gray-400">No products match your filters.</div>;
   }
 
-  const grouped = {};
-  products.forEach((p) => {
-    const key = p.category?.id ?? "uncategorized";
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(p);
-  });
-
-  const orderedKeys = [
-    ...categories.map((c) => c.id).filter((id) => grouped[id]),
-    ...(grouped["uncategorized"] ? ["uncategorized"] : []),
-  ];
+  const sorted = [...products].sort((a, b) => compareNames(a.name, b.name));
 
   return (
-    <div className="space-y-8">
-      {orderedKeys.map((key) => {
-        const groupProducts = grouped[key];
-        const label = key === "uncategorized" ? "Uncategorized" : categories.find((c) => c.id === key)?.name;
-
-        return (
-          <div key={key}>
-            <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
-              {label} <span className="text-gray-400 font-normal">({groupProducts.length})</span>
-            </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {groupProducts.map((product) => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  isAdmin={isAdmin}
-                  onDelete={onDelete}
-                  onEdit={onEdit}
-                  onRequest={onRequest}
-                  onRestock={onRestock}
-                />
-              ))}
-            </div>
-          </div>
-        );
-      })}
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+      {sorted.map((product) => (
+        <ProductCard
+          key={product.id}
+          product={product}
+          isAdmin={isAdmin}
+          onDelete={onDelete}
+          onEdit={onEdit}
+          onRequest={onRequest}
+          onRestock={onRestock}
+        />
+      ))}
     </div>
   );
 }
@@ -573,63 +532,6 @@ function StockHistoryPanel({ movements }) {
     </div>
   );
 }
-
-// ---------- CategorySelect ----------
-function CategorySelect({ categories, value, onChange, onCreateCategory }) {
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const handleCreate = async () => {
-    if (!newName.trim()) return;
-    setSaving(true);
-    try {
-      const newCategory = await onCreateCategory(newName.trim());
-      onChange(String(newCategory.id));
-      setNewName("");
-      setCreating(false);
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (creating) {
-    return (
-      <div className="flex gap-2">
-        <input
-          autoFocus
-          placeholder="New category name"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleCreate())}
-          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-        <button type="button" onClick={handleCreate} disabled={saving} className="bg-blue-600 text-white px-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-          {saving ? "..." : "Add"}
-        </button>
-        <button type="button" onClick={() => setCreating(false)} className="border border-gray-300 px-3 rounded-lg text-sm hover:bg-gray-50">✕</button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex gap-2">
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <option value="">No category</option>
-        {categories.map((cat) => (
-          <option key={cat.id} value={cat.id}>{cat.name}</option>
-        ))}
-      </select>
-      <button type="button" onClick={() => setCreating(true)} className="border border-gray-300 px-3 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap">
-        + New
-      </button>
-    </div>
-  );
-}
-
-
 
 function RequestModal({ products, initialProductId, onSubmit, onClose }) {
   const [items, setItems] = useState([{ product_id: initialProductId, quantity: 1 }]);
@@ -1116,7 +1018,7 @@ function AccountSelect({ accounts, accountType, value, onChange, placeholder, on
 }
 
 // ---------- ProductForm ----------
-function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onClose, onCreateCategory, onImagesChanged }) {
+function ProductForm({ initialData, defaultDepartment, onSubmit, onClose, onImagesChanged }) {
   const isEditMode = Boolean(initialData);
   const [form, setForm] = useState({
     item_type: initialData?.item_type || "Inventory Part",
@@ -1140,7 +1042,6 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
     quantity: initialData?.quantity ?? 0,
 
     sku: initialData?.sku || "",
-    category_id: initialData?.category?.id ? String(initialData.category.id) : "",
     department: initialData?.department || defaultDepartment,
   });
 
@@ -1325,7 +1226,7 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
             </div>
           </div>
 
-          {/* ---- existing app fields: SKU, Category, Department ---- */}
+          {/* ---- existing app fields: SKU, Department ---- */}
           <input placeholder="SKU (optional)" value={form.sku} onChange={(e) => handleChange("sku", e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
 
@@ -1341,8 +1242,6 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
               ))}
             </select>
           </div>
-
-          <CategorySelect categories={categories} value={form.category_id} onChange={(val) => handleChange("category_id", val)} onCreateCategory={onCreateCategory} />
 
           {!isEditMode && (
             <div>
@@ -1381,7 +1280,6 @@ function ProductForm({ categories, initialData, defaultDepartment, onSubmit, onC
 // ---------- Shared inventory view (used by both routes) ----------
 function InventoryView({ isAdmin, department, onBack }) {
   const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [requests, setRequests] = useState([]);
   const [stockMovements, setStockMovements] = useState([]);
   const [activeTab, setActiveTab] = useState("products"); // "products" | "requests" | "history"
@@ -1391,23 +1289,21 @@ function InventoryView({ isAdmin, department, onBack }) {
   const [restockingProduct, setRestockingProduct] = useState(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("");
-  const [catKey, setCatKey] = useState(null);
   const [itemId, setItemId] = useState(null);
+  const [collapsed, setCollapsed] = useState(() => new Set());
 
   const loadData = async (silent = false) => {
     if (!silent) setLoading(true);
-    const calls = [getProducts(department.slug), getCategories()];
+    const calls = [getProducts(department.slug)];
     if (isAdmin) {
       calls.push(getRequests(undefined, department.slug));
       calls.push(getStockMovements(department.slug));
     }
     const results = await Promise.all(calls);
     setProducts(results[0]);
-    setCategories(results[1]);
     if (isAdmin) {
-      setRequests(results[2]);
-      setStockMovements(results[3]);
+      setRequests(results[1]);
+      setStockMovements(results[2]);
     }
     if (!silent) setLoading(false);
   };
@@ -1452,12 +1348,6 @@ function InventoryView({ isAdmin, department, onBack }) {
     await loadData();
   };
 
-  const handleCreateCategory = async (name) => {
-    const newCategory = await createCategory(name);
-    setCategories((prev) => [...prev, newCategory]);
-    return newCategory;
-  };
-
   const handleRequestSubmit = async (payload) => {
     await createRequest(payload);
     await loadData();
@@ -1477,11 +1367,21 @@ function InventoryView({ isAdmin, department, onBack }) {
     await restockProduct(id, quantity, note);
     await loadData();
   };
-  
-  const pendingCount = requests.filter((r) => r.status === "pending").length;
-  const groups = groupByCategory(products);
 
-    let content;
+  const toggleCollapsed = (id) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const pendingCount = requests.filter((r) => r.status === "pending").length;
+  const q = searchTerm.trim().toLowerCase();
+  const sortedProducts = [...products].sort((a, b) => compareNames(a.name, b.name));
+  const shownProducts = q ? sortedProducts.filter((p) => p.name.toLowerCase().includes(q)) : sortedProducts;
+
+  let content;
 
   if (activeTab === "products" && itemId) {
     const selectedItem = findItemById(products, itemId);
@@ -1504,15 +1404,6 @@ function InventoryView({ isAdmin, department, onBack }) {
         <SubHeader title="Item details" onBack={() => setItemId(null)} />
         <p className="text-gray-400 text-center py-16">This item no longer exists.</p>
       </div>
-    );
-  } else if (activeTab === "products" && catKey) {
-    content = (
-      <CategoryItemsPage
-        group={groups.find((g) => g.key === catKey)}
-        catKey={catKey}
-        loading={loading}
-        go={(next) => { setCatKey(next.cat ?? null); setItemId(next.item ?? null); }}
-      />
     );
   } else {
     content = (
@@ -1574,19 +1465,24 @@ function InventoryView({ isAdmin, department, onBack }) {
           ) : (
             <>
               <div className="mb-5">
-                <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search categories or items..." />
+                <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search items..." />
               </div>
-              {groups.length === 0 ? (
+              {products.length === 0 ? (
                 <p className="text-gray-400 text-center py-16">No products yet.</p>
+              ) : shownProducts.length === 0 ? (
+                <p className="text-gray-400 text-center py-16">No items match your search.</p>
               ) : (
-                <CategoryGrid
-                  groups={
-                    searchTerm.trim()
-                      ? groups.filter((g) => g.name.toLowerCase().includes(searchTerm.trim().toLowerCase()))
-                      : groups
-                  }
-                  onSelect={setCatKey}
-                />
+                <div className="space-y-2 max-w-2xl">
+                  {shownProducts.map((item) => (
+                    <ItemRowWithSubitems
+                      key={item.id}
+                      item={item}
+                      expanded={!collapsed.has(item.id)}
+                      onToggle={() => toggleCollapsed(item.id)}
+                      onSelect={setItemId}
+                    />
+                  ))}
+                </div>
               )}
             </>
           )}
@@ -1601,12 +1497,10 @@ function InventoryView({ isAdmin, department, onBack }) {
 
       {showForm && (
         <ProductForm
-          categories={categories}
           initialData={editingProduct}
           defaultDepartment={department.slug}
           onSubmit={editingProduct ? handleUpdate : handleCreate}
           onClose={() => { setShowForm(false); setEditingProduct(null); }}
-          onCreateCategory={handleCreateCategory}
           onImagesChanged={() => loadData(true)}
         />
       )}
@@ -1629,178 +1523,12 @@ function InventoryView({ isAdmin, department, onBack }) {
       )}
     </>
   );
-  
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
-                <div className="flex flex-wrap gap-3 justify-between items-center mb-3">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onBack}
-              aria-label="Back to departments"
-              className="p-2 -ml-2 rounded-full text-gray-500 hover:bg-gray-100"
-            >
-              <ArrowLeft size={20} />
-            </button>
-            <img
-              src={department.logo}
-              alt=""
-              className="w-10 h-10 object-contain rounded-lg border border-gray-200 bg-white p-1"
-            />
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">{department.name}</h1>
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isAdmin ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}>
-                {isAdmin ? "Admin" : "Employee (Read Only)"}
-              </span>
-            </div>
-          </div>
-          {isAdmin && activeTab === "products" && (
-            <button onClick={() => { setEditingProduct(null); setShowForm(true); }}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
-              + Add Product
-            </button>
-          )}
-        </div>
-
-        {isAdmin && (
-          <div className="flex gap-4 border-b border-gray-100 -mb-4">
-            <button
-              onClick={() => setActiveTab("products")}
-              className={`pb-2 text-sm font-medium border-b-2 ${
-                activeTab === "products" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              Products
-            </button>
-            <button
-              onClick={() => setActiveTab("requests")}
-              className={`pb-2 text-sm font-medium border-b-2 flex items-center gap-1.5 ${
-                activeTab === "requests" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              Requests
-              {pendingCount > 0 && (
-                <span className="bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center">
-                  {pendingCount}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab("history")}
-              className={`pb-2 text-sm font-medium border-b-2 flex items-center gap-1.5 ${
-                activeTab === "history" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              <History size={14} />
-              Stock History
-            </button>
-          </div>
-        )}
-      </header>
-
-      <main className="p-4 sm:p-6">
-        {loading ? (
-          <p className="text-gray-400 text-center py-16">Loading...</p>
-        ) : activeTab === "requests" ? (
-          <RequestsPanel requests={requests} onApprove={handleApprove} onReject={handleReject} />
-        ) : activeTab === "history" ? (
-          <StockHistoryPanel movements={stockMovements} />
-        ) : (
-          <>
-            <FilterBar
-              categories={usedCategories}
-              searchTerm={searchTerm}
-              onSearchChange={setSearchTerm}
-              selectedCategory={selectedCategory}
-              onCategoryChange={setSelectedCategory}
-            />
-            <GroupedProductGrid
-              products={filteredProducts}
-              categories={categories}
-              isAdmin={isAdmin}
-              onDelete={handleDelete}
-              onEdit={(product) => { setEditingProduct(product); setShowForm(true); }}
-              onRequest={(product) => setRequestingProduct(product)}
-              onRestock={(product) => setRestockingProduct(product)}
-            />
-          </>
-        )}
-      </main>
-
-      {showForm && (
-        <ProductForm
-          categories={categories}
-          initialData={editingProduct}
-          defaultDepartment={department.slug}
-          onSubmit={editingProduct ? handleUpdate : handleCreate}
-          onClose={() => { setShowForm(false); setEditingProduct(null); }}
-          onCreateCategory={handleCreateCategory}
-          onImagesChanged={() => loadData(true)}
-        />
-      )}
-
-     {requestingProduct && (
-        <RequestModal
-          products={products}
-          initialProductId={requestingProduct.id}
-          onSubmit={handleRequestSubmit}
-          onClose={() => setRequestingProduct(null)}
-        />
-      )}
-
-      {restockingProduct && (
-        <RestockModal
-          product={restockingProduct}
-          onSubmit={handleRestock}
-          onClose={() => setRestockingProduct(null)}
-        />
-      )}
-    </div>
-  );
 }
-
-function FilterBar({ categories, searchTerm, onSearchChange, selectedCategory, onCategoryChange }) {
-  return (
-    <div className="flex flex-col sm:flex-row gap-3 mb-6">
-      <input
-        type="text"
-        placeholder="Search products by name..."
-        value={searchTerm}
-        onChange={(e) => onSearchChange(e.target.value)}
-        className="flex-1 border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-      />
-      <select
-        value={selectedCategory}
-        onChange={(e) => onCategoryChange(e.target.value)}
-        className="border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-56"
-      >
-        <option value="">All categories</option>
-        {categories.map((cat) => (
-          <option key={cat.id} value={cat.id}>{cat.name}</option>
-        ))}
-        <option value="uncategorized">Uncategorized</option>
-      </select>
-    </div>
-  );
-}
-
 
 const AddProductButton = forwardRef(function AddProductButton({ onCreated, hideTrigger }, ref) {
   const [open, setOpen] = useState(false);
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(false);
 
-  const handleOpen = async () => {
-    setLoading(true);
-    try {
-      setCategories(await getCategories());
-      setOpen(true);
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const handleOpen = () => setOpen(true);
 
   useImperativeHandle(ref, () => ({ open: handleOpen }));
 
@@ -1809,30 +1537,21 @@ const AddProductButton = forwardRef(function AddProductButton({ onCreated, hideT
     onCreated?.();
   };
 
-  const handleCreateCategory = async (name) => {
-    const created = await createCategory(name);
-    setCategories((prev) => [...prev, created]);
-    return created;
-  };
-
   return (
     <>
       {!hideTrigger && (
         <button
           onClick={handleOpen}
-          disabled={loading}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
         >
-          {loading ? "Loading..." : "+ Add Product"}
+          + Add Product
         </button>
       )}
       {open && (
         <ProductForm
-          categories={categories}
           defaultDepartment={DEPARTMENTS[0].slug}
           onSubmit={handleCreate}
           onClose={() => setOpen(false)}
-          onCreateCategory={handleCreateCategory}
         />
       )}
     </>
@@ -1975,26 +1694,9 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
 }
 
 // ---------- Shared helpers for the home tabs / items browser ----------
-const UNCATEGORIZED = "uncategorized";
 const nameCollator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
 const compareNames = (a, b) => nameCollator.compare(a, b); // A-Z, ignores upper/lower case
 const getDepartment = (slug) => DEPARTMENTS.find((d) => d.slug === slug);
-
-// ---------- group products by category, A-Z, "Uncategorized" last ----------
-function groupByCategory(products) {
-  const groupMap = {};
-  products.forEach((p) => {
-    const key = p.category ? String(p.category.id) : UNCATEGORIZED;
-    if (!groupMap[key]) groupMap[key] = { key, name: p.category ? p.category.name : "Uncategorized", items: [] };
-    groupMap[key].items.push(p);
-  });
-  const groups = Object.values(groupMap);
-  groups.forEach((g) => g.items.sort((a, b) => compareNames(a.name, b.name)));
-  groups.sort((a, b) =>
-    a.key === UNCATEGORIZED ? 1 : b.key === UNCATEGORIZED ? -1 : compareNames(a.name, b.name)
-  );
-  return groups;
-}
 
 function findItemById(products, id) {
   for (const p of products) {
@@ -2005,32 +1707,6 @@ function findItemById(products, id) {
     }
   }
   return null;
-}
-
-// ---------- category grid (A-Z), shared by ItemsPage and InventoryView ----------
-function CategoryGrid({ groups, onSelect }) {
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      {groups.map((g) => (
-        <button
-          key={g.key}
-          onClick={() => onSelect(g.key)}
-          className="flex items-center gap-4 bg-white border border-gray-200 rounded-2xl p-4 text-left hover:shadow-md hover:border-gray-300 active:scale-[0.99] transition"
-        >
-          <div className="w-12 h-12 shrink-0 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-            <Tag size={20} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-semibold text-gray-900 truncate">{g.name}</p>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {g.items.length} {g.items.length === 1 ? "item" : "items"}
-            </p>
-          </div>
-          <ChevronRight size={18} className="text-gray-400 shrink-0" />
-        </button>
-      ))}
-    </div>
-  );
 }
 
 function HomeTabs({ active, onChange, isAdmin }) {
@@ -2108,10 +1784,10 @@ function StockBadge({ quantity, lowStock }) {
   return <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${colorClass}`}>{label}</span>;
 }
 
-function ItemRow({ item, showCategory, onClick }) {
+function ItemRow({ item, onClick }) {
   const image = item.images?.find((i) => i.is_primary) || item.images?.[0];
   const dept = getDepartment(item.department);
-  const subtitle = [dept?.name, showCategory ? item.category?.name : null].filter(Boolean).join(" · ");
+  const subtitle = dept?.name || "";
   const low = isLowStock(item);
   return (
     <button
@@ -2231,7 +1907,6 @@ function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRes
 
             <dl className="mt-4 space-y-3 text-sm">
               <DetailRow label="SKU" value={item.sku || "—"} />
-              <DetailRow label="Category" value={item.category?.name || "Uncategorized"} />
               {parentName && <DetailRow label="Subitem of" value={parentName} />}
               {isAdmin && (
                 <>
@@ -2325,74 +2000,20 @@ function ItemRowWithSubitems({ item, expanded, onToggle, onSelect }) {
   );
 }
 
-function CategoryItemsPage({ group, catKey, loading, go }) {
-  const [search, setSearch] = useState("");
-  const [collapsed, setCollapsed] = useState(() => new Set());
-
-  const toggleCollapsed = (id) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
-
-  const q = search.trim().toLowerCase();
-  const shown = group ? group.items.filter((p) => p.name.toLowerCase().includes(q)) : [];
-  const title = group ? group.name : catKey === UNCATEGORIZED ? "Uncategorized" : "Category";
-  const count = group ? group.items.length : 0;
-  const goToItem = (id) => go({ view: "items", cat: catKey, item: String(id) });
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <SubHeader
-        title={title}
-        subtitle={group ? `${count} ${count === 1 ? "item" : "items"}` : undefined}
-        onBack={() => go({ view: "items" })}
-      />
-      <main className="p-4 sm:p-6 max-w-4xl space-y-4">
-        {loading ? (
-          <p className="text-gray-400 text-center py-16">Loading...</p>
-        ) : !group ? (
-          <p className="text-gray-400 text-center py-16">No items in this category.</p>
-        ) : (
-          <>
-            <SearchBox value={search} onChange={setSearch} placeholder="Search items in this category..." />
-            {shown.length === 0 ? (
-              <p className="text-gray-400 text-sm text-center py-8">No items match your search.</p>
-            ) : (
-              <div className="space-y-2">
-                {shown.map((item) => (
-                  <ItemRowWithSubitems
-                    key={item.id}
-                    item={item}
-                    expanded={!collapsed.has(item.id)}
-                    onToggle={() => toggleCollapsed(item.id)}
-                    onSelect={goToItem}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </main>
-    </div>
-  );
-}
-
-// ---------- Items page: categories (A-Z) -> items -> full item card ----------
-function ItemsPage({ isAdmin, catKey, itemId, go, refreshToken, onProductAdded }) {
+// ---------- Items page: flat A-Z item list (with subitems nested) -> full item card ----------
+function ItemsPage({ isAdmin, itemId, go, refreshToken, onProductAdded }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
+  const [collapsed, setCollapsed] = useState(() => new Set());
 
-    useEffect(() => {
+  useEffect(() => {
     let cancelled = false;
     const load = async () => {
       if (document.hidden) return;
       try {
-        const data = await getProducts(); // every department
+        const data = await getProducts(); // every department, top-level items with nested subitems
         if (cancelled) return;
         setProducts(data);
         setError(null);
@@ -2413,22 +2034,17 @@ function ItemsPage({ isAdmin, catKey, itemId, go, refreshToken, onProductAdded }
     };
   }, [refreshToken]);
 
-  // group items by category, then sort A-Z ("Uncategorized" always last)
-  const groupMap = {};
-  products.forEach((p) => {
-    const key = p.category ? String(p.category.id) : UNCATEGORIZED;
-    if (!groupMap[key]) groupMap[key] = { key, name: p.category ? p.category.name : "Uncategorized", items: [] };
-    groupMap[key].items.push(p);
-  });
-  const groups = Object.values(groupMap);
-  groups.forEach((g) => g.items.sort((a, b) => compareNames(a.name, b.name)));
-  groups.sort((a, b) =>
-    a.key === UNCATEGORIZED ? 1 : b.key === UNCATEGORIZED ? -1 : compareNames(a.name, b.name)
-  );
+  const toggleCollapsed = (id) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
 
-  // 3) full item card
-    if (itemId) {
-    const back = () => go(catKey ? { view: "items", cat: catKey } : { view: "items" });
+  // full item card
+  if (itemId) {
+    const back = () => go({ view: "items" });
     const item = findItemById(products, itemId);
     const parentName = item?.parent_id
       ? products.find((p) => p.id === item.parent_id)?.name
@@ -2442,24 +2058,10 @@ function ItemsPage({ isAdmin, catKey, itemId, go, refreshToken, onProductAdded }
     );
   }
 
-  // 2) items inside one category
-  if (catKey) {
-    return (
-      <CategoryItemsPage
-        group={groups.find((g) => g.key === catKey)}
-        catKey={catKey}
-        loading={loading}
-        go={go}
-      />
-    );
-  }
-
-  // 1) all categories, with search
+  // flat A-Z list of top-level items, each with its subitems nested underneath
   const q = search.trim().toLowerCase();
-  const shownGroups = q ? groups.filter((g) => g.name.toLowerCase().includes(q)) : groups;
-  const matchedItems = q
-    ? products.filter((p) => p.name.toLowerCase().includes(q)).sort((a, b) => compareNames(a.name, b.name))
-    : [];
+  const sortedProducts = [...products].sort((a, b) => compareNames(a.name, b.name));
+  const shownProducts = q ? sortedProducts.filter((p) => p.name.toLowerCase().includes(q)) : sortedProducts;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -2472,7 +2074,7 @@ function ItemsPage({ isAdmin, catKey, itemId, go, refreshToken, onProductAdded }
 
       <main className="p-4 sm:p-6 max-w-4xl">
         <div className="mb-5">
-          <SearchBox value={search} onChange={setSearch} placeholder="Search categories or items..." />
+          <SearchBox value={search} onChange={setSearch} placeholder="Search items..." />
         </div>
 
         {loading ? (
@@ -2481,55 +2083,19 @@ function ItemsPage({ isAdmin, catKey, itemId, go, refreshToken, onProductAdded }
           <p className="text-red-500 text-center py-16">{error}</p>
         ) : products.length === 0 ? (
           <p className="text-gray-400 text-center py-16">No items yet.</p>
-        ) : q && shownGroups.length === 0 && matchedItems.length === 0 ? (
+        ) : shownProducts.length === 0 ? (
           <p className="text-gray-400 text-center py-16">Nothing matches "{search.trim()}".</p>
         ) : (
-          <div className="space-y-8">
-            {shownGroups.length > 0 && (
-              <div>
-                <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
-                  Categories <span className="text-gray-400 font-normal">({shownGroups.length})</span>
-                </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {shownGroups.map((g) => (
-                    <button
-                      key={g.key}
-                      onClick={() => go({ view: "items", cat: g.key })}
-                      className="flex items-center gap-4 bg-white border border-gray-200 rounded-2xl p-4 text-left hover:shadow-md hover:border-gray-300 active:scale-[0.99] transition"
-                    >
-                      <div className="w-12 h-12 shrink-0 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                        <Tag size={20} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-900 truncate">{g.name}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {g.items.length} {g.items.length === 1 ? "item" : "items"}
-                        </p>
-                      </div>
-                      <ChevronRight size={18} className="text-gray-400 shrink-0" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {matchedItems.length > 0 && (
-              <div>
-                <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
-                  Items <span className="text-gray-400 font-normal">({matchedItems.length})</span>
-                </h2>
-                <div className="space-y-2">
-                  {matchedItems.map((item) => (
-                    <ItemRow
-                      key={item.id}
-                      item={item}
-                      showCategory
-                      onClick={() => go({ view: "items", item: String(item.id) })}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
+          <div className="space-y-2">
+            {shownProducts.map((item) => (
+              <ItemRowWithSubitems
+                key={item.id}
+                item={item}
+                expanded={!collapsed.has(item.id)}
+                onToggle={() => toggleCollapsed(item.id)}
+                onSelect={(id) => go({ view: "items", item: String(id) })}
+              />
+            ))}
           </div>
         )}
       </main>
@@ -3059,8 +2625,8 @@ function SearchSelect({
 }
 
 // Inline "create item" panel shown under the Item title
-function CreateItemPanel({ department, category, existingNames, onCreate, onCancel }) {
-  const [form, setForm] = useState({ name: "", sku: "", price: "" });
+function CreateItemPanel({ department, existingNames, parentOptions = [], onCreate, onCancel }) {
+  const [form, setForm] = useState({ name: "", sku: "", price: "", is_subitem: false, parent_id: "" });
   const [imageFiles, setImageFiles] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -3070,7 +2636,10 @@ function CreateItemPanel({ department, category, existingNames, onCreate, onCanc
     const name = form.name.trim();
     if (!name) return setError("Enter an item name");
     if (existingNames.includes(name.toLowerCase())) {
-      return setError("This item already exists in this category — select it from the list");
+      return setError("This item already exists in this department - select it from the list");
+    }
+    if (form.is_subitem && !form.parent_id) {
+      return setError('Select the parent item, or untick "Subitem of"');
     }
     setSaving(true);
     setError(null);
@@ -3083,7 +2652,7 @@ function CreateItemPanel({ department, category, existingNames, onCreate, onCanc
           quantity: 0, // stock is added through the bill so it is logged with a timestamp
           price: form.price || 0,
           department,
-          category_id: category,
+          parent_id: form.is_subitem ? form.parent_id : "",
         },
         imageFiles
       );
@@ -3095,7 +2664,7 @@ function CreateItemPanel({ department, category, existingNames, onCreate, onCanc
 
   return (
     <div className="mb-3 border border-blue-200 bg-blue-50/50 rounded-xl p-3 space-y-2">
-      <p className="text-xs font-medium text-blue-700">New item in this department & category</p>
+      <p className="text-xs font-medium text-blue-700">New item in this department</p>
       {error && <div className="bg-red-50 text-red-600 text-xs rounded-lg px-3 py-2">{error}</div>}
       <input
         autoFocus
@@ -3104,6 +2673,31 @@ function CreateItemPanel({ department, category, existingNames, onCreate, onCanc
         onChange={(e) => set("name", e.target.value)}
         className={inputCls}
       />
+      <div className="flex items-center gap-2">
+        <input
+          id="new_item_is_subitem"
+          type="checkbox"
+          checked={form.is_subitem}
+          onChange={(e) => {
+            set("is_subitem", e.target.checked);
+            if (!e.target.checked) set("parent_id", "");
+          }}
+          className="rounded border-gray-300"
+        />
+        <label htmlFor="new_item_is_subitem" className="text-sm text-gray-700 whitespace-nowrap">Subitem of</label>
+        <select
+          disabled={!form.is_subitem}
+          value={form.parent_id}
+          onChange={(e) => set("parent_id", e.target.value)}
+          className={`${inputCls} flex-1 min-w-0`}
+        >
+          <option value="">Select parent item...</option>
+          {parentOptions.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+
       <div className="grid grid-cols-2 gap-2">
         <input placeholder="SKU (optional)" value={form.sku} onChange={(e) => set("sku", e.target.value)} className={inputCls} />
         <input
@@ -3192,79 +2786,41 @@ function SubmitBillModal({ lines, onSubmit, onClose }) {
 // ---------- New bill form ----------
 function NewBillForm({ onBack, onSaved }) {
   const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
   const [department, setDepartment] = useState("");
-  const [categoryId, setCategoryId] = useState("");
   const [itemId, setItemId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [lines, setLines] = useState([]); // [{ product, quantity }]
   const [formError, setFormError] = useState(null);
 
-  const [creatingCategory, setCreatingCategory] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [savingCategory, setSavingCategory] = useState(false);
   const [showCreateItem, setShowCreateItem] = useState(false);
   const [showSubmit, setShowSubmit] = useState(false);
 
   useEffect(() => {
-    Promise.all([getProducts(), getCategories()])
-      .then(([p, c]) => { setProducts(p); setCategories(c); })
+    getProducts()
+      .then((data) => setProducts(data.flatMap((p) => [p, ...(p.subitems || [])])))
       .catch((err) => setLoadError(err.message))
       .finally(() => setLoading(false));
   }, []);
 
-  const sortedCategories = [...categories].sort((a, b) => compareNames(a.name, b.name));
-  const categoryItems = products
-    .filter((p) => p.department === department && String(p.category?.id) === categoryId)
+  const departmentItems = products
+    .filter((p) => p.department === department)
     .sort((a, b) => compareNames(a.name, b.name));
-  const selectedItem = categoryItems.find((p) => String(p.id) === itemId);
+  const selectedItem = departmentItems.find((p) => String(p.id) === itemId);
   const totalUnits = lines.reduce((sum, l) => sum + l.quantity, 0);
   const qtyNumber = Number(quantity);
   const qtyValid = Number.isInteger(qtyNumber) && qtyNumber > 0;
 
   const departmentOptions = DEPARTMENTS.map((d) => ({ value: d.slug, label: d.name }));
-  const categoryOptions = sortedCategories.map((c) => ({ value: String(c.id), label: c.name }));
-  const itemOptions = categoryItems.map((p) => ({ value: String(p.id), label: p.name, hint: `${p.quantity} in stock` }));
+  const itemOptions = departmentItems.map((p) => ({ value: String(p.id), label: p.name, hint: `${p.quantity} in stock` }));
 
   const handleDepartment = (slug) => {
     setDepartment(slug);
     setItemId("");
     setShowCreateItem(false);
     setFormError(null);
-  };
-
-  const handleCategory = (id) => {
-    setCategoryId(id);
-    setItemId("");
-    setShowCreateItem(false);
-    setFormError(null);
-  };
-
-  const handleCreateCategory = async () => {
-    const name = newCategoryName.trim();
-    if (!name) return;
-    const existing = categories.find((c) => c.name.toLowerCase() === name.toLowerCase());
-    if (existing) {
-      handleCategory(String(existing.id));
-      setNewCategoryName("");
-      setCreatingCategory(false);
-      return;
-    }
-    setSavingCategory(true);
-    try {
-      const created = await createCategory(name);
-      setCategories((prev) => [...prev, created]);
-      handleCategory(String(created.id));
-      setNewCategoryName("");
-      setCreatingCategory(false);
-    } catch (err) {
-      setFormError(err.message);
-    } finally {
-      setSavingCategory(false);
-    }
   };
 
   const handleCreateItem = async (values, imageFiles) => {
@@ -3335,67 +2891,14 @@ function NewBillForm({ onBack, onSaved }) {
                 />
               </div>
 
-              {/* Category */}
-              <div>
-                <FieldLabel
-                  action={
-                    !creatingCategory && (
-                      <FieldButton onClick={() => setCreatingCategory(true)}>New Category</FieldButton>
-                    )
-                  }
-                >
-                  Category
-                </FieldLabel>
-                {creatingCategory ? (
-                  <div className="border border-blue-200 bg-blue-50/50 rounded-xl p-3 space-y-2">
-                    <p className="text-xs font-medium text-blue-700">New category</p>
-                    <input
-                      autoFocus
-                      placeholder="Category name"
-                      value={newCategoryName}
-                      onChange={(e) => setNewCategoryName(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleCreateCategory())}
-                      className={inputCls}
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => { setCreatingCategory(false); setNewCategoryName(""); }}
-                        className="flex-1 border border-gray-300 bg-white rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleCreateCategory}
-                        disabled={savingCategory || !newCategoryName.trim()}
-                        className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-                      >
-                        {savingCategory ? "Creating..." : "Create category"}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <SearchSelect
-                    value={categoryId}
-                    onChange={handleCategory}
-                    options={categoryOptions}
-                    disabled={!department}
-                    placeholder={department ? "Search or select category" : "Select a department first"}
-                    searchPlaceholder="Search categories..."
-                    emptyText="No category found — use “New Category”"
-                  />
-                )}
-              </div>
-
               {/* Item */}
               <div>
                 <FieldLabel
                   action={
                     <FieldButton
                       onClick={() => setShowCreateItem((v) => !v)}
-                      disabled={!department || !categoryId}
-                      title={!categoryId ? "Select a department and category first" : undefined}
+                      disabled={!department}
+                      title={!department ? "Select a department first" : undefined}
                     >
                       Create Item
                     </FieldButton>
@@ -3404,11 +2907,11 @@ function NewBillForm({ onBack, onSaved }) {
                   Item
                 </FieldLabel>
 
-                {showCreateItem && department && categoryId && (
+                {showCreateItem && department && (
                   <CreateItemPanel
                     department={department}
-                    category={categoryId}
-                    existingNames={categoryItems.map((p) => p.name.toLowerCase())}
+                    existingNames={departmentItems.map((p) => p.name.toLowerCase())}
+                    parentOptions={departmentItems.filter((p) => !p.parent_id)}
                     onCreate={handleCreateItem}
                     onCancel={() => setShowCreateItem(false)}
                   />
@@ -3418,16 +2921,16 @@ function NewBillForm({ onBack, onSaved }) {
                   value={itemId}
                   onChange={setItemId}
                   options={itemOptions}
-                  disabled={!department || !categoryId}
+                  disabled={!department}
                   placeholder={
-                    !categoryId ? "Select a category first" : categoryItems.length ? "Search or select item" : "No items yet"
+                    !department ? "Select a department first" : departmentItems.length ? "Search or select item" : "No items yet"
                   }
                   searchPlaceholder="Search items..."
-                  emptyText={categoryItems.length ? "No item found" : "No items in this category yet"}
+                  emptyText={departmentItems.length ? "No item found" : "No items in this department yet"}
                 />
-                {department && categoryId && categoryItems.length === 0 && !showCreateItem && (
+                {department && departmentItems.length === 0 && !showCreateItem && (
                   <p className="text-xs text-gray-400 mt-1.5">
-                    Nothing in this category for {deptName} yet — use “Create Item” to add one.
+                    Nothing in {deptName} yet — use “Create Item” to add one.
                   </p>
                 )}
 
@@ -3506,9 +3009,7 @@ function NewBillForm({ onBack, onSaved }) {
                       <div key={l.product.id} className="flex items-center gap-3 border border-gray-200 rounded-lg p-3">
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-gray-900 truncate">{l.product.name}</p>
-                          <p className="text-xs text-gray-400 truncate">
-                            {[dept?.name, l.product.category?.name].filter(Boolean).join(" · ")}
-                          </p>
+                          <p className="text-xs text-gray-400 truncate">{dept?.name}</p>
                           <p className="text-xs text-gray-500 mt-0.5">
                             {l.product.quantity} → <span className="font-medium text-green-600">{l.product.quantity + l.quantity}</span>
                           </p>
@@ -3767,7 +3268,6 @@ function ReviewIssuedModal({ date, responsible, rows, warnings, error, submittin
 // ---------- Create issued list form ----------
 function NewIssuedForm({ onBack, onSaved }) {
   const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
@@ -3789,8 +3289,8 @@ function NewIssuedForm({ onBack, onSaved }) {
   const [showOthers, setShowOthers] = useState(false);
 
   useEffect(() => {
-    Promise.all([getProducts(), getCategories()])
-      .then(([p, c]) => { setProducts(p); setCategories(c); })
+    getProducts()
+      .then(setProducts)
       .catch((err) => setLoadError(err.message))
       .finally(() => setLoading(false));
   }, []);
@@ -3838,12 +3338,6 @@ function NewIssuedForm({ onBack, onSaved }) {
   const toggleTick = (r) => {
     setFormError(null);
     setTicked((prev) => (prev.includes(r.id) ? prev.filter((id) => id !== r.id) : [...prev, r.id]));
-  };
-
-  const handleCreateCategory = async (name) => {
-    const created = await createCategory(name);
-    setCategories((prev) => [...prev, created]);
-    return created;
   };
 
   // "+ Create Product" uses the same form as the main product screen
@@ -4066,9 +3560,7 @@ function NewIssuedForm({ onBack, onSaved }) {
                       <div key={l.product.id} className="flex items-center gap-3 border border-gray-200 rounded-lg p-3">
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-gray-900 truncate">{l.product.name}</p>
-                          <p className="text-xs text-gray-400 truncate">
-                            {[dept?.name, l.product.category?.name].filter(Boolean).join(" · ")}
-                          </p>
+                          <p className="text-xs text-gray-400 truncate">{dept?.name}</p>
                           <p className="text-xs text-gray-500 mt-0.5">
                             {l.product.quantity} → <span className="font-medium text-amber-600">{l.product.quantity - (l.quantity - cov)}</span>
                           </p>
@@ -4177,11 +3669,9 @@ function NewIssuedForm({ onBack, onSaved }) {
 
       {showProductForm && (
         <ProductForm
-          categories={categories}
           defaultDepartment={DEPARTMENTS[0].slug}
           onSubmit={handleCreateProduct}
           onClose={() => setShowProductForm(false)}
-          onCreateCategory={handleCreateCategory}
         />
       )}
 
@@ -4409,22 +3899,16 @@ function IssuedPage({ go, autoCreateToken }) {
 // ---------- Ctrl+N / Ctrl+B / Ctrl+I admin shortcuts, anywhere in the app ----------
 function GlobalAdminShortcuts({ isAdmin, defaultDepartment, onProductCreated, onNewBill, onNewIssued }) {
   const [open, setOpen] = useState(false);
-  const [categories, setCategories] = useState([]);
 
   useEffect(() => {
     if (!isAdmin) return;
-    const onKeyDown = async (e) => {
+    const onKeyDown = (e) => {
       if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
       const key = e.key.toLowerCase();
 
       if (key === "n") {
         e.preventDefault(); // stop the browser's own "new window"
-        try {
-          setCategories(await getCategories());
-          setOpen(true);
-        } catch (err) {
-          alert(err.message);
-        }
+        setOpen(true);
       } else if (key === "b") {
         e.preventDefault(); // stop Chrome's "toggle bookmarks bar"
         onNewBill();
@@ -4441,27 +3925,20 @@ function GlobalAdminShortcuts({ isAdmin, defaultDepartment, onProductCreated, on
 
   return (
     <ProductForm
-      categories={categories}
       defaultDepartment={defaultDepartment}
       onSubmit={async (values, imageFiles) => {
         await createProduct(values, imageFiles);
         onProductCreated?.();
       }}
       onClose={() => setOpen(false)}
-      onCreateCategory={async (name) => {
-        const created = await createCategory(name);
-        setCategories((prev) => [...prev, created]);
-        return created;
-      }}
     />
   );
 }
 
 // ---------- Picks home / items / a department, using the URL query ----------
 //   /?dept=i-lab                 -> department stock
-//   /?view=items                 -> all categories
-//   /?view=items&cat=3           -> items in category 3
-//   /?view=items&cat=3&item=12   -> full item card
+//   /?view=items                 -> flat item list (subitems nested)
+//   /?view=items&item=12         -> full item card
 function AppShell() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -4497,7 +3974,6 @@ function AppShell() {
     page = (
       <ItemsPage
         isAdmin={isAdmin}
-        catKey={searchParams.get("cat")}
         itemId={searchParams.get("item")}
         go={setSearchParams}
         refreshToken={refreshToken}

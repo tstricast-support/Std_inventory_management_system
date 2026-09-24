@@ -3,15 +3,6 @@ from sqlalchemy.orm import relationship
 from .database import Base
 from .departments import DEFAULT_DEPARTMENT
 
-class Category(Base):
-    __tablename__ = "categories"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(100), nullable=False, unique=True)
-    created_at = Column(TIMESTAMP, server_default=func.now())
-
-    products = relationship("Product", back_populates="category")
-
 class Account(Base):
     """Simple chart-of-accounts entry: a COGS, Income or Asset account (QuickBooks style)."""
     __tablename__ = "accounts"
@@ -44,7 +35,6 @@ class Product(Base):
     quantity = Column(Integer, nullable=False, default=0)
     price = Column(Numeric(10, 2), nullable=False, default=0)          # Sales Price
     cost = Column(Numeric(10, 2), nullable=False, default=0, server_default="0")  # Cost
-    category_id = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"))
     department = Column(String(50), nullable=False, default=DEFAULT_DEPARTMENT, server_default=DEFAULT_DEPARTMENT)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
@@ -61,7 +51,6 @@ class Product(Base):
     asset_account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True)
     preferred_vendor_id = Column(Integer, ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True)
 
-    category = relationship("Category", back_populates="products")
     images = relationship("ProductImage", back_populates="product", cascade="all, delete-orphan")
 
     cogs_account = relationship("Account", foreign_keys=[cogs_account_id])

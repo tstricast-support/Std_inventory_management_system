@@ -5,19 +5,6 @@ from typing import Optional, List
 from .departments import DEFAULT_DEPARTMENT
 
 
-# ---------- Category ----------
-class CategoryBase(BaseModel):
-    name: str
-
-class CategoryCreate(CategoryBase):
-    pass
-
-class CategoryOut(CategoryBase):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
-    created_at: datetime
-
-
 # ---------- Account (chart of accounts) ----------
 class AccountBase(BaseModel):
     name: str
@@ -66,7 +53,6 @@ class ProductBase(BaseModel):
     quantity: int = 0
     price: Decimal = Decimal("0")                      # Sales Price
     cost: Decimal = Decimal("0")                        # Cost
-    category_id: Optional[int] = None
     department: str = DEFAULT_DEPARTMENT
 
     item_type: str = "Inventory Part"
@@ -91,7 +77,6 @@ class ProductUpdate(BaseModel):
     quantity: Optional[int] = None
     price: Optional[Decimal] = None
     cost: Optional[Decimal] = None
-    category_id: Optional[int] = None
     department: Optional[str] = None
 
     item_type: Optional[str] = None
@@ -106,7 +91,7 @@ class ProductUpdate(BaseModel):
     preferred_vendor_id: Optional[int] = None
 
     @field_validator(
-        "category_id", "parent_id", "cogs_account_id", "income_account_id",
+        "parent_id", "cogs_account_id", "income_account_id",
         "asset_account_id", "preferred_vendor_id", mode="before",
     )
     @classmethod
@@ -131,7 +116,6 @@ class ProductOut(ProductBase):
     created_at: datetime
     updated_at: datetime
     images: List[ProductImageOut] = []
-    category: Optional[CategoryOut] = None
 
     cogs_account: Optional[AccountOut] = None
     income_account: Optional[AccountOut] = None
