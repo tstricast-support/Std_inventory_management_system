@@ -113,7 +113,11 @@ def update_product(product_id: int, payload: schemas.ProductUpdate, db: Session 
         if not parent:
             raise HTTPException(400, f"Parent item {payload.parent_id} does not exist")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if "sku" in data:
+        data["sku"] = (data["sku"] or "").strip() or None
+
+    for field, value in data.items():
         setattr(product, field, value)
 
     try:
