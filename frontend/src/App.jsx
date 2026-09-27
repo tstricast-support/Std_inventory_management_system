@@ -1590,8 +1590,6 @@ function InventoryView({ isAdmin, department, onBack }) {
         parentName={parentName}
         onBack={() => setItemId(null)}
         isAdmin={isAdmin}
-        onEdit={isAdmin ? (p) => { setEditingProduct(p); setShowForm(true); } : undefined}
-        onDelete={isAdmin ? handleDelete : undefined}
         onRestock={isAdmin ? (p) => setRestockingProduct(p) : undefined}
         onRequest={!isAdmin ? (p) => setRequestingProduct(p) : undefined}
       />
@@ -2267,7 +2265,8 @@ function ItemsPage({ isAdmin, itemId, go, refreshToken, onProductAdded }) {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [expandedIds, setExpandedIds] = useState(() => new Set());
-
+  const [restockingProduct, setRestockingProduct] = useState(null);
+  
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -2302,14 +2301,37 @@ function ItemsPage({ isAdmin, itemId, go, refreshToken, onProductAdded }) {
     });
   };
 
-  // full item card
+  const handleRestock = async (id, quantity, note) => {
+    await restockProduct(id, quantity, note);
+    setProducts(await getProducts());
+  };
+
   if (itemId) {
     const back = () => go({ view: "items" });
     const item = findItemById(products, itemId);
     const parentName = item?.parent_id
       ? findItemById(products, item.parent_id)?.name
       : null;
-    if (item) return <ItemDetail item={item} parentName={parentName} onBack={back} isAdmin={isAdmin} />;
+    if (item) {
+      return (
+        <>
+          <ItemDetail
+            item={item}
+            parentName={parentName}
+            onBack={back}
+            isAdmin={isAdmin}
+            onRestock={isAdmin ? (p) => setRestockingProduct(p) : undefined}
+          />
+          {restockingProduct && (
+            <RestockModal
+              product={restockingProduct}
+              onSubmit={handleRestock}
+              onClose={() => setRestockingProduct(null)}
+            />
+          )}
+        </>
+      );
+    }
     return (
       <div className="min-h-screen bg-gray-50">
         <SubHeader title="Item details" onBack={back} />
@@ -2637,6 +2659,9 @@ function DepartmentHome({ isAdmin, onSelect, onSelectItem, onSelectAccount, onTa
   const [vendors, setVendors] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [search, setSearch] = useState("");
+  const [restockingProduct, setRestockingProduct] = useState(null);
+  const longPressTimer = useRef(null);
+  const longPressTriggered = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -2670,8 +2695,41 @@ function DepartmentHome({ isAdmin, onSelect, onSelectItem, onSelectAccount, onTa
     return () => { cancelled = true; clearInterval(interval); };
   }, [isAdmin, refreshToken]);
 
+  
+  const startLongPress = (item) => {
+    if (!isAdmin) return;
+    longPressTriggered.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      setRestockingProduct(item);
+    }, 550);
+  };
+  const cancelLongPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+  const handleItemResultClick = (item) => {
+    if (longPressTriggered.current) {
+      longPressTriggered.current = false;
+      return;
+    }
+    onSelectItem(item.id);
+  };
+  const handleRestock = async (id, quantity, note) => {
+    await restockProduct(id, quantity, note);
+    setProducts(await getProducts());
+  };
+
   const q = search.trim().toLowerCase();
-  const matchedItems = q ? flattenParents(products).filter((p) => p.name.toLowerCase().includes(q)).sort((a, b) => compareNames(a.name, b.name)) : [];
+  const matchedItems = q
+    ? flattenParents(products)
+        .filter((p) => !(p.subitems?.length > 0)) // parents/parent-subitems can't be opened - only leaf items show up
+        .filter((p) => p.name.toLowerCase().includes(q))
+        .sort((a, b) => compareNames(a.name, b.name))
+    : [];
+
   const matchedVendors = q ? vendors.filter((v) => v.name.toLowerCase().includes(q)).sort((a, b) => compareNames(a.name, b.name)) : [];
   const matchedAccounts = q ? accounts.filter((a) => a.name.toLowerCase().includes(q)).sort((a, b) => compareNames(a.name, b.name)) : [];
 
@@ -2696,12 +2754,20 @@ function DepartmentHome({ isAdmin, onSelect, onSelectItem, onSelectAccount, onTa
               <>
                 {matchedItems.length > 0 && (
                   <div>
-                    <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">Items</h2>
+                    <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                      Items {isAdmin && <span className="text-gray-400 font-normal normal-case">· hold an item to add stock</span>}
+                    </h2>
                     <div className="space-y-2">
                       {matchedItems.map((p) => (
                         <button
                           key={`item-${p.id}`}
-                          onClick={() => onSelectItem(p.id)}
+                          onClick={() => handleItemResultClick(p)}
+                          onPointerDown={() => startLongPress(p)}
+                          onPointerUp={cancelLongPress}
+                          onPointerLeave={cancelLongPress}
+                          onPointerCancel={cancelLongPress}
+                          onContextMenu={(e) => e.preventDefault()}
+                          style={{ touchAction: "manipulation", WebkitUserSelect: "none", userSelect: "none" }}
                           className="w-full flex items-center justify-between gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:shadow-md hover:border-gray-300 transition"
                         >
                           <div className="min-w-0">
@@ -2804,8 +2870,16 @@ function DepartmentHome({ isAdmin, onSelect, onSelectItem, onSelectAccount, onTa
               })}
             </div>
           </>
-        )}
+                )}
       </main>
+
+      {restockingProduct && (
+        <RestockModal
+          product={restockingProduct}
+          onSubmit={handleRestock}
+          onClose={() => setRestockingProduct(null)}
+        />
+      )}
     </div>
   );
 }
