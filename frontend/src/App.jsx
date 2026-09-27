@@ -1696,6 +1696,9 @@ function InventoryView({ isAdmin, department, onBack }) {
             <>
               <div className="mb-5">
                 <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search items..." />
+                {isAdmin && (
+                  <p className="text-xs text-gray-400 mt-1.5">Hold an item to add stock</p>
+                )}
               </div>
               {products.length === 0 ? (
                 <p className="text-gray-400 text-center py-16">No products yet.</p>
@@ -1710,6 +1713,8 @@ function InventoryView({ isAdmin, department, onBack }) {
                       expanded={expandedIds.has(item.id)}
                       onToggle={() => toggleExpanded(item.id)}
                       onSelect={setItemId}
+                      isAdmin={isAdmin}
+                      onLongPress={(p) => setRestockingProduct(p)}
                     />
                   ))}
                 </div>
