@@ -33,6 +33,32 @@ def create_account(payload: schemas.AccountCreate, db: Session = Depends(get_db)
     db.refresh(account)
     return account
 
+@router.put("/{account_id}", response_model=schemas.AccountOut)
+def update_account(account_id: int, payload: schemas.AccountUpdate, db: Session = Depends(get_db)):
+    account = db.query(models.Account).get(account_id)
+    if not account:
+        raise HTTPException(404, "Account not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    if "account_type" in data and data["account_type"] not in VALID_TYPES:
+        raise HTTPException(400, f"account_type must be one of {sorted(VALID_TYPES)}")
+
+    new_name = data.get("name", account.name)
+    new_type = data.get("account_type", account.account_type)
+    existing = db.query(models.Account).filter(
+        models.Account.name == new_name,
+        models.Account.account_type == new_type,
+        models.Account.id != account_id,
+    ).first()
+    if existing:
+        raise HTTPException(400, "Account already exists")
+
+    for field, value in data.items():
+        setattr(account, field, value)
+    db.commit()
+    db.refresh(account)
+    return account
+
 # An account's total value = sum of (stock quantity x rate) over the items linked to it:
 #   COGS / Asset accounts -> rate = item cost
 #   Income accounts       -> rate = item sales price

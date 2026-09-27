@@ -90,6 +90,19 @@ async function createAccount(payload) {
   return res.json();
 }
 
+async function updateAccount(id, payload) {
+  const res = await fetch(`${BASE_URL}/accounts/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to update account");
+  }
+  return res.json();
+}
+
 async function deleteAccount(id) {
   const res = await fetch(`${BASE_URL}/accounts/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete account");
@@ -2512,7 +2525,7 @@ function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdde
 
       <main className="p-4 sm:p-6 max-w-4xl">
         <div className="mb-5">
-          <SearchBox value={search} onChange={setSearch} placeholder="Search items..." />
+          <SearchBox value={search} onChange={setSearch} placeholder="Search items, vendors, accounts..." />
         </div>
 
         {loading ? (
@@ -2653,12 +2666,17 @@ function ManagePage({ go, refreshToken, onProductAdded }) {
   const [editingVendor, setEditingVendor] = useState(null);
   const [showVendorForm, setShowVendorForm] = useState(false);
   const [deleteVendorTarget, setDeleteVendorTarget] = useState(null);
+  const [accounts, setAccounts] = useState([]);
+  const [editingAccount, setEditingAccount] = useState(null);
+  const [showAccountForm, setShowAccountForm] = useState(false);
+  const [deleteAccountTarget, setDeleteAccountTarget] = useState(null);
 
-    const load = async () => {
+  const load = async () => {
     try {
-      const [productList, vendorList] = await Promise.all([getProducts(), getVendors()]);
+      const [productList, vendorList, accountList] = await Promise.all([getProducts(), getVendors(), getAccounts()]);
       setProducts(productList);
       setVendors(vendorList);
+      setAccounts(accountList);
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -2707,9 +2725,30 @@ function ManagePage({ go, refreshToken, onProductAdded }) {
     }
   };
 
-  const q = search.trim().toLowerCase();
-  const sortedProducts = [...products].sort((a, b) => compareNames(a.name, b.name));
-  const shownProducts = q ? sortedProducts.filter((p) => p.name.toLowerCase().includes(q)) : sortedProducts;
+  const handleUpdateAccount = async (id, payload) => {
+    await updateAccount(id, payload);
+    await load();
+  };
+
+  const handleDeleteAccount = async () => {
+    try {
+      await deleteAccount(deleteAccountTarget.id);
+      setDeleteAccountTarget(null);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+const q = search.trim().toLowerCase();
+const sortedProducts = [...products].sort((a, b) => compareNames(a.name, b.name));
+const shownProducts = q ? sortedProducts.filter((p) => p.name.toLowerCase().includes(q)) : sortedProducts;
+
+const sortedVendors = [...vendors].sort((a, b) => compareNames(a.name, b.name));
+const shownVendors = q ? sortedVendors.filter((v) => v.name.toLowerCase().includes(q)) : sortedVendors;
+
+const sortedAccounts = [...accounts].sort((a, b) => compareNames(a.name, b.name));
+const shownAccounts = q ? sortedAccounts.filter((a) => a.name.toLowerCase().includes(q)) : sortedAccounts;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -2717,7 +2756,7 @@ function ManagePage({ go, refreshToken, onProductAdded }) {
 
       <main className="p-4 sm:p-6 max-w-4xl">
         <div className="mb-5">
-          <SearchBox value={search} onChange={setSearch} placeholder="Search items..." />
+          <SearchBox value={search} onChange={setSearch} placeholder="Search Items / Vendors / Acc..." />
         </div>
 
         {loading ? (
@@ -2754,14 +2793,14 @@ function ManagePage({ go, refreshToken, onProductAdded }) {
                 </div>
               );
             })}
-                    </div>
+          </div>
         )}
 
-        {vendors.length > 0 && (
+        {shownVendors.length > 0 && (
           <div className="mt-8">
             <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">Vendors</h2>
             <div className="space-y-2">
-              {[...vendors].sort((a, b) => compareNames(a.name, b.name)).map((v) => (
+              {shownVendors.map((v) => (
                 <div key={v.id} className="w-full flex items-center gap-3 border rounded-xl p-3 bg-white border-gray-200">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-gray-900 truncate">{v.name}</p>
@@ -2772,6 +2811,26 @@ function ManagePage({ go, refreshToken, onProductAdded }) {
                   <ItemActionsMenu
                     onEdit={() => { setEditingVendor(v); setShowVendorForm(true); }}
                     onDelete={() => setDeleteVendorTarget(v)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {shownAccounts.length > 0 && (
+          <div className="mt-8">
+            <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">Accounts</h2>
+            <div className="space-y-2">
+              {shownAccounts.map((a) => (
+                <div key={a.id} className="w-full flex items-center gap-3 border rounded-xl p-3 bg-white border-gray-200">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-900 truncate">{a.name}</p>
+                    <p className="text-xs text-gray-400 truncate">{ACCOUNT_TYPE_NAMES[a.account_type] || a.account_type}</p>
+                  </div>
+                  <ItemActionsMenu
+                    onEdit={() => { setEditingAccount(a); setShowAccountForm(true); }}
+                    onDelete={() => setDeleteAccountTarget(a)}
                   />
                 </div>
               ))}
@@ -2801,6 +2860,22 @@ function ManagePage({ go, refreshToken, onProductAdded }) {
           label={deleteVendorTarget.name}
           onCancel={() => setDeleteVendorTarget(null)}
           onConfirm={handleDeleteVendor}
+        />
+      )}
+
+      {showAccountForm && (
+        <AccountForm
+          initialData={editingAccount}
+          onSubmit={handleUpdateAccount}
+          onClose={() => { setShowAccountForm(false); setEditingAccount(null); }}
+        />
+      )}
+
+      {deleteAccountTarget && (
+        <TypedDeleteConfirm
+          label={deleteAccountTarget.name}
+          onCancel={() => setDeleteAccountTarget(null)}
+          onConfirm={handleDeleteAccount}
         />
       )}
     </div>
@@ -3100,6 +3175,7 @@ function AccountDetail({ accountId, go, fromParam }) {
   const [error, setError] = useState(null);
   const back = () => navigateFrom(fromParam, go, { view: "accounting" });
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -3175,12 +3251,20 @@ function AccountDetail({ accountId, go, fromParam }) {
               )}
             </div>
 
+            <div className="flex gap-2">
+            <button
+              onClick={() => setShowEditForm(true)}
+              className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50"
+            >
+              <Pencil size={16} /> Edit account
+            </button>
             <button
               onClick={() => setShowDeleteConfirm(true)}
               className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-50"
             >
               <Trash2 size={16} /> Delete account
             </button>
+          </div>
           </>
         )}
       </main>
@@ -3190,6 +3274,17 @@ function AccountDetail({ accountId, go, fromParam }) {
           label={data.name}
           onCancel={() => setShowDeleteConfirm(false)}
           onConfirm={() => { setShowDeleteConfirm(false); handleDelete(); }}
+        />
+      )}
+      {showEditForm && (
+        <AccountForm
+          initialData={data}
+          onClose={() => setShowEditForm(false)}
+          onSubmit={async (id, payload) => {
+            await updateAccount(id, payload);
+            const refreshed = await getAccountDetail(accountId);
+            setData(refreshed);
+          }}
         />
       )}
     </div>
@@ -3280,8 +3375,12 @@ function AccountingPage({ isAdmin, go }) {
   );
 }
 
-function AccountForm({ onClose, onSubmit }) {
-  const [form, setForm] = useState({ name: "", account_type: "cogs" });
+function AccountForm({ initialData, onClose, onSubmit }) {
+  const isEditMode = Boolean(initialData);
+  const [form, setForm] = useState({
+    name: initialData?.name || "",
+    account_type: initialData?.account_type || "cogs",
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const handleChange = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
@@ -3291,7 +3390,11 @@ function AccountForm({ onClose, onSubmit }) {
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(form);
+      if (isEditMode) {
+        await onSubmit(initialData.id, form);
+      } else {
+        await onSubmit(form);
+      }
       onClose();
     } catch (err) {
       setError(err.message);
@@ -3303,7 +3406,7 @@ function AccountForm({ onClose, onSubmit }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-        <h2 className="text-lg font-semibold mb-4">Add Account</h2>
+        <h2 className="text-lg font-semibold mb-4">{isEditMode ? "Edit Account" : "Add Account"}</h2>
         {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-3">
           <input required placeholder="Account name" value={form.name} onChange={(e) => handleChange("name", e.target.value)}

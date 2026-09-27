@@ -13,6 +13,10 @@ class AccountBase(BaseModel):
 class AccountCreate(AccountBase):
     pass
 
+class AccountUpdate(BaseModel):
+    name: Optional[str] = None
+    account_type: Optional[str] = None
+
 class AccountOut(AccountBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
