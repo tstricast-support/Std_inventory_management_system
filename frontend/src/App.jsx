@@ -1111,6 +1111,14 @@ function AccountSelect({ accounts, accountType, value, onChange, placeholder, on
   );
 }
 
+// Restores whatever page a search result was opened from, instead of always landing
+// on a hardcoded page. `from` is the origin's full query string (or "home" for none).
+function navigateFrom(fromParam, go, fallback) {
+  if (!fromParam) return go(fallback);
+  if (fromParam === "home") return go({});
+  go(Object.fromEntries(new URLSearchParams(fromParam)));
+}
+
 // Flattens the item tree so ANY item - top-level or a subitem at any depth - can be picked as a
 // parent. Labels show the path ("GREEN iii › DRY PAPER"). When editing, the item itself and
 // everything inside it are left out (an item can't be placed inside its own subitems).
@@ -1126,6 +1134,21 @@ function flattenParents(items, excludeId = null, trail = []) {
     });
   return out;
 }
+
+// Used by the tree-based search boxes (Items page, department page): keeps a parent/parent-subitem
+// as scaffolding only if it or something inside it matches; a parent name match reveals everything
+// nested inside it, since only leaf items are ever actually selectable.
+function filterItemTree(items, q) {
+  const filterNode = (item) => {
+    const hasKids = item.subitems?.length > 0;
+    if (!hasKids) return item.name.toLowerCase().includes(q) ? item : null;
+    if (item.name.toLowerCase().includes(q)) return item;
+    const kept = item.subitems.map(filterNode).filter(Boolean);
+    return kept.length > 0 ? { ...item, subitems: kept } : null;
+  };
+  return items.map(filterNode).filter(Boolean);
+}
+
 
 // ---------- ProductForm ----------
 // What "+ Add Product" opens: first a question (Create Item / Create Subitem), then the form.
@@ -1755,11 +1778,12 @@ const AddProductButton = forwardRef(function AddProductButton({ onCreated, hideT
 function LowStockBell() {
   const [items, setItems] = useState([]);
   const [open, setOpen] = useState(false);
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      if (document.hidden) return;
       try {
         const products = await getProducts(); // every department, top-level items with nested subitems
         const flat = [];
@@ -1775,14 +1799,18 @@ function LowStockBell() {
     };
     load();
     const interval = setInterval(load, 15000);
-    return () => { cancelled = true; clearInterval(interval); };
+    const onVisible = () => { if (!document.hidden) load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   const goToItem = (item) => {
     setOpen(false);
-    // ItemsPage resolves an item by id alone (searching nested subitems too),
-    // so "cat" isn't needed here - this works for any item in any department.
-    setSearchParams({ view: "items", item: String(item.id) });
+    setSearchParams({ view: "items", item: String(item.id), from: searchParams.toString() || "home" });
   };
 
   return (
@@ -1840,30 +1868,28 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
   const [vendors, setVendors] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [restockingProduct, setRestockingProduct] = useState(null);
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const addProductRef = useRef(null);
   const longPressTimer = useRef(null);
   const longPressTriggered = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [p, v, a] = await Promise.all([
-          getProducts(),
-          isAdmin ? getVendors() : Promise.resolve([]),
-          isAdmin ? getAccounts() : Promise.resolve([]),
-        ]);
-        if (cancelled) return;
-        setProducts(p);
-        setVendors(v);
-        setAccounts(a);
-      } catch {
-        // search is best-effort - the page still works fine without it
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isAdmin]);
+  const [searchDataLoaded, setSearchDataLoaded] = useState(false);
+  const loadSearchData = async () => {
+    if (searchDataLoaded) return; // only ever fetched once, and only if the search is actually used
+    setSearchDataLoaded(true);
+    try {
+      const [p, v, a] = await Promise.all([
+        getProducts(),
+        isAdmin ? getVendors() : Promise.resolve([]),
+        isAdmin ? getAccounts() : Promise.resolve([]),
+      ]);
+      setProducts(p);
+      setVendors(v);
+      setAccounts(a);
+    } catch {
+      setSearchDataLoaded(false); // let it retry next time the search is opened
+    }
+  };
 
   const q = query.trim().toLowerCase();
   const matchedItems = q
@@ -1888,13 +1914,14 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
     if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
   };
   const closeSearch = () => { setQuery(""); setSearchOpen(false); };
+    const currentAsFrom = () => searchParams.toString() || "home";
   const handleItemClick = (item) => {
     if (longPressTriggered.current) { longPressTriggered.current = false; return; }
     closeSearch();
-    setSearchParams({ view: "items", item: String(item.id) });
+    setSearchParams({ view: "items", item: String(item.id), from: currentAsFrom() });
   };
   const handleVendorClick = () => { closeSearch(); setSearchParams({ view: "vendors" }); };
-  const handleAccountClick = (a) => { closeSearch(); setSearchParams({ view: "accounting", account: String(a.id) }); };
+  const handleAccountClick = (a) => { closeSearch(); setSearchParams({ view: "accounting", account: String(a.id), from: currentAsFrom() }); };
   const handleRestock = async (id, quantity, note) => {
     await restockProduct(id, quantity, note);
     setProducts(await getProducts());
@@ -1985,11 +2012,11 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
 
         <div className="flex items-center gap-2 shrink-0 relative">
           <div className="relative hidden md:block w-56 lg:w-72">
-            <SearchBox value={query} onChange={setQuery} placeholder="Search items, vendors, accounts..." />
+            <SearchBox value={query} onChange={setQuery} placeholder="Search items, vendors, accounts..." onFocus={loadSearchData} />
             {resultsPanel}
           </div>
           <button
-            onClick={() => setSearchOpen((v) => !v)}
+            onClick={() => { setSearchOpen((v) => !v); loadSearchData(); }}
             aria-label="Search"
             className="md:hidden p-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
           >
@@ -2027,7 +2054,7 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
 
       {searchOpen && (
         <div className="md:hidden relative mt-3">
-          <SearchBox value={query} onChange={setQuery} placeholder="Search items, vendors, accounts..." />
+          <SearchBox value={query} onChange={setQuery} placeholder="Search items, vendors, accounts..." onFocus={loadSearchData} />
           {resultsPanel}
         </div>
       )}
@@ -2083,7 +2110,7 @@ function HomeTabs({ active, onChange, isAdmin }) {
   );
 }
 
-function SearchBox({ value, onChange, placeholder }) {
+function SearchBox({ value, onChange, placeholder, onFocus }) {
   return (
     <div className="relative">
       <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -2091,6 +2118,7 @@ function SearchBox({ value, onChange, placeholder }) {
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={onFocus}
         placeholder={placeholder}
         className="w-full border border-gray-300 rounded-lg pl-9 pr-4 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
       />
@@ -2350,16 +2378,17 @@ function SubitemRow({ item, onClick, expanded, onToggle }) {
   );
 }
 
-function SubitemBranch({ item, onSelect }) {
+function SubitemBranch({ item, onSelect, forceOpen }) {
   const [open, setOpen] = useState(false);
   const kids = [...(item.subitems || [])].sort((a, b) => compareNames(a.name, b.name));
+  const isOpen = forceOpen || open;
   return (
     <div className="space-y-1.5">
-      <SubitemRow item={item} onClick={() => onSelect(item.id)} expanded={open} onToggle={() => setOpen((o) => !o)} />
-      {kids.length > 0 && open && (
+      <SubitemRow item={item} onClick={() => onSelect(item.id)} expanded={isOpen} onToggle={() => setOpen((o) => !o)} />
+      {kids.length > 0 && isOpen && (
         <div className="ml-6 space-y-1.5">
           {kids.map((k) => (
-            <SubitemBranch key={k.id} item={k} onSelect={onSelect} />
+            <SubitemBranch key={k.id} item={k} onSelect={onSelect} forceOpen={forceOpen} />
           ))}
         </div>
       )}
@@ -2367,17 +2396,18 @@ function SubitemBranch({ item, onSelect }) {
   );
 }
 
-function ItemRowWithSubitems({ item, expanded, onToggle, onSelect }) {
+function ItemRowWithSubitems({ item, expanded, onToggle, onSelect, forceOpen }) {
   const subitems = item.subitems || [];
   const sorted = [...subitems].sort((a, b) => compareNames(a.name, b.name));
+  const isOpen = forceOpen || expanded;
 
   return (
     <div className="space-y-1.5">
-      <ItemRow item={item} onClick={() => onSelect(item.id)} expanded={expanded} onToggle={onToggle} />
-      {sorted.length > 0 && expanded && (
+      <ItemRow item={item} onClick={() => onSelect(item.id)} expanded={isOpen} onToggle={onToggle} />
+      {sorted.length > 0 && isOpen && (
         <div className="ml-6 space-y-1.5">
           {sorted.map((sub) => (
-            <SubitemBranch key={sub.id} item={sub} onSelect={onSelect} />
+            <SubitemBranch key={sub.id} item={sub} onSelect={onSelect} forceOpen={forceOpen} />
           ))}
         </div>
       )}
@@ -2386,7 +2416,7 @@ function ItemRowWithSubitems({ item, expanded, onToggle, onSelect }) {
 }
 
 // ---------- Items page: flat A-Z item list (with subitems nested) -> full item card ----------
-function ItemsPage({ isAdmin, itemId, go, refreshToken, onProductAdded }) {
+function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdded }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -2434,7 +2464,7 @@ function ItemsPage({ isAdmin, itemId, go, refreshToken, onProductAdded }) {
   };
 
   if (itemId) {
-    const back = () => go({ view: "items" });
+    const back = () => navigateFrom(fromParam, go, { view: "items" });
     const item = findItemById(products, itemId);
     const parentName = item?.parent_id
       ? findItemById(products, item.parent_id)?.name
@@ -2470,8 +2500,7 @@ function ItemsPage({ isAdmin, itemId, go, refreshToken, onProductAdded }) {
   // flat A-Z list of top-level items, each with its subitems nested underneath
   const q = search.trim().toLowerCase();
   const sortedProducts = [...products].sort((a, b) => compareNames(a.name, b.name));
-  const shownProducts = q ? sortedProducts.filter((p) => p.name.toLowerCase().includes(q)) : sortedProducts;
-
+  const shownProducts = q ? filterItemTree(sortedProducts, q) : sortedProducts;
   return (
     <div className="min-h-screen bg-gray-50">
       <AppHeader
@@ -2503,6 +2532,7 @@ function ItemsPage({ isAdmin, itemId, go, refreshToken, onProductAdded }) {
                 expanded={expandedIds.has(item.id)}
                 onToggle={() => toggleExpanded(item.id)}
                 onSelect={(id) => go({ view: "items", item: String(id) })}
+                forceOpen={Boolean(q)}
               />
             ))}
           </div>
@@ -2786,6 +2816,7 @@ function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      if (document.hidden) return;
       try {
         const [products, pending] = await Promise.all([
           getProducts(),
@@ -2807,7 +2838,13 @@ function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded
     };
     load();
     const interval = setInterval(load, 10000);
-    return () => { cancelled = true; clearInterval(interval); };
+    const onVisible = () => { if (!document.hidden) load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [isAdmin, refreshToken]);
 
   return (
@@ -3057,11 +3094,11 @@ function TypedDeleteConfirm({ label, onConfirm, onCancel }) {
 }
 // ---------- Account detail: total value + the items behind it ----------
 //   /?view=accounting&account=3
-function AccountDetail({ accountId, go }) {
+function AccountDetail({ accountId, go, fromParam }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const back = () => go({ view: "accounting" });
+  const back = () => navigateFrom(fromParam, go, { view: "accounting" });
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
@@ -3624,8 +3661,9 @@ function NewBillForm({ onBack, onSaved }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const departmentItems = products
-    .filter((p) => p.department === department)
+  const allDeptItems = flattenParents(products.filter((p) => p.department === department));
+  const departmentItems = allDeptItems
+    .filter((p) => !(p.subitems?.length > 0)) // only real, leaf-level items can be billed - categories can't
     .sort((a, b) => compareNames(a.name, b.name));
   const selectedItem = departmentItems.find((p) => String(p.id) === itemId);
   const totalUnits = lines.reduce((sum, l) => sum + l.quantity, 0);
@@ -3633,8 +3671,7 @@ function NewBillForm({ onBack, onSaved }) {
   const qtyValid = Number.isInteger(qtyNumber) && qtyNumber > 0;
 
   const departmentOptions = DEPARTMENTS.map((d) => ({ value: d.slug, label: d.name }));
-  const itemOptions = departmentItems.map((p) => ({ value: String(p.id), label: p.name, hint: `${p.quantity} in stock` }));
-
+  const itemOptions = departmentItems.map((p) => ({ value: String(p.id), label: p.label, hint: `${p.quantity} in stock` }));
   const handleDepartment = (slug) => {
     setDepartment(slug);
     setItemId("");
@@ -3729,8 +3766,8 @@ function NewBillForm({ onBack, onSaved }) {
                 {showCreateItem && department && (
                   <CreateItemPanel
                     department={department}
-                    existingNames={departmentItems.map((p) => p.name.toLowerCase())}
-                    parentOptions={departmentItems.filter((p) => !p.parent_id)}
+                    existingNames={allDeptItems.map((p) => p.name.toLowerCase())}
+                    parentOptions={allDeptItems.filter((p) => !p.parent_id)}
                     onCreate={handleCreateItem}
                     onCancel={() => setShowCreateItem(false)}
                   />
@@ -4130,12 +4167,13 @@ function NewIssuedForm({ onBack, onSaved }) {
   });
   const covered = (productId) => coveredByProduct[productId] || 0;
 
-  const sortedProducts = [...products].sort((a, b) => compareNames(a.name, b.name));
+  const leafProducts = flattenParents(products).filter((p) => !(p.subitems?.length > 0));
+  const sortedProducts = [...leafProducts].sort((a, b) => compareNames(a.name, b.name));
   const itemOptions = sortedProducts.map((p) => {
-    const deptName = getDepartment(p.department)?.name || p.department;
-    return { value: String(p.id), label: p.name, hint: `${deptName} · ${p.quantity} in stock`, search: `${p.name} ${deptName}` };
+  const deptName = getDepartment(p.department)?.name || p.department;
+    return { value: String(p.id), label: p.label, hint: `${deptName} · ${p.quantity} in stock`, search: `${p.label} ${deptName}` };
   });
-  const selectedItem = products.find((p) => String(p.id) === itemId);
+  const selectedItem = leafProducts.find((p) => String(p.id) === itemId);
   const alreadyInList = lines.find((l) => l.product.id === selectedItem?.id)?.quantity || 0;
   const pendingDeduct = selectedItem ? Math.max(0, alreadyInList - covered(selectedItem.id)) : 0;
   const availableStock = selectedItem ? selectedItem.quantity - pendingDeduct : 0;
@@ -4533,8 +4571,13 @@ function IssuedPage({ go, autoCreateToken }) {
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 10000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => { if (!document.hidden) load(); }, 10000);
+    const onVisible = () => { if (!document.hidden) load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   useEffect(() => {
@@ -4785,7 +4828,7 @@ function AppShell() {
     page = <IssuedPage go={setSearchParams} autoCreateToken={quickIssuedToken} />;
   } else if (searchParams.get("view") === "accounting" && isAdmin) {
     page = searchParams.get("account")
-      ? <AccountDetail accountId={searchParams.get("account")} go={setSearchParams} />
+      ? <AccountDetail accountId={searchParams.get("account")} go={setSearchParams} fromParam={searchParams.get("from")} />
       : <AccountingPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "vendors" && isAdmin) {
     page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
@@ -4802,6 +4845,7 @@ function AppShell() {
       <ItemsPage
         isAdmin={isAdmin}
         itemId={searchParams.get("item")}
+        fromParam={searchParams.get("from")}
         go={setSearchParams}
         refreshToken={refreshToken}
         onProductAdded={refresh}
