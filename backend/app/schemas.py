@@ -111,7 +111,8 @@ class ProductUpdate(BaseModel):
 
     @field_validator(
         "parent_id", "cogs_account_id", "income_account_id",
-        "asset_account_id", "preferred_vendor_id", mode="before",
+        "asset_account_id", "preferred_vendor_id",
+        "reorder_min", "reorder_max", mode="before",
     )
     @classmethod
     def empty_string_to_none(cls, v):

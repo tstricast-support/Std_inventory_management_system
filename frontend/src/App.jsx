@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
-import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck, CornerDownRight,Bell,Menu } from "lucide-react";
+import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck, CornerDownRight,Bell,Menu, Settings, MoreVertical } from "lucide-react";
 import "./index.css";
 
 
@@ -46,6 +46,19 @@ async function createVendor(payload) {
   if (!res.ok) {
     const err = await res.json().catch(() => null);
     throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to create vendor");
+  }
+  return res.json();
+}
+
+async function updateVendor(id, payload) {
+  const res = await fetch(`${BASE_URL}/vendors/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to update vendor");
   }
   return res.json();
 }
@@ -975,7 +988,9 @@ function VendorSelect({ vendors, value, onChange, onCreateVendor }) {
 }
 
 // ---------- ParentItemSelect ("Subitem of" dropdown with a + New button) ----------
-function ParentItemSelect({ options, value, onChange, onCreateParent, disabled }) {
+//   onCreateParent(name) -> "+ New" shows a small name box and creates the parent right there
+//   onNew()              -> "+ New" hands over to the caller (used to open a full form)
+function ParentItemSelect({ options, value, onChange, onCreateParent, onNew, placeholder = "Select parent item...", disabled }) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1022,15 +1037,15 @@ function ParentItemSelect({ options, value, onChange, onCreateParent, disabled }
         onChange={(e) => onChange(e.target.value)}
         className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
       >
-        <option value="">Select parent item...</option>
+        <option value="">{placeholder}</option>
         {options.map((p) => (
-          <option key={p.id} value={p.id}>{p.name}</option>
+          <option key={p.id} value={p.id}>{p.label || p.name}</option>
         ))}
       </select>
       <button
         type="button"
         disabled={disabled}
-        onClick={() => setCreating(true)}
+        onClick={() => (onNew ? onNew() : setCreating(true))}
         className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
       >
         + New
@@ -1038,7 +1053,6 @@ function ParentItemSelect({ options, value, onChange, onCreateParent, disabled }
     </div>
   );
 }
-
 
 // ---------- AccountSelect ----------
 function AccountSelect({ accounts, accountType, value, onChange, placeholder, onCreateAccount }) {
@@ -1097,14 +1111,71 @@ function AccountSelect({ accounts, accountType, value, onChange, placeholder, on
   );
 }
 
+// Flattens the item tree so ANY item - top-level or a subitem at any depth - can be picked as a
+// parent. Labels show the path ("GREEN iii › DRY PAPER"). When editing, the item itself and
+// everything inside it are left out (an item can't be placed inside its own subitems).
+function flattenParents(items, excludeId = null, trail = []) {
+  const out = [];
+  [...items]
+    .sort((a, b) => compareNames(a.name, b.name))
+    .forEach((p) => {
+      if (excludeId != null && p.id === excludeId) return; // skips its whole subtree too
+      const path = [...trail, p.name];
+      out.push({ ...p, label: path.join(" › ") });
+      if (p.subitems?.length) out.push(...flattenParents(p.subitems, excludeId, path));
+    });
+  return out;
+}
+
 // ---------- ProductForm ----------
-function ProductForm({ initialData, defaultDepartment, onSubmit, onClose, onImagesChanged }) {
+// What "+ Add Product" opens: first a question (Create Item / Create Subitem), then the form.
+// Editing an item, or a form opened from inside another form, skips the question.
+function ProductForm(props) {
+  const [kind, setKind] = useState(null); // null = still asking
+  if (!props.initialData && !kind) {
+    return <ProductKindChooser onPick={setKind} onClose={props.onClose} />;
+  }
+  return <ProductFormBody {...props} kind={kind || "item"} />;
+}
+
+function ProductKindChooser({ onPick, onClose }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+        <h2 className="text-lg font-semibold mb-4">Add Product</h2>
+        <div className="space-y-2">
+          <button type="button" onClick={() => onPick("item")}
+            className="w-full text-left border border-gray-300 rounded-lg px-4 py-3 hover:bg-gray-50">
+            <p className="font-medium text-gray-900">+ Create Item</p>
+            <p className="text-xs text-gray-500">A normal item (optionally a subitem of one item)</p>
+          </button>
+          <button type="button" onClick={() => onPick("subitem")}
+            className="w-full text-left border border-gray-300 rounded-lg px-4 py-3 hover:bg-gray-50">
+            <p className="font-medium text-gray-900">+ Create Subitem</p>
+            <p className="text-xs text-gray-500">An item that goes inside an existing subitem (e.g. inside CYAN)</p>
+          </button>
+        </div>
+        <button type="button" onClick={onClose}
+          className="w-full mt-3 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// kind: "item"       -> normal form (Subitem of is optional, parents = top-level items)
+//       "subitem"    -> Create Subitem (Subitem of is required, parents = existing subitems)
+//       "under-item" -> opened by "+ New" inside a subitem form (Subitem of required, parents = top-level items)
+function ProductFormBody({ initialData, defaultDepartment, onSubmit, onClose, onImagesChanged, kind = "item" }) {
   const isEditMode = Boolean(initialData);
+  const parentKind = kind === "subitem" ? "sub" : "top";               // which items are offered as parents
+  const requireParent = kind === "subitem" || kind === "under-item";   // Subitem of is ticked and locked
   const [form, setForm] = useState({
     item_type: initialData?.item_type || "Inventory Part",
     name: initialData?.name || "",
     manufacturer_part_number: initialData?.manufacturer_part_number || "",
-    is_subitem: Boolean(initialData?.parent_id),
+    is_subitem: requireParent || Boolean(initialData?.parent_id),
     parent_id: initialData?.parent_id ? String(initialData.parent_id) : "",
 
     purchase_description: initialData?.purchase_description || "",
@@ -1128,10 +1199,21 @@ function ProductForm({ initialData, defaultDepartment, onSubmit, onClose, onImag
   const [vendors, setVendors] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [parentOptions, setParentOptions] = useState([]);
+  const [creatingParent, setCreatingParent] = useState(false); // "+ New" next to Subitem of
   const [imageFiles, setImageFiles] = useState([]);
   const [images, setImages] = useState(initialData?.images || []);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+
+  // which items can be picked as the parent
+  //   editing        -> any item except itself and the items inside it
+  //   Create Subitem -> only items that are already subitems (CYAN, MAGENTA, ...)
+  //   otherwise      -> top-level items only
+  const buildParentOptions = (tree) => {
+    if (isEditMode) return flattenParents(tree, initialData.id);
+    const all = flattenParents(tree);
+    return parentKind === "sub" ? all.filter((p) => p.parent_id) : all.filter((p) => !p.parent_id);
+  };
 
   // load the dropdown data the QuickBooks-style fields need (vendors, accounts, possible parents)
   useEffect(() => {
@@ -1140,9 +1222,7 @@ function ProductForm({ initialData, defaultDepartment, onSubmit, onClose, onImag
         const [v, a, p] = await Promise.all([getVendors(), getAccounts(), getProducts()]);
         setVendors(v);
         setAccounts(a);
-        // getProducts() only returns top-level items (subitems are nested), so this list
-        // already excludes anything that's already a subitem - matches QuickBooks' one-level rule
-        setParentOptions(isEditMode ? p.filter((prod) => prod.id !== initialData.id) : p);
+        setParentOptions(buildParentOptions(p));
       } catch {
         // non-fatal: selects just show "None" if this fails
       }
@@ -1164,7 +1244,7 @@ function ProductForm({ initialData, defaultDepartment, onSubmit, onClose, onImag
     return created;
   };
 
-    // "Subitem of" -> "+ New": create a bare parent item right away (same as vendors/accounts)
+  // Create Item form: "Subitem of" -> "+ New" creates a bare parent item from just a name
   const handleCreateParent = async (name) => {
     if (parentOptions.some((p) => p.name.trim().toLowerCase() === name.toLowerCase())) {
       throw new Error("An item with this name already exists - select it from the list");
@@ -1176,10 +1256,21 @@ function ProductForm({ initialData, defaultDepartment, onSubmit, onClose, onImag
     setParentOptions((prev) => [...prev, created]);
     return created;
   };
-  
+
+  // Create Subitem form: "Subitem of" -> "+ New" opens a full form for the parent (a subitem of a
+  // top-level item). When it saves, reload the parent list and select the new parent here.
+  const handleParentCreated = async (values, files) => {
+    const created = await createProduct(values, files);
+    const p = await getProducts();
+    setParentOptions(buildParentOptions(p));
+    setForm((prev) => ({ ...prev, is_subitem: true, parent_id: String(created.id) }));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (requireParent && !form.parent_id) {
+      return setError("Select the parent item, or use + New to create it");
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -1201,7 +1292,7 @@ function ProductForm({ initialData, defaultDepartment, onSubmit, onClose, onImag
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">{isEditMode ? "Edit Item" : "New Item"}</h2>
+        <h2 className="text-lg font-semibold mb-4">{isEditMode ? "Edit Item" : requireParent ? "New Subitem" : "New Item"}</h2>
 
         {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
 
@@ -1225,20 +1316,24 @@ function ProductForm({ initialData, defaultDepartment, onSubmit, onClose, onImag
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
 
           <div className="flex items-center gap-2">
-            <input
-              id="is_subitem"
-              type="checkbox"
-              checked={form.is_subitem}
-              onChange={(e) => handleChange("is_subitem", e.target.checked)}
-              className="rounded border-gray-300"
-            />
-            <label htmlFor="is_subitem" className="text-sm text-gray-700">Subitem of</label>
-              <ParentItemSelect
+            <label className="flex items-center gap-2 text-sm text-gray-700 whitespace-nowrap cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.is_subitem}
+                disabled={requireParent}
+                onChange={(e) => handleChange("is_subitem", e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              Subitem of
+            </label>
+            <ParentItemSelect
               disabled={!form.is_subitem}
               options={parentOptions}
               value={form.parent_id}
               onChange={(val) => handleChange("parent_id", val)}
+              placeholder={parentKind === "sub" ? "Select parent subitem..." : "Select parent item..."}
               onCreateParent={handleCreateParent}
+              onNew={parentKind === "sub" ? () => setCreatingParent(true) : undefined}
             />
           </div>
 
@@ -1363,6 +1458,17 @@ function ProductForm({ initialData, defaultDepartment, onSubmit, onClose, onImag
             </button>
           </div>
         </form>
+
+        {/* Create Subitem: "+ New" opens this same form for the parent (a subitem of a top-level item).
+            Rendered OUTSIDE the <form> above so its submit doesn't reach this form. */}
+        {creatingParent && (
+          <ProductFormBody
+            kind="under-item"
+            defaultDepartment={form.department}
+            onSubmit={handleParentCreated}
+            onClose={() => setCreatingParent(false)}
+          />
+        )}
       </div>
     </div>
   );
@@ -1380,7 +1486,7 @@ function InventoryView({ isAdmin, department, onBack }) {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [itemId, setItemId] = useState(null);
-  const [collapsed, setCollapsed] = useState(() => new Set());
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
 
   const loadData = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -1458,8 +1564,8 @@ function InventoryView({ isAdmin, department, onBack }) {
     await loadData();
   };
 
-  const toggleCollapsed = (id) => {
-    setCollapsed((prev) => {
+    const toggleExpanded = (id) => {
+    setExpandedIds((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
@@ -1476,7 +1582,7 @@ function InventoryView({ isAdmin, department, onBack }) {
   if (activeTab === "products" && itemId) {
     const selectedItem = findItemById(products, itemId);
     const parentName = selectedItem?.parent_id
-      ? products.find((p) => p.id === selectedItem.parent_id)?.name
+      ? findItemById(products, selectedItem.parent_id)?.name
       : null;
     content = selectedItem ? (
       <ItemDetail
@@ -1567,8 +1673,8 @@ function InventoryView({ isAdmin, department, onBack }) {
                     <ItemRowWithSubitems
                       key={item.id}
                       item={item}
-                      expanded={!collapsed.has(item.id)}
-                      onToggle={() => toggleCollapsed(item.id)}
+                      expanded={expandedIds.has(item.id)}
+                      onToggle={() => toggleExpanded(item.id)}
                       onSelect={setItemId}
                     />
                   ))}
@@ -1728,9 +1834,11 @@ function LowStockBell() {
   );
 }
 
-function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddProduct, inlineAction }) {
+function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddProduct, inlineAction, search, onSearchChange, searchPlaceholder }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const addProductRef = useRef(null);
+  const hasSearch = onSearchChange != null;
   return (
     <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
       <div className="flex flex-nowrap gap-2 justify-between items-start">
@@ -1740,8 +1848,23 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
             {isAdmin ? "Admin" : "Employee (Read Only)"}
           </span>
         </div>
+        <div className="flex items-center gap-2 shrink-0 relative">
+          {hasSearch && (
+            <>
+              <div className="hidden md:block w-56 lg:w-72">
+                <SearchBox value={search} onChange={onSearchChange} placeholder={searchPlaceholder || "Search..."} />
+              </div>
+              <button
+                onClick={() => setSearchOpen((v) => !v)}
+                aria-label="Search"
+                className="md:hidden p-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
+              >
+                <Search size={18} />
+              </button>
+            </>
+          )}
         {isAdmin && (
-          <div className="flex items-center gap-2 shrink-0 relative">
+          <>
             {inlineAction}
             <LowStockBell />
             {actions && (
@@ -1774,10 +1897,18 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
                 )}
               </>
             )}
-            <AddProductButton ref={addProductRef} onCreated={onProductAdded} hideTrigger={hideAddProduct} />
-          </div>
+                        <AddProductButton ref={addProductRef} onCreated={onProductAdded} hideTrigger={hideAddProduct} />
+          </>
         )}
+        </div>
       </div>
+
+      {hasSearch && searchOpen && (
+        <div className="md:hidden mt-3">
+          <SearchBox value={search} onChange={onSearchChange} placeholder={searchPlaceholder || "Search..."} />
+        </div>
+      )}
+
       <HomeTabs active={active} isAdmin={isAdmin} onChange={onTab} />
     </header>
   );
@@ -1820,6 +1951,7 @@ function HomeTabs({ active, onChange, isAdmin }) {
       {isAdmin && tab("vendors", "Vendors", Truck)}
       {isAdmin && tab("bill", "Bill", Receipt)}
       {isAdmin && tab("issued", "Issued", ClipboardList)}
+      {isAdmin && tab("manage", "Manage", Settings)}
     </div>
   );
 }
@@ -1874,15 +2006,19 @@ function StockBadge({ quantity, lowStock }) {
   return <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${colorClass}`}>{label}</span>;
 }
 
-function ItemRow({ item, onClick }) {
+function ItemRow({ item, onClick, expanded, onToggle }) {
   const image = item.images?.find((i) => i.is_primary) || item.images?.[0];
   const dept = getDepartment(item.department);
   const subtitle = dept?.name || "";
   const low = isLowStock(item);
+  const hasSubitems = (item.subitems?.length ?? 0) > 0;
+  const Wrapper = hasSubitems ? "div" : "button";
   return (
-    <button
-      onClick={onClick}
-      className={`w-full flex items-center gap-3 border rounded-xl p-3 text-left hover:shadow-md transition ${
+    <Wrapper
+      onClick={hasSubitems ? onToggle : onClick}
+      className={`w-full flex items-center gap-3 border rounded-xl p-3 text-left transition ${
+        hasSubitems ? "hover:bg-gray-50" : "hover:shadow-md"
+      } ${
         low ? "bg-red-50 border-red-200 hover:border-red-300" : "bg-white border-gray-200 hover:border-gray-300"
       }`}
     >
@@ -1896,10 +2032,17 @@ function ItemRow({ item, onClick }) {
       <div className="flex-1 min-w-0">
         <p className="font-medium text-gray-900 truncate">{item.name}</p>
         {subtitle && <p className="text-xs text-gray-400 truncate">{subtitle}</p>}
+        {hasSubitems && (
+          <p className="text-xs text-blue-600 font-medium mt-0.5">
+            {item.subitems.length} {item.subitems.length === 1 ? "subitem" : "subitems"}
+          </p>
+        )}
       </div>
-      <StockBadge quantity={item.quantity} lowStock={low} />
-      <ChevronRight size={18} className="text-gray-400 shrink-0" />
-    </button>
+      {!hasSubitems && <StockBadge quantity={item.quantity} lowStock={low} />}
+      {hasSubitems
+        ? (expanded ? <ChevronDown size={18} className="text-gray-400 shrink-0" /> : <ChevronRight size={18} className="text-gray-400 shrink-0" />)
+        : <ChevronRight size={18} className="text-gray-400 shrink-0" />}
+    </Wrapper>
   );
 }
 
@@ -2044,20 +2187,58 @@ function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRes
   );
 }
 
-function SubitemRow({ item, onClick }) {
+function SubitemRow({ item, onClick, expanded, onToggle }) {
+  const image = item.images?.find((i) => i.is_primary) || item.images?.[0];
   const low = isLowStock(item);
+  const hasSubitems = (item.subitems?.length ?? 0) > 0;
+  const Wrapper = hasSubitems ? "div" : "button";
   return (
-    <button
-      onClick={onClick}
-      className={`w-full flex items-center gap-2 border rounded-xl pl-3 pr-3 py-2.5 text-left hover:shadow-md transition ${
+    <Wrapper
+      onClick={hasSubitems ? onToggle : onClick}
+      className={`w-full flex items-center gap-2 border rounded-xl pl-3 pr-3 py-2.5 text-left transition ${
+        hasSubitems ? "hover:bg-gray-50" : "hover:shadow-md"
+      } ${
         low ? "bg-red-50 border-red-200 hover:border-red-300" : "bg-white border-gray-200 hover:border-gray-300"
       }`}
     >
       <CornerDownRight size={14} className="text-gray-300 shrink-0" />
-      <p className="flex-1 min-w-0 text-sm font-medium text-gray-900 truncate">{item.name}</p>
-      <StockBadge quantity={item.quantity} lowStock={low} />
-      <ChevronRight size={16} className="text-gray-400 shrink-0" />
-    </button>
+      <div className="w-9 h-9 shrink-0 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center">
+        {image ? (
+          <img src={image.image_url} alt="" className="w-full h-full object-cover" />
+        ) : (
+          <span className="text-[8px] text-gray-400">No image</span>
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
+        {hasSubitems && (
+          <p className="text-xs text-blue-600 font-medium">
+            {item.subitems.length} {item.subitems.length === 1 ? "subitem" : "subitems"}
+          </p>
+        )}
+      </div>
+      {!hasSubitems && <StockBadge quantity={item.quantity} lowStock={low} />}
+      {hasSubitems
+        ? (expanded ? <ChevronDown size={16} className="text-gray-400 shrink-0" /> : <ChevronRight size={16} className="text-gray-400 shrink-0" />)
+        : <ChevronRight size={16} className="text-gray-400 shrink-0" />}
+    </Wrapper>
+  );
+}
+
+function SubitemBranch({ item, onSelect }) {
+  const [open, setOpen] = useState(false);
+  const kids = [...(item.subitems || [])].sort((a, b) => compareNames(a.name, b.name));
+  return (
+    <div className="space-y-1.5">
+      <SubitemRow item={item} onClick={() => onSelect(item.id)} expanded={open} onToggle={() => setOpen((o) => !o)} />
+      {kids.length > 0 && open && (
+        <div className="ml-6 space-y-1.5">
+          {kids.map((k) => (
+            <SubitemBranch key={k.id} item={k} onSelect={onSelect} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2067,23 +2248,12 @@ function ItemRowWithSubitems({ item, expanded, onToggle, onSelect }) {
 
   return (
     <div className="space-y-1.5">
-      <ItemRow item={item} onClick={() => onSelect(item.id)} />
-      {sorted.length > 0 && (
+      <ItemRow item={item} onClick={() => onSelect(item.id)} expanded={expanded} onToggle={onToggle} />
+      {sorted.length > 0 && expanded && (
         <div className="ml-6 space-y-1.5">
-          <button
-            onClick={onToggle}
-            className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-700 px-1 py-0.5"
-          >
-            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            {sorted.length} {sorted.length === 1 ? "subitem" : "subitems"}
-          </button>
-          {expanded && (
-            <div className="space-y-1.5">
-              {sorted.map((sub) => (
-                <SubitemRow key={sub.id} item={sub} onClick={() => onSelect(sub.id)} />
-              ))}
-            </div>
-          )}
+          {sorted.map((sub) => (
+            <SubitemBranch key={sub.id} item={sub} onSelect={onSelect} />
+          ))}
         </div>
       )}
     </div>
@@ -2096,7 +2266,7 @@ function ItemsPage({ isAdmin, itemId, go, refreshToken, onProductAdded }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
-  const [collapsed, setCollapsed] = useState(() => new Set());
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -2124,8 +2294,8 @@ function ItemsPage({ isAdmin, itemId, go, refreshToken, onProductAdded }) {
     };
   }, [refreshToken]);
 
-  const toggleCollapsed = (id) => {
-    setCollapsed((prev) => {
+  const toggleExpanded = (id) => {
+    setExpandedIds((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
@@ -2137,7 +2307,7 @@ function ItemsPage({ isAdmin, itemId, go, refreshToken, onProductAdded }) {
     const back = () => go({ view: "items" });
     const item = findItemById(products, itemId);
     const parentName = item?.parent_id
-      ? products.find((p) => p.id === item.parent_id)?.name
+      ? findItemById(products, item.parent_id)?.name
       : null;
     if (item) return <ItemDetail item={item} parentName={parentName} onBack={back} isAdmin={isAdmin} />;
     return (
@@ -2181,8 +2351,8 @@ function ItemsPage({ isAdmin, itemId, go, refreshToken, onProductAdded }) {
               <ItemRowWithSubitems
                 key={item.id}
                 item={item}
-                expanded={!collapsed.has(item.id)}
-                onToggle={() => toggleCollapsed(item.id)}
+                expanded={expandedIds.has(item.id)}
+                onToggle={() => toggleExpanded(item.id)}
                 onSelect={(id) => go({ view: "items", item: String(id) })}
               />
             ))}
@@ -2193,19 +2363,290 @@ function ItemsPage({ isAdmin, itemId, go, refreshToken, onProductAdded }) {
   );
 }
 
+// ---------- Manage page: item list where Edit/Delete live behind a 3-dot menu ----------
+function ItemActionsMenu({ onEdit, onDelete }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Item actions"
+        className="p-1.5 rounded-full text-gray-500 hover:bg-gray-100"
+      >
+        <MoreVertical size={18} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[130px]">
+            <button
+              onClick={() => { setOpen(false); onEdit(); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <Pencil size={14} /> Edit
+            </button>
+            <button
+              onClick={() => { setOpen(false); onDelete(); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+            >
+              <Trash2 size={14} /> Delete
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ManageItemRow({ item, expanded, onToggle, onEdit, onDelete }) {
+  const image = item.images?.find((i) => i.is_primary) || item.images?.[0];
+  const dept = getDepartment(item.department);
+  const hasSubitems = (item.subitems?.length ?? 0) > 0;
+  return (
+    <div
+      onClick={hasSubitems ? onToggle : undefined}
+      className={`w-full flex items-center gap-3 border rounded-xl p-3 bg-white border-gray-200 ${hasSubitems ? "cursor-pointer hover:bg-gray-50" : ""}`}
+    >
+      <div className="w-12 h-12 shrink-0 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center">
+        {image ? <img src={image.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-[10px] text-gray-400">No image</span>}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-gray-900 truncate">{item.name}</p>
+        <p className="text-xs text-gray-400 truncate">{dept?.name || ""}</p>
+        {hasSubitems && (
+          <p className="text-xs text-blue-600 font-medium mt-0.5">
+            {item.subitems.length} {item.subitems.length === 1 ? "subitem" : "subitems"}
+          </p>
+        )}
+      </div>
+      {hasSubitems && (expanded ? <ChevronDown size={18} className="text-gray-400 shrink-0" /> : <ChevronRight size={18} className="text-gray-400 shrink-0" />)}
+      <ItemActionsMenu onEdit={onEdit} onDelete={onDelete} />
+    </div>
+  );
+}
+
+function ManageSubitemBranch({ item, onEdit, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const kids = [...(item.subitems || [])].sort((a, b) => compareNames(a.name, b.name));
+  const hasSubitems = kids.length > 0;
+  const image = item.images?.find((i) => i.is_primary) || item.images?.[0];
+  return (
+    <div className="space-y-1.5">
+      <div
+        onClick={hasSubitems ? () => setOpen((o) => !o) : undefined}
+        className={`w-full flex items-center gap-2 border rounded-xl pl-3 pr-3 py-2.5 bg-white border-gray-200 ${hasSubitems ? "cursor-pointer hover:bg-gray-50" : ""}`}
+      >
+        <CornerDownRight size={14} className="text-gray-300 shrink-0" />
+        <div className="w-9 h-9 shrink-0 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center">
+          {image ? <img src={image.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-[8px] text-gray-400">No image</span>}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
+          {hasSubitems && (
+            <p className="text-xs text-blue-600 font-medium">
+              {kids.length} {kids.length === 1 ? "subitem" : "subitems"}
+            </p>
+          )}
+        </div>
+        {hasSubitems && (open ? <ChevronDown size={16} className="text-gray-400 shrink-0" /> : <ChevronRight size={16} className="text-gray-400 shrink-0" />)}
+        <ItemActionsMenu onEdit={() => onEdit(item)} onDelete={() => onDelete(item.id)} />
+      </div>
+      {hasSubitems && open && (
+        <div className="ml-6 space-y-1.5">
+          {kids.map((k) => (
+            <ManageSubitemBranch key={k.id} item={k} onEdit={onEdit} onDelete={onDelete} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ManagePage({ go, refreshToken, onProductAdded }) {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [vendors, setVendors] = useState([]);
+  const [editingVendor, setEditingVendor] = useState(null);
+  const [showVendorForm, setShowVendorForm] = useState(false);
+  const [deleteVendorTarget, setDeleteVendorTarget] = useState(null);
+
+    const load = async () => {
+    try {
+      const [productList, vendorList] = await Promise.all([getProducts(), getVendors()]);
+      setProducts(productList);
+      setVendors(vendorList);
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [refreshToken]);
+
+  const toggleExpanded = (id) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const handleUpdate = async (id, updates) => {
+    await updateProduct(id, updates);
+    await load();
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm("Delete this item?")) return;
+    try {
+      await deleteProduct(id);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleUpdateVendor = async (id, payload) => {
+    await updateVendor(id, payload);
+    await load();
+  };
+
+  const handleDeleteVendor = async () => {
+    try {
+      await deleteVendor(deleteVendorTarget.id);
+      setDeleteVendorTarget(null);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const q = search.trim().toLowerCase();
+  const sortedProducts = [...products].sort((a, b) => compareNames(a.name, b.name));
+  const shownProducts = q ? sortedProducts.filter((p) => p.name.toLowerCase().includes(q)) : sortedProducts;
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={true} active="manage" onProductAdded={onProductAdded} onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+
+      <main className="p-4 sm:p-6 max-w-4xl">
+        <div className="mb-5">
+          <SearchBox value={search} onChange={setSearch} placeholder="Search items..." />
+        </div>
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error && products.length === 0 ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : shownProducts.length === 0 ? (
+          <p className="text-gray-400 text-center py-16">No items match.</p>
+        ) : (
+          <div className="space-y-2">
+            {shownProducts.map((item) => {
+              const sortedSubs = [...(item.subitems || [])].sort((a, b) => compareNames(a.name, b.name));
+              return (
+                <div key={item.id} className="space-y-1.5">
+                  <ManageItemRow
+                    item={item}
+                    expanded={expandedIds.has(item.id)}
+                    onToggle={() => toggleExpanded(item.id)}
+                    onEdit={() => { setEditingProduct(item); setShowForm(true); }}
+                    onDelete={() => handleDelete(item.id)}
+                  />
+                  {sortedSubs.length > 0 && expandedIds.has(item.id) && (
+                    <div className="ml-6 space-y-1.5">
+                      {sortedSubs.map((sub) => (
+                        <ManageSubitemBranch
+                          key={sub.id}
+                          item={sub}
+                          onEdit={(p) => { setEditingProduct(p); setShowForm(true); }}
+                          onDelete={handleDelete}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+                    </div>
+        )}
+
+        {vendors.length > 0 && (
+          <div className="mt-8">
+            <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">Vendors</h2>
+            <div className="space-y-2">
+              {[...vendors].sort((a, b) => compareNames(a.name, b.name)).map((v) => (
+                <div key={v.id} className="w-full flex items-center gap-3 border rounded-xl p-3 bg-white border-gray-200">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-900 truncate">{v.name}</p>
+                    <p className="text-xs text-gray-400 truncate">
+                      {[v.contact_person, v.phone, v.email].filter(Boolean).join(" · ") || "No contact details"}
+                    </p>
+                  </div>
+                  <ItemActionsMenu
+                    onEdit={() => { setEditingVendor(v); setShowVendorForm(true); }}
+                    onDelete={() => setDeleteVendorTarget(v)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {showForm && (
+        <ProductForm
+          initialData={editingProduct}
+          onSubmit={handleUpdate}
+          onClose={() => { setShowForm(false); setEditingProduct(null); }}
+        />
+      )}
+
+      {showVendorForm && (
+        <VendorForm
+          initialData={editingVendor}
+          onSubmit={handleUpdateVendor}
+          onClose={() => { setShowVendorForm(false); setEditingVendor(null); }}
+        />
+      )}
+
+      {deleteVendorTarget && (
+        <TypedDeleteConfirm
+          label={deleteVendorTarget.name}
+          onCancel={() => setDeleteVendorTarget(null)}
+          onConfirm={handleDeleteVendor}
+        />
+      )}
+    </div>
+  );
+}
+
 
 // ---------- Department home screen ----------
-function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded }) {
+function DepartmentHome({ isAdmin, onSelect, onSelectItem, onSelectAccount, onTab, refreshToken, onProductAdded }) {
   const [itemCounts, setItemCounts] = useState({});
   const [pendingCounts, setPendingCounts] = useState({});
+  const [products, setProducts] = useState([]);
+  const [vendors, setVendors] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const [products, pending] = await Promise.all([
+        const [products, pending, vendorList, accountList] = await Promise.all([
           getProducts(),
           isAdmin ? getRequests("pending") : Promise.resolve([]),
+          isAdmin ? getVendors() : Promise.resolve([]),
+          isAdmin ? getAccounts() : Promise.resolve([]),
         ]);
         if (cancelled) return;
         const items = {};
@@ -2217,8 +2658,11 @@ function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded
         });
         setItemCounts(items);
         setPendingCounts(waiting);
+        setProducts(products);
+        setVendors(vendorList);
+        setAccounts(accountList);
       } catch {
-        // counts are optional - the cards still work without them
+        // counts/search data are optional - the cards still work without them
       }
     };
     load();
@@ -2226,60 +2670,147 @@ function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded
     return () => { cancelled = true; clearInterval(interval); };
   }, [isAdmin, refreshToken]);
 
+  const q = search.trim().toLowerCase();
+  const matchedItems = q ? flattenParents(products).filter((p) => p.name.toLowerCase().includes(q)).sort((a, b) => compareNames(a.name, b.name)) : [];
+  const matchedVendors = q ? vendors.filter((v) => v.name.toLowerCase().includes(q)).sort((a, b) => compareNames(a.name, b.name)) : [];
+  const matchedAccounts = q ? accounts.filter((a) => a.name.toLowerCase().includes(q)).sort((a, b) => compareNames(a.name, b.name)) : [];
+
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="home" onTab={onTab} onProductAdded={onProductAdded} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="home"
+        onTab={onTab}
+        onProductAdded={onProductAdded}
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search items, vendors, accounts..."
+      />
 
       <main className="p-4 sm:p-6">
-        <p className="text-sm text-gray-500 mb-4">Select a department</p>
-        <div className="flex flex-col gap-4 max-w-4xl">
-          {DEPARTMENTS.map((d) => {
-            const count = itemCounts[d.slug] || 0;
-            const waiting = pendingCounts[d.slug] || 0;
-            return (
-                            <button
-                key={d.slug}
-                onClick={() => onSelect(d.slug)}
-                className="flex items-center gap-3 bg-white border border-gray-200 rounded-2xl p-4 text-left hover:shadow-md hover:border-gray-300 active:scale-[0.99] transition"
-              >
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div className="w-14 h-14 shrink-0 rounded-xl border border-gray-200 bg-white flex items-center justify-center overflow-hidden p-1.5">
-                    <img src={d.logo} alt="" className="max-w-full max-h-full object-contain" />
+        {q ? (
+          <div className="max-w-4xl space-y-6">
+            {matchedItems.length === 0 && matchedVendors.length === 0 && matchedAccounts.length === 0 ? (
+              <p className="text-gray-400 text-center py-16">Nothing matches "{search.trim()}".</p>
+            ) : (
+              <>
+                {matchedItems.length > 0 && (
+                  <div>
+                    <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">Items</h2>
+                    <div className="space-y-2">
+                      {matchedItems.map((p) => (
+                        <button
+                          key={`item-${p.id}`}
+                          onClick={() => onSelectItem(p.id)}
+                          className="w-full flex items-center justify-between gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:shadow-md hover:border-gray-300 transition"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-medium text-gray-900 truncate">{p.label}</p>
+                            <p className="text-xs text-gray-400">{getDepartment(p.department)?.name}</p>
+                          </div>
+                          <ChevronRight size={18} className="text-gray-400 shrink-0" />
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <p className="font-semibold text-gray-900 uppercase truncate">{d.name}</p>
-
-                  {d.extraLogo && (
-                    <>
-                      <span className="text-gray-300">|</span>
-                      <div className="w-14 h-14 shrink-0 rounded-xl border border-gray-200 bg-white flex items-center justify-center overflow-hidden p-1.5">
-                        <img src={d.extraLogo} alt="" className="max-w-full max-h-full object-contain" />
-                      </div>
-                      <p className="font-semibold text-gray-900 uppercase truncate">{d.extraName}</p>
-                    </>
-                  )}
-                </div>
-
-                <p className="shrink-0 text-xs text-gray-400">
-                  {count} {count === 1 ? "item" : "items"}
-                </p>
-
-                {isAdmin && waiting > 0 && (
-                  <span
-                    title="Pending requests"
-                    className="bg-red-500 text-white text-[11px] font-medium rounded-full min-w-5 h-5 px-1.5 flex items-center justify-center"
-                  >
-                    {waiting}
-                  </span>
                 )}
-                <ChevronRight size={18} className="text-gray-400 shrink-0" />
-              </button>
-            );
-          })}
-        </div>
+
+                {matchedVendors.length > 0 && (
+                  <div>
+                    <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">Vendors</h2>
+                    <div className="space-y-2">
+                      {matchedVendors.map((v) => (
+                        <button
+                          key={`vendor-${v.id}`}
+                          onClick={() => onTab("vendors")}
+                          className="w-full flex items-center justify-between gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:shadow-md hover:border-gray-300 transition"
+                        >
+                          <p className="font-medium text-gray-900 truncate">{v.name}</p>
+                          <ChevronRight size={18} className="text-gray-400 shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {matchedAccounts.length > 0 && (
+                  <div>
+                    <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">Accounts</h2>
+                    <div className="space-y-2">
+                      {matchedAccounts.map((a) => (
+                        <button
+                          key={`account-${a.id}`}
+                          onClick={() => onSelectAccount(a.id)}
+                          className="w-full flex items-center justify-between gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:shadow-md hover:border-gray-300 transition"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-medium text-gray-900 truncate">{a.name}</p>
+                            <p className="text-xs text-gray-400">{ACCOUNT_TYPE_NAMES[a.account_type] || a.account_type}</p>
+                          </div>
+                          <ChevronRight size={18} className="text-gray-400 shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        ) : (
+          <>
+            <p className="text-sm text-gray-500 mb-4">Select a department</p>
+            <div className="flex flex-col gap-4 max-w-4xl">
+              {DEPARTMENTS.map((d) => {
+                const count = itemCounts[d.slug] || 0;
+                const waiting = pendingCounts[d.slug] || 0;
+                return (
+                  <button
+                    key={d.slug}
+                    onClick={() => onSelect(d.slug)}
+                    className="flex items-center gap-3 bg-white border border-gray-200 rounded-2xl p-4 text-left hover:shadow-md hover:border-gray-300 active:scale-[0.99] transition"
+                  >
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-14 h-14 shrink-0 rounded-xl border border-gray-200 bg-white flex items-center justify-center overflow-hidden p-1.5">
+                        <img src={d.logo} alt="" className="max-w-full max-h-full object-contain" />
+                      </div>
+                      <p className="font-semibold text-gray-900 uppercase truncate">{d.name}</p>
+
+                      {d.extraLogo && (
+                        <>
+                          <span className="text-gray-300">|</span>
+                          <div className="w-14 h-14 shrink-0 rounded-xl border border-gray-200 bg-white flex items-center justify-center overflow-hidden p-1.5">
+                            <img src={d.extraLogo} alt="" className="max-w-full max-h-full object-contain" />
+                          </div>
+                          <p className="font-semibold text-gray-900 uppercase truncate">{d.extraName}</p>
+                        </>
+                      )}
+                    </div>
+
+                    <p className="shrink-0 text-xs text-gray-400">
+                      {count} {count === 1 ? "item" : "items"}
+                    </p>
+
+                    {isAdmin && waiting > 0 && (
+                      <span
+                        title="Pending requests"
+                        className="bg-red-500 text-white text-[11px] font-medium rounded-full min-w-5 h-5 px-1.5 flex items-center justify-center"
+                      >
+                        {waiting}
+                      </span>
+                    )}
+                    <ChevronRight size={18} className="text-gray-400 shrink-0" />
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
       </main>
     </div>
   );
 }
+
+
 
 // ---------- Vendors (admin only) ----------
 function VendorsPage({ isAdmin, go }) {
@@ -2319,14 +2850,14 @@ function VendorsPage({ isAdmin, go }) {
         isAdmin={isAdmin}
         active="vendors"
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
-        inlineAction={
-          <button onClick={() => setFormOpen(true)} className="hidden md:inline-flex bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
-            + Add Vendor
-          </button>
-        }
       />
 
       <main className="p-4 sm:p-6 max-w-3xl">
+        <div className="mb-5 flex justify-end">
+          <button onClick={() => setFormOpen(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
+            + Add Vendor
+          </button>
+        </div>
         {loading ? (
           <p className="text-gray-400 text-center py-16">Loading...</p>
         ) : error ? (
@@ -2343,10 +2874,6 @@ function VendorsPage({ isAdmin, go }) {
                     {[v.contact_person, v.phone, v.email].filter(Boolean).join(" · ") || "No contact details"}
                   </p>
                 </div>
-                <button onClick={() => handleDelete(v.id)} title="Delete vendor" aria-label="Delete vendor"
-                  className="p-2 rounded-full text-red-500 hover:bg-red-50 transition-colors">
-                  <Trash2 size={16} />
-                </button>
               </div>
             ))}
           </div>
@@ -2363,8 +2890,15 @@ function VendorsPage({ isAdmin, go }) {
   );
 }
 
-function VendorForm({ onClose, onSubmit }) {
-  const [form, setForm] = useState({ name: "", contact_person: "", phone: "", email: "", address: "" });
+function VendorForm({ initialData, onClose, onSubmit }) {
+  const isEditMode = Boolean(initialData);
+  const [form, setForm] = useState({
+    name: initialData?.name || "",
+    contact_person: initialData?.contact_person || "",
+    phone: initialData?.phone || "",
+    email: initialData?.email || "",
+    address: initialData?.address || "",
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const handleChange = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
@@ -2374,7 +2908,11 @@ function VendorForm({ onClose, onSubmit }) {
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(form);
+      if (isEditMode) {
+        await onSubmit(initialData.id, form);
+      } else {
+        await onSubmit(form);
+      }
       onClose();
     } catch (err) {
       setError(err.message);
@@ -2386,7 +2924,7 @@ function VendorForm({ onClose, onSubmit }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">Add Vendor</h2>
+        <h2 className="text-lg font-semibold mb-4">{isEditMode ? "Edit Vendor" : "Add Vendor"}</h2>
         {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-3">
           <input required placeholder="Vendor name" value={form.name} onChange={(e) => handleChange("name", e.target.value)}
@@ -2427,6 +2965,42 @@ const formatRs = (n) =>
 
 const ACCOUNT_TYPE_NAMES = { cogs: "COGS account", income: "Income account", asset: "Asset account" };
 
+
+
+function TypedDeleteConfirm({ label, onConfirm, onCancel }) {
+  const [value, setValue] = useState("");
+  const expected = `DELETE ${label}`;
+  const match = value.trim() === expected;
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-2">Delete "{label}"?</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          This can't be undone. Type <span className="font-mono font-semibold text-gray-700">{expected}</span> to confirm.
+        </p>
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={expected}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-500"
+        />
+        <div className="flex gap-2 justify-end">
+          <button onClick={onCancel} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100">
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={!match}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 // ---------- Account detail: total value + the items behind it ----------
 //   /?view=accounting&account=3
 function AccountDetail({ accountId, go }) {
@@ -2434,6 +3008,7 @@ function AccountDetail({ accountId, go }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const back = () => go({ view: "accounting" });
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -2445,8 +3020,7 @@ function AccountDetail({ accountId, go }) {
     return () => { cancelled = true; };
   }, [accountId]);
 
-  const handleDelete = async () => {
-    if (!confirm(`Delete "${data.name}"? Items using it will simply lose this account.`)) return;
+    const handleDelete = async () => {
     try {
       await deleteAccount(data.id);
       back();
@@ -2511,7 +3085,7 @@ function AccountDetail({ accountId, go }) {
             </div>
 
             <button
-              onClick={handleDelete}
+              onClick={() => setShowDeleteConfirm(true)}
               className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-50"
             >
               <Trash2 size={16} /> Delete account
@@ -2519,6 +3093,14 @@ function AccountDetail({ accountId, go }) {
           </>
         )}
       </main>
+
+      {showDeleteConfirm && (
+        <TypedDeleteConfirm
+          label={data.name}
+          onCancel={() => setShowDeleteConfirm(false)}
+          onConfirm={() => { setShowDeleteConfirm(false); handleDelete(); }}
+        />
+      )}
     </div>
   );
 }
@@ -2542,21 +3124,20 @@ function AccountingPage({ isAdmin, go }) {
 
   useEffect(() => { load(); }, []);
 
-
   return (
     <div className="min-h-screen bg-gray-50">
       <AppHeader
         isAdmin={isAdmin}
         active="accounting"
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
-        inlineAction={
-          <button onClick={() => setFormOpen(true)} className="hidden md:inline-flex bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
-            + Add Account
-          </button>
-        }
       />
 
       <main className="p-4 sm:p-6 max-w-3xl space-y-8">
+        <div className="flex justify-end">
+          <button onClick={() => setFormOpen(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
+            + Add Account
+          </button>
+        </div>
         {loading ? (
           <p className="text-gray-400 text-center py-16">Loading...</p>
         ) : error ? (
@@ -2821,7 +3402,7 @@ function CreateItemPanel({ department, existingNames, parentOptions = [], onCrea
     const name = form.name.trim();
     if (!name) return setError("Enter an item name");
     if (existingNames.includes(name.toLowerCase())) {
-      return setError("This item already exists in this department - select it from the list");
+      return setError("This item already exists in this department — select it from the list");
     }
     if (form.is_subitem && !form.parent_id) {
       return setError('Select the parent item, or untick "Subitem of"');
@@ -2882,7 +3463,6 @@ function CreateItemPanel({ department, existingNames, parentOptions = [], onCrea
           ))}
         </select>
       </div>
-
       <div className="grid grid-cols-2 gap-2">
         <input placeholder="SKU (optional)" value={form.sku} onChange={(e) => set("sku", e.target.value)} className={inputCls} />
         <input
@@ -2985,7 +3565,7 @@ function NewBillForm({ onBack, onSaved }) {
 
   useEffect(() => {
     getProducts()
-      .then((data) => setProducts(data.flatMap((p) => [p, ...(p.subitems || [])])))
+      .then(setProducts)
       .catch((err) => setLoadError(err.message))
       .finally(() => setLoading(false));
   }, []);
@@ -3288,16 +3868,15 @@ function BillPage({ go, autoCreateToken }) {
       <AppHeader
         isAdmin
         active="bill"
-        hideAddProduct
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
-        actions={
-          <button onClick={() => setCreating(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
-            + New Bill
-          </button>
-        }
       />
 
       <main className="p-4 sm:p-6 max-w-4xl">
+        <div className="mb-4 flex justify-end">
+          <button onClick={() => setCreating(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
+            + New Bill
+          </button>
+        </div>
         <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
           <h2 className="text-sm font-semibold text-gray-500 uppercase">
             Bills <span className="text-gray-400 font-normal">({shown.length})</span>
@@ -3950,16 +4529,15 @@ function IssuedPage({ go, autoCreateToken }) {
       <AppHeader
         isAdmin
         active="issued"
-        hideAddProduct
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
-        actions={
-          <button onClick={() => setCreating(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
-            + Create Issued List
-          </button>
-        }
       />
 
       <main className="p-4 sm:p-6 max-w-4xl">
+        <div className="mb-4 flex justify-end">
+          <button onClick={() => setCreating(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
+            + Create Issued List
+          </button>
+        </div>
         <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
           <h2 className="text-sm font-semibold text-gray-500 uppercase">
             Issued lists <span className="text-gray-400 font-normal">({shown.length})</span>
@@ -4152,11 +4730,19 @@ function AppShell() {
    } else if (searchParams.get("view") === "issued" && isAdmin) {
     page = <IssuedPage go={setSearchParams} autoCreateToken={quickIssuedToken} />;
   } else if (searchParams.get("view") === "accounting" && isAdmin) {
-      page = searchParams.get("account")
+    page = searchParams.get("account")
       ? <AccountDetail accountId={searchParams.get("account")} go={setSearchParams} />
       : <AccountingPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "vendors" && isAdmin) {
     page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "manage" && isAdmin) {
+    page = (
+      <ManagePage
+        go={setSearchParams}
+        refreshToken={refreshToken}
+        onProductAdded={refresh}
+      />
+    );
   } else if (searchParams.get("view") === "items") {
     page = (
       <ItemsPage
@@ -4172,6 +4758,8 @@ function AppShell() {
       <DepartmentHome
         isAdmin={isAdmin}
         onSelect={(slug) => setSearchParams({ dept: slug })}
+        onSelectItem={(id) => setSearchParams({ view: "items", item: String(id) })}
+        onSelectAccount={(id) => setSearchParams({ view: "accounting", account: String(id) })}
         refreshToken={refreshToken}
         onProductAdded={refresh}
         onTab={(tab) => tab !== "home" && setSearchParams({ view: tab })}
