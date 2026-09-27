@@ -2174,16 +2174,42 @@ function StockBadge({ quantity, lowStock }) {
   return <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${colorClass}`}>{label}</span>;
 }
 
-function ItemRow({ item, onClick, expanded, onToggle }) {
+function ItemRow({ item, onClick, expanded, onToggle, isAdmin, onLongPress }) {
   const image = item.images?.find((i) => i.is_primary) || item.images?.[0];
   const dept = getDepartment(item.department);
   const subtitle = dept?.name || "";
   const low = isLowStock(item);
   const hasSubitems = (item.subitems?.length ?? 0) > 0;
   const Wrapper = hasSubitems ? "div" : "button";
+
+  const canLongPress = isAdmin && !hasSubitems && Boolean(onLongPress);
+  const longPressTimer = useRef(null);
+  const longPressTriggered = useRef(false);
+  const startLongPress = () => {
+    if (!canLongPress) return;
+    longPressTriggered.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      onLongPress(item);
+    }, 550);
+  };
+  const cancelLongPress = () => {
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+  };
+  const handleClick = () => {
+    if (longPressTriggered.current) { longPressTriggered.current = false; return; }
+    (hasSubitems ? onToggle : onClick)();
+  };
+
   return (
     <Wrapper
-      onClick={hasSubitems ? onToggle : onClick}
+      onClick={handleClick}
+      onPointerDown={canLongPress ? startLongPress : undefined}
+      onPointerUp={canLongPress ? cancelLongPress : undefined}
+      onPointerLeave={canLongPress ? cancelLongPress : undefined}
+      onPointerCancel={canLongPress ? cancelLongPress : undefined}
+      onContextMenu={canLongPress ? (e) => e.preventDefault() : undefined}
+      style={canLongPress ? { touchAction: "manipulation", WebkitUserSelect: "none", userSelect: "none" } : undefined}
       className={`w-full flex items-center gap-3 border rounded-xl p-3 text-left bg-white border-gray-200 hover:border-gray-300 transition ${
         hasSubitems ? "hover:bg-gray-50" : "hover:shadow-md"
       }`}
@@ -2353,14 +2379,40 @@ function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRes
   );
 }
 
-function SubitemRow({ item, onClick, expanded, onToggle }) {
+function SubitemRow({ item, onClick, expanded, onToggle, isAdmin, onLongPress }) {
   const image = item.images?.find((i) => i.is_primary) || item.images?.[0];
   const low = isLowStock(item);
   const hasSubitems = (item.subitems?.length ?? 0) > 0;
   const Wrapper = hasSubitems ? "div" : "button";
+
+  const canLongPress = isAdmin && !hasSubitems && Boolean(onLongPress);
+  const longPressTimer = useRef(null);
+  const longPressTriggered = useRef(false);
+  const startLongPress = () => {
+    if (!canLongPress) return;
+    longPressTriggered.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      onLongPress(item);
+    }, 550);
+  };
+  const cancelLongPress = () => {
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+  };
+  const handleClick = () => {
+    if (longPressTriggered.current) { longPressTriggered.current = false; return; }
+    (hasSubitems ? onToggle : onClick)();
+  };
+
   return (
     <Wrapper
-      onClick={hasSubitems ? onToggle : onClick}
+      onClick={handleClick}
+      onPointerDown={canLongPress ? startLongPress : undefined}
+      onPointerUp={canLongPress ? cancelLongPress : undefined}
+      onPointerLeave={canLongPress ? cancelLongPress : undefined}
+      onPointerCancel={canLongPress ? cancelLongPress : undefined}
+      onContextMenu={canLongPress ? (e) => e.preventDefault() : undefined}
+      style={canLongPress ? { touchAction: "manipulation", WebkitUserSelect: "none", userSelect: "none" } : undefined}
       className={`w-full flex items-center gap-2 border rounded-xl pl-3 pr-3 py-2.5 text-left transition ${
         hasSubitems ? "hover:bg-gray-50" : "hover:shadow-md"
       } ${
@@ -2391,17 +2443,17 @@ function SubitemRow({ item, onClick, expanded, onToggle }) {
   );
 }
 
-function SubitemBranch({ item, onSelect, forceOpen }) {
+function SubitemBranch({ item, onSelect, forceOpen, isAdmin, onLongPress }) {
   const [open, setOpen] = useState(false);
   const kids = [...(item.subitems || [])].sort((a, b) => compareNames(a.name, b.name));
   const isOpen = forceOpen || open;
   return (
     <div className="space-y-1.5">
-      <SubitemRow item={item} onClick={() => onSelect(item.id)} expanded={isOpen} onToggle={() => setOpen((o) => !o)} />
+      <SubitemRow item={item} onClick={() => onSelect(item.id)} expanded={isOpen} onToggle={() => setOpen((o) => !o)} isAdmin={isAdmin} onLongPress={onLongPress} />
       {kids.length > 0 && isOpen && (
         <div className="ml-6 space-y-1.5">
           {kids.map((k) => (
-            <SubitemBranch key={k.id} item={k} onSelect={onSelect} forceOpen={forceOpen} />
+            <SubitemBranch key={k.id} item={k} onSelect={onSelect} forceOpen={forceOpen} isAdmin={isAdmin} onLongPress={onLongPress} />
           ))}
         </div>
       )}
@@ -2409,18 +2461,18 @@ function SubitemBranch({ item, onSelect, forceOpen }) {
   );
 }
 
-function ItemRowWithSubitems({ item, expanded, onToggle, onSelect, forceOpen }) {
+function ItemRowWithSubitems({ item, expanded, onToggle, onSelect, forceOpen, isAdmin, onLongPress }) {
   const subitems = item.subitems || [];
   const sorted = [...subitems].sort((a, b) => compareNames(a.name, b.name));
   const isOpen = forceOpen || expanded;
 
   return (
     <div className="space-y-1.5">
-      <ItemRow item={item} onClick={() => onSelect(item.id)} expanded={isOpen} onToggle={onToggle} />
+      <ItemRow item={item} onClick={() => onSelect(item.id)} expanded={isOpen} onToggle={onToggle} isAdmin={isAdmin} onLongPress={onLongPress} />
       {sorted.length > 0 && isOpen && (
         <div className="ml-6 space-y-1.5">
           {sorted.map((sub) => (
-            <SubitemBranch key={sub.id} item={sub} onSelect={onSelect} forceOpen={forceOpen} />
+            <SubitemBranch key={sub.id} item={sub} onSelect={onSelect} forceOpen={forceOpen} isAdmin={isAdmin} onLongPress={onLongPress} />
           ))}
         </div>
       )}
@@ -2525,7 +2577,10 @@ function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdde
 
       <main className="p-4 sm:p-6 max-w-4xl">
         <div className="mb-5">
-          <SearchBox value={search} onChange={setSearch} placeholder="Search items, vendors, accounts..." />
+          <SearchBox value={search} onChange={setSearch} placeholder="Search items..." />
+          {isAdmin && (
+            <p className="text-xs text-gray-400 mt-1.5">Hold an item to add stock</p>
+          )}
         </div>
 
         {loading ? (
@@ -2546,11 +2601,21 @@ function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdde
                 onToggle={() => toggleExpanded(item.id)}
                 onSelect={(id) => go({ view: "items", item: String(id) })}
                 forceOpen={Boolean(q)}
+                isAdmin={isAdmin}
+                onLongPress={(p) => setRestockingProduct(p)}
               />
             ))}
           </div>
         )}
       </main>
+
+      {restockingProduct && (
+        <RestockModal
+          product={restockingProduct}
+          onSubmit={handleRestock}
+          onClose={() => setRestockingProduct(null)}
+        />
+      )}
     </div>
   );
 }
