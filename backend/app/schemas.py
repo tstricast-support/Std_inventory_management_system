@@ -120,15 +120,15 @@ class ProductUpdate(BaseModel):
             return None
         return v
 
-    @field_validator("sku", mode="before")
+    
+    @field_validator("quantity", mode="before")
     @classmethod
-    def empty_sku_to_none(cls, v):
-        # an empty SKU must be stored as NULL, otherwise two products
-        # without an SKU collide on the unique constraint
-        if v is None:
-            return None
-        v = str(v).strip()
-        return v or None
+    def empty_quantity_to_zero(cls, v):
+        # quantity is NOT NULL in the DB - a blank input (common on parent/grouping
+        # items, which don't track their own stock) must fall back to 0, not None
+        if v == "" or v is None:
+            return 0
+        return v
 
 class ProductOut(ProductBase):
     model_config = ConfigDict(from_attributes=True)

@@ -1832,11 +1832,147 @@ function LowStockBell() {
   );
 }
 
-function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddProduct, inlineAction, search, onSearchChange, searchPlaceholder }) {
+function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddProduct, inlineAction }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [products, setProducts] = useState([]);
+  const [vendors, setVendors] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [restockingProduct, setRestockingProduct] = useState(null);
+  const [, setSearchParams] = useSearchParams();
   const addProductRef = useRef(null);
-  const hasSearch = onSearchChange != null;
+  const longPressTimer = useRef(null);
+  const longPressTriggered = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [p, v, a] = await Promise.all([
+          getProducts(),
+          isAdmin ? getVendors() : Promise.resolve([]),
+          isAdmin ? getAccounts() : Promise.resolve([]),
+        ]);
+        if (cancelled) return;
+        setProducts(p);
+        setVendors(v);
+        setAccounts(a);
+      } catch {
+        // search is best-effort - the page still works fine without it
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isAdmin]);
+
+  const q = query.trim().toLowerCase();
+  const matchedItems = q
+    ? flattenParents(products)
+        .filter((p) => !(p.subitems?.length > 0)) // only leaf items ever show up - never an unopenable parent row
+        .filter((p) => p.label.toLowerCase().includes(q)) // matches the item's own name OR any parent/parent-subitem's name
+        .sort((a, b) => compareNames(a.name, b.name))
+    : [];
+  const matchedVendors = q ? vendors.filter((v) => v.name.toLowerCase().includes(q)).sort((a, b) => compareNames(a.name, b.name)) : [];
+  const matchedAccounts = q ? accounts.filter((a) => a.name.toLowerCase().includes(q)).sort((a, b) => compareNames(a.name, b.name)) : [];
+  const hasResults = matchedItems.length > 0 || matchedVendors.length > 0 || matchedAccounts.length > 0;
+
+    const startLongPress = (item) => {
+    if (!isAdmin) return; // can't restock a parent - it has no real stock of its own
+    longPressTriggered.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      setRestockingProduct(item);
+    }, 550);
+  };
+  const cancelLongPress = () => {
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+  };
+  const closeSearch = () => { setQuery(""); setSearchOpen(false); };
+  const handleItemClick = (item) => {
+    if (longPressTriggered.current) { longPressTriggered.current = false; return; }
+    closeSearch();
+    setSearchParams({ view: "items", item: String(item.id) });
+  };
+  const handleVendorClick = () => { closeSearch(); setSearchParams({ view: "vendors" }); };
+  const handleAccountClick = (a) => { closeSearch(); setSearchParams({ view: "accounting", account: String(a.id) }); };
+  const handleRestock = async (id, quantity, note) => {
+    await restockProduct(id, quantity, note);
+    setProducts(await getProducts());
+  };
+
+  const resultsPanel = q && (
+    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-gray-200 rounded-xl shadow-lg max-h-96 overflow-y-auto p-3 space-y-4">
+      {!hasResults ? (
+        <p className="text-sm text-gray-400 text-center py-6">Nothing matches "{query.trim()}".</p>
+      ) : (
+        <>
+          {matchedItems.length > 0 && (
+            <div>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                Items {isAdmin && <span className="text-gray-400 font-normal normal-case">· hold an item to add stock</span>}
+              </h3>
+              <div className="space-y-1.5">
+                {matchedItems.map((p) => (
+                  <button
+                    key={`item-${p.id}`}
+                    type="button"
+                    onClick={() => handleItemClick(p)}
+                    onPointerDown={() => startLongPress(p)}
+                    onPointerUp={cancelLongPress}
+                    onPointerLeave={cancelLongPress}
+                    onPointerCancel={cancelLongPress}
+                    onContextMenu={(e) => e.preventDefault()}
+                    style={{ touchAction: "manipulation", WebkitUserSelect: "none", userSelect: "none" }}
+                    className="w-full flex items-center justify-between gap-3 rounded-lg p-2 text-left hover:bg-gray-50 transition"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{p.label}</p>
+                      <p className="text-xs text-gray-400">{getDepartment(p.department)?.name}</p>
+                    </div>
+                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {matchedVendors.length > 0 && (
+            <div>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Vendors</h3>
+              <div className="space-y-1.5">
+                {matchedVendors.map((v) => (
+                  <button key={`vendor-${v.id}`} type="button" onClick={handleVendorClick}
+                    className="w-full flex items-center justify-between gap-3 rounded-lg p-2 text-left hover:bg-gray-50 transition">
+                    <p className="text-sm font-medium text-gray-900 truncate">{v.name}</p>
+                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {matchedAccounts.length > 0 && (
+            <div>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Accounts</h3>
+              <div className="space-y-1.5">
+                {matchedAccounts.map((a) => (
+                  <button key={`account-${a.id}`} type="button" onClick={() => handleAccountClick(a)}
+                    className="w-full flex items-center justify-between gap-3 rounded-lg p-2 text-left hover:bg-gray-50 transition">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{a.name}</p>
+                      <p className="text-xs text-gray-400">{ACCOUNT_TYPE_NAMES[a.account_type] || a.account_type}</p>
+                    </div>
+                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+
   return (
     <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
       <div className="flex flex-nowrap gap-2 justify-between items-start">
@@ -1846,68 +1982,61 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
             {isAdmin ? "Admin" : "Employee (Read Only)"}
           </span>
         </div>
+
         <div className="flex items-center gap-2 shrink-0 relative">
-          {hasSearch && (
+          <div className="relative hidden md:block w-56 lg:w-72">
+            <SearchBox value={query} onChange={setQuery} placeholder="Search items, vendors, accounts..." />
+            {resultsPanel}
+          </div>
+          <button
+            onClick={() => setSearchOpen((v) => !v)}
+            aria-label="Search"
+            className="md:hidden p-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
+          >
+            <Search size={18} />
+          </button>
+
+          {isAdmin && (
             <>
-              <div className="hidden md:block w-56 lg:w-72">
-                <SearchBox value={search} onChange={onSearchChange} placeholder={searchPlaceholder || "Search..."} />
-              </div>
-              <button
-                onClick={() => setSearchOpen((v) => !v)}
-                aria-label="Search"
-                className="md:hidden p-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
-              >
-                <Search size={18} />
-              </button>
+              {inlineAction}
+              <LowStockBell />
+              {actions && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                  <div
+                    className="absolute right-0 top-full mt-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-2 flex flex-col gap-2 min-w-[190px]"
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    {actions}
+                    {hideAddProduct && (
+                      <button
+                        onClick={() => addProductRef.current?.open()}
+                        className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
+                      >
+                        + Add Product
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+              <AddProductButton ref={addProductRef} onCreated={onProductAdded} hideTrigger={hideAddProduct} />
             </>
           )}
-        {isAdmin && (
-          <>
-            {inlineAction}
-            <LowStockBell />
-            {actions && (
-              <>
-                <button
-                  onClick={() => setMenuOpen((v) => !v)}
-                  aria-label="Page actions"
-                  className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
-                >
-                  <Menu size={18} />
-                </button>
-                {menuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                    <div
-                      className="absolute right-0 top-full mt-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-2 flex flex-col gap-2 min-w-[190px]"
-                      onClick={() => setMenuOpen(false)}
-                    >
-                      {actions}
-                      {hideAddProduct && (
-                        <button
-                          onClick={() => addProductRef.current?.open()}
-                          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
-                        >
-                          + Add Product
-                        </button>
-                      )}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-                        <AddProductButton ref={addProductRef} onCreated={onProductAdded} hideTrigger={hideAddProduct} />
-          </>
-        )}
         </div>
       </div>
 
-      {hasSearch && searchOpen && (
-        <div className="md:hidden mt-3">
-          <SearchBox value={search} onChange={onSearchChange} placeholder={searchPlaceholder || "Search..."} />
+      {searchOpen && (
+        <div className="md:hidden relative mt-3">
+          <SearchBox value={query} onChange={setQuery} placeholder="Search items, vendors, accounts..." />
+          {resultsPanel}
         </div>
       )}
 
       <HomeTabs active={active} isAdmin={isAdmin} onChange={onTab} />
+
+      {restockingProduct && (
+        <RestockModal product={restockingProduct} onSubmit={handleRestock} onClose={() => setRestockingProduct(null)} />
+      )}
     </header>
   );
 }
@@ -2014,10 +2143,8 @@ function ItemRow({ item, onClick, expanded, onToggle }) {
   return (
     <Wrapper
       onClick={hasSubitems ? onToggle : onClick}
-      className={`w-full flex items-center gap-3 border rounded-xl p-3 text-left transition ${
+      className={`w-full flex items-center gap-3 border rounded-xl p-3 text-left bg-white border-gray-200 hover:border-gray-300 transition ${
         hasSubitems ? "hover:bg-gray-50" : "hover:shadow-md"
-      } ${
-        low ? "bg-red-50 border-red-200 hover:border-red-300" : "bg-white border-gray-200 hover:border-gray-300"
       }`}
     >
       <div className="w-12 h-12 shrink-0 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center">
@@ -2652,26 +2779,17 @@ function ManagePage({ go, refreshToken, onProductAdded }) {
 
 
 // ---------- Department home screen ----------
-function DepartmentHome({ isAdmin, onSelect, onSelectItem, onSelectAccount, onTab, refreshToken, onProductAdded }) {
+function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded }) {
   const [itemCounts, setItemCounts] = useState({});
   const [pendingCounts, setPendingCounts] = useState({});
-  const [products, setProducts] = useState([]);
-  const [vendors, setVendors] = useState([]);
-  const [accounts, setAccounts] = useState([]);
-  const [search, setSearch] = useState("");
-  const [restockingProduct, setRestockingProduct] = useState(null);
-  const longPressTimer = useRef(null);
-  const longPressTriggered = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const [products, pending, vendorList, accountList] = await Promise.all([
+        const [products, pending] = await Promise.all([
           getProducts(),
           isAdmin ? getRequests("pending") : Promise.resolve([]),
-          isAdmin ? getVendors() : Promise.resolve([]),
-          isAdmin ? getAccounts() : Promise.resolve([]),
         ]);
         if (cancelled) return;
         const items = {};
@@ -2683,11 +2801,8 @@ function DepartmentHome({ isAdmin, onSelect, onSelectItem, onSelectAccount, onTa
         });
         setItemCounts(items);
         setPendingCounts(waiting);
-        setProducts(products);
-        setVendors(vendorList);
-        setAccounts(accountList);
       } catch {
-        // counts/search data are optional - the cards still work without them
+        // counts are optional - the cards still work without them
       }
     };
     load();
@@ -2695,195 +2810,60 @@ function DepartmentHome({ isAdmin, onSelect, onSelectItem, onSelectAccount, onTa
     return () => { cancelled = true; clearInterval(interval); };
   }, [isAdmin, refreshToken]);
 
-  
-  const startLongPress = (item) => {
-    if (!isAdmin) return;
-    longPressTriggered.current = false;
-    longPressTimer.current = setTimeout(() => {
-      longPressTriggered.current = true;
-      setRestockingProduct(item);
-    }, 550);
-  };
-  const cancelLongPress = () => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  };
-  const handleItemResultClick = (item) => {
-    if (longPressTriggered.current) {
-      longPressTriggered.current = false;
-      return;
-    }
-    onSelectItem(item.id);
-  };
-  const handleRestock = async (id, quantity, note) => {
-    await restockProduct(id, quantity, note);
-    setProducts(await getProducts());
-  };
-
-  const q = search.trim().toLowerCase();
-  const matchedItems = q
-    ? flattenParents(products)
-        .filter((p) => !(p.subitems?.length > 0)) // parents/parent-subitems can't be opened - only leaf items show up
-        .filter((p) => p.name.toLowerCase().includes(q))
-        .sort((a, b) => compareNames(a.name, b.name))
-    : [];
-
-  const matchedVendors = q ? vendors.filter((v) => v.name.toLowerCase().includes(q)).sort((a, b) => compareNames(a.name, b.name)) : [];
-  const matchedAccounts = q ? accounts.filter((a) => a.name.toLowerCase().includes(q)).sort((a, b) => compareNames(a.name, b.name)) : [];
-
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader
-        isAdmin={isAdmin}
-        active="home"
-        onTab={onTab}
-        onProductAdded={onProductAdded}
-        search={search}
-        onSearchChange={setSearch}
-        searchPlaceholder="Search items, vendors, accounts..."
-      />
+      <AppHeader isAdmin={isAdmin} active="home" onTab={onTab} onProductAdded={onProductAdded} />
 
       <main className="p-4 sm:p-6">
-        {q ? (
-          <div className="max-w-4xl space-y-6">
-            {matchedItems.length === 0 && matchedVendors.length === 0 && matchedAccounts.length === 0 ? (
-              <p className="text-gray-400 text-center py-16">Nothing matches "{search.trim()}".</p>
-            ) : (
-              <>
-                {matchedItems.length > 0 && (
-                  <div>
-                    <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">
-                      Items {isAdmin && <span className="text-gray-400 font-normal normal-case">· hold an item to add stock</span>}
-                    </h2>
-                    <div className="space-y-2">
-                      {matchedItems.map((p) => (
-                        <button
-                          key={`item-${p.id}`}
-                          onClick={() => handleItemResultClick(p)}
-                          onPointerDown={() => startLongPress(p)}
-                          onPointerUp={cancelLongPress}
-                          onPointerLeave={cancelLongPress}
-                          onPointerCancel={cancelLongPress}
-                          onContextMenu={(e) => e.preventDefault()}
-                          style={{ touchAction: "manipulation", WebkitUserSelect: "none", userSelect: "none" }}
-                          className="w-full flex items-center justify-between gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:shadow-md hover:border-gray-300 transition"
-                        >
-                          <div className="min-w-0">
-                            <p className="font-medium text-gray-900 truncate">{p.label}</p>
-                            <p className="text-xs text-gray-400">{getDepartment(p.department)?.name}</p>
-                          </div>
-                          <ChevronRight size={18} className="text-gray-400 shrink-0" />
-                        </button>
-                      ))}
-                    </div>
+        <p className="text-sm text-gray-500 mb-4">Select a department</p>
+        <div className="flex flex-col gap-4 max-w-4xl">
+          {DEPARTMENTS.map((d) => {
+            const count = itemCounts[d.slug] || 0;
+            const waiting = pendingCounts[d.slug] || 0;
+            return (
+              <button
+                key={d.slug}
+                onClick={() => onSelect(d.slug)}
+                className="flex items-center gap-3 bg-white border border-gray-200 rounded-2xl p-4 text-left hover:shadow-md hover:border-gray-300 active:scale-[0.99] transition"
+              >
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className="w-14 h-14 shrink-0 rounded-xl border border-gray-200 bg-white flex items-center justify-center overflow-hidden p-1.5">
+                    <img src={d.logo} alt="" className="max-w-full max-h-full object-contain" />
                   </div>
-                )}
+                  <p className="font-semibold text-gray-900 uppercase truncate">{d.name}</p>
 
-                {matchedVendors.length > 0 && (
-                  <div>
-                    <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">Vendors</h2>
-                    <div className="space-y-2">
-                      {matchedVendors.map((v) => (
-                        <button
-                          key={`vendor-${v.id}`}
-                          onClick={() => onTab("vendors")}
-                          className="w-full flex items-center justify-between gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:shadow-md hover:border-gray-300 transition"
-                        >
-                          <p className="font-medium text-gray-900 truncate">{v.name}</p>
-                          <ChevronRight size={18} className="text-gray-400 shrink-0" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {matchedAccounts.length > 0 && (
-                  <div>
-                    <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">Accounts</h2>
-                    <div className="space-y-2">
-                      {matchedAccounts.map((a) => (
-                        <button
-                          key={`account-${a.id}`}
-                          onClick={() => onSelectAccount(a.id)}
-                          className="w-full flex items-center justify-between gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:shadow-md hover:border-gray-300 transition"
-                        >
-                          <div className="min-w-0">
-                            <p className="font-medium text-gray-900 truncate">{a.name}</p>
-                            <p className="text-xs text-gray-400">{ACCOUNT_TYPE_NAMES[a.account_type] || a.account_type}</p>
-                          </div>
-                          <ChevronRight size={18} className="text-gray-400 shrink-0" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        ) : (
-          <>
-            <p className="text-sm text-gray-500 mb-4">Select a department</p>
-            <div className="flex flex-col gap-4 max-w-4xl">
-              {DEPARTMENTS.map((d) => {
-                const count = itemCounts[d.slug] || 0;
-                const waiting = pendingCounts[d.slug] || 0;
-                return (
-                  <button
-                    key={d.slug}
-                    onClick={() => onSelect(d.slug)}
-                    className="flex items-center gap-3 bg-white border border-gray-200 rounded-2xl p-4 text-left hover:shadow-md hover:border-gray-300 active:scale-[0.99] transition"
-                  >
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                  {d.extraLogo && (
+                    <>
+                      <span className="text-gray-300">|</span>
                       <div className="w-14 h-14 shrink-0 rounded-xl border border-gray-200 bg-white flex items-center justify-center overflow-hidden p-1.5">
-                        <img src={d.logo} alt="" className="max-w-full max-h-full object-contain" />
+                        <img src={d.extraLogo} alt="" className="max-w-full max-h-full object-contain" />
                       </div>
-                      <p className="font-semibold text-gray-900 uppercase truncate">{d.name}</p>
+                      <p className="font-semibold text-gray-900 uppercase truncate">{d.extraName}</p>
+                    </>
+                  )}
+                </div>
 
-                      {d.extraLogo && (
-                        <>
-                          <span className="text-gray-300">|</span>
-                          <div className="w-14 h-14 shrink-0 rounded-xl border border-gray-200 bg-white flex items-center justify-center overflow-hidden p-1.5">
-                            <img src={d.extraLogo} alt="" className="max-w-full max-h-full object-contain" />
-                          </div>
-                          <p className="font-semibold text-gray-900 uppercase truncate">{d.extraName}</p>
-                        </>
-                      )}
-                    </div>
+                <p className="shrink-0 text-xs text-gray-400">
+                  {count} {count === 1 ? "item" : "items"}
+                </p>
 
-                    <p className="shrink-0 text-xs text-gray-400">
-                      {count} {count === 1 ? "item" : "items"}
-                    </p>
-
-                    {isAdmin && waiting > 0 && (
-                      <span
-                        title="Pending requests"
-                        className="bg-red-500 text-white text-[11px] font-medium rounded-full min-w-5 h-5 px-1.5 flex items-center justify-center"
-                      >
-                        {waiting}
-                      </span>
-                    )}
-                    <ChevronRight size={18} className="text-gray-400 shrink-0" />
-                  </button>
-                );
-              })}
-            </div>
-          </>
+                {isAdmin && waiting > 0 && (
+                  <span
+                    title="Pending requests"
+                    className="bg-red-500 text-white text-[11px] font-medium rounded-full min-w-5 h-5 px-1.5 flex items-center justify-center"
+                  >
+                    {waiting}
+                  </span>
                 )}
+                <ChevronRight size={18} className="text-gray-400 shrink-0" />
+              </button>
+            );
+          })}
+        </div>
       </main>
-
-      {restockingProduct && (
-        <RestockModal
-          product={restockingProduct}
-          onSubmit={handleRestock}
-          onClose={() => setRestockingProduct(null)}
-        />
-      )}
     </div>
   );
 }
-
 
 
 // ---------- Vendors (admin only) ----------
@@ -4829,11 +4809,9 @@ function AppShell() {
     );
   } else {
     page = (
-      <DepartmentHome
+    <DepartmentHome
         isAdmin={isAdmin}
         onSelect={(slug) => setSearchParams({ dept: slug })}
-        onSelectItem={(id) => setSearchParams({ view: "items", item: String(id) })}
-        onSelectAccount={(id) => setSearchParams({ view: "accounting", account: String(id) })}
         refreshToken={refreshToken}
         onProductAdded={refresh}
         onTab={(tab) => tab !== "home" && setSearchParams({ view: tab })}
