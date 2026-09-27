@@ -1788,8 +1788,8 @@ function LowStockBell() {
         const products = await getProducts(); // every department, top-level items with nested subitems
         const flat = [];
         const walk = (list) => list.forEach((p) => {
-          flat.push(p);
-          if (p.subitems?.length) walk(p.subitems);
+          if (!p.subitems?.length) flat.push(p); // only real leaf items can be "low stock" - categories don't hold their own stock
+          else walk(p.subitems);
         });
         walk(products);
         if (!cancelled) setItems(flat.filter(isLowStock));
