@@ -270,3 +270,50 @@ class InvoiceItem(Base):
 
     invoice = relationship("Invoice", back_populates="items")
     product = relationship("Product")
+
+
+
+class Payment(Base):
+    """Money received from a customer, applied to one or more of their invoices."""
+    __tablename__ = "payments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    payment_number = Column(String(30), nullable=False, unique=True)   # PAY-0001, PAY-0002 ...
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    payment_date = Column(Date, nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False)
+    payment_mode = Column(String(30), nullable=False, default="Cash", server_default="Cash")
+    deposit_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)   # where the money went
+    reference = Column(String(100))
+    notes = Column(Text)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    customer = relationship("Customer")
+    deposit_account = relationship("Account")
+    allocations = relationship("PaymentAllocation", back_populates="payment", cascade="all, delete-orphan",
+                               order_by="PaymentAllocation.id")
+
+    @property
+    def customer_name(self):
+        return self.customer.display_name if self.customer else ""
+
+    @property
+    def deposit_account_name(self):
+        return self.deposit_account.name if self.deposit_account else ""
+
+
+class PaymentAllocation(Base):
+    """How much of a payment was applied to one invoice."""
+    __tablename__ = "payment_allocations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    payment_id = Column(Integer, ForeignKey("payments.id", ondelete="CASCADE"), nullable=False)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False)
+
+    payment = relationship("Payment", back_populates="allocations")
+    invoice = relationship("Invoice")
+
+    @property
+    def invoice_number(self):
+        return self.invoice.invoice_number if self.invoice else ""

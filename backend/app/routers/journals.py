@@ -76,7 +76,7 @@ def delete_journal(journal_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Journal not found")\
 
     if journal.source_type:
-        raise HTTPException(400, "This entry was posted by an invoice. Void the invoice instead.")
+        raise HTTPException(400, "This entry was posted automatically by an invoice or a payment. Void the invoice or delete the payment instead.")
     db.delete(journal)
     db.commit()
     return {"message": "Deleted"}

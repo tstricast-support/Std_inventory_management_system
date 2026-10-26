@@ -369,3 +369,42 @@ class InvoiceOut(BaseModel):
     balance_due: float
     created_at: datetime
     items: List[InvoiceItemOut] = []
+
+
+
+# ---------- Payments received ----------
+class PaymentAllocationCreate(BaseModel):
+    invoice_id: int
+    amount: float
+
+class PaymentCreate(BaseModel):
+    customer_id: int
+    payment_date: date
+    payment_mode: str = "Cash"
+    deposit_account_id: int
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    allocations: List[PaymentAllocationCreate]
+
+class PaymentAllocationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    invoice_id: int
+    invoice_number: str
+    amount: float
+
+class PaymentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    payment_number: str
+    customer_id: int
+    customer_name: str
+    payment_date: date
+    amount: float
+    payment_mode: str
+    deposit_account_id: int
+    deposit_account_name: str
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+    allocations: List[PaymentAllocationOut] = []

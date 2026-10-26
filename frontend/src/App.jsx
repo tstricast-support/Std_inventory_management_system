@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
-import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck, CornerDownRight,Bell,Menu, Settings, MoreVertical, Users, BookOpen,FileText } from "lucide-react";
+import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck, CornerDownRight,Bell,Menu, Settings, MoreVertical, Users, BookOpen,FileText,Wallet } from "lucide-react";
 import "./index.css";
 
 
@@ -104,6 +104,24 @@ async function invoiceRequest(path, method, payload, failMsg) {
 const getInvoices = () => invoiceRequest("", "GET", null, "Failed to fetch invoices");
 const createInvoice = (payload) => invoiceRequest("", "POST", payload, "Failed to save invoice");
 const voidInvoice = (id) => invoiceRequest(`${id}/void`, "PUT", null, "Failed to void invoice");
+
+
+// ---------- Payments received ----------
+async function paymentRequest(path, method, payload, failMsg) {
+  const res = await fetch(`${BASE_URL}/payments/${path}`, {
+    method,
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : failMsg);
+  }
+  return res.json();
+}
+const getPayments = () => paymentRequest("", "GET", null, "Failed to fetch payments");
+const createPayment = (payload) => paymentRequest("", "POST", payload, "Failed to save payment");
+const deletePayment = (id) => paymentRequest(String(id), "DELETE", null, "Failed to delete payment");
 
 // ---------- Accounts (chart of accounts) ----------
 async function getAccounts(accountType) {
@@ -2177,6 +2195,7 @@ function HomeTabs({ active, onChange, isAdmin }) {
       {tab("items", "Items", Tag)}
       {isAdmin && tab("customers", "Customers", Users)}
       {isAdmin && tab("invoices", "Invoices", FileText)}
+      {isAdmin && tab("payments", "Payments", Wallet)}
       {isAdmin && tab("vendors", "Vendors", Truck)}
       {isAdmin && tab("bill", "Bill", Receipt)}
       {isAdmin && tab("issued", "Issued", ClipboardList)}
@@ -4176,7 +4195,7 @@ function InvoicesPage({ isAdmin, go }) {
   };
 
   useEffect(() => { load(); }, []);
-
+  const [payFor, setPayFor] = useState(null); // the invoice whose "Record payment" button was pressed
   const handleVoid = async (inv) => {
     if (!window.confirm(`Void ${inv.invoice_number}? The stock goes back and its ledger entry is removed.`)) return;
     try {
@@ -4268,12 +4287,22 @@ function InvoicesPage({ isAdmin, go }) {
                       </div>
 
                       {inv.status !== "void" && (
-                        <button
-                          onClick={() => handleVoid(inv)}
-                          className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
-                        >
-                          <Trash2 size={14} /> Void invoice
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          {inv.balance_due > 0.004 && (
+                            <button
+                              onClick={() => setPayFor(inv)}
+                              className="inline-flex items-center gap-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-green-700"
+                            >
+                              <Wallet size={14} /> Record payment
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleVoid(inv)}
+                            className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                          >
+                            <Trash2 size={14} /> Void invoice
+                          </button>
+                        </div>
                       )}
                     </div>
                   )}
@@ -4285,6 +4314,15 @@ function InvoicesPage({ isAdmin, go }) {
       </main>
 
       {formOpen && <InvoiceForm onClose={() => setFormOpen(false)} onSaved={load} />}
+
+      {payFor && (
+        <PaymentForm
+          initialCustomerId={payFor.customer_id}
+          initialInvoiceId={payFor.id}
+          onClose={() => setPayFor(null)}
+          onSaved={load}
+        />
+      )}
     </div>
   );
 }
@@ -4502,6 +4540,291 @@ function InvoiceForm({ onClose, onSaved }) {
               className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
               {submitting ? "Saving..." : "Save Invoice"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Payments received (money in: pays off invoices + posts to the ledger, admin only) ----------
+const PAYMENT_MODES = ["Cash", "Bank Transfer", "Cheque", "Card", "Other"];
+const DEPOSIT_ACCOUNT_TYPES = ["cash", "bank", "other_current_asset"]; // where the money can land
+
+function PaymentsPage({ isAdmin, go }) {
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+
+  const load = async () => {
+    try {
+      setPayments(await getPayments());
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleDelete = async (p) => {
+    if (!window.confirm(`Delete ${p.payment_number}? Its invoices will owe the money again and the ledger entry is removed.`)) return;
+    try {
+      await deletePayment(p.id);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const q = search.trim().toLowerCase();
+  const shown = payments.filter(
+    (p) => !q || [p.payment_number, p.customer_name, p.reference].some((v) => (v || "").toLowerCase().includes(q))
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active="payments" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+
+      <main className="p-4 sm:p-6 max-w-3xl">
+        <div className="mb-5 flex gap-3 items-center">
+          <div className="flex-1">
+            <SearchBox value={search} onChange={setSearch} placeholder="Search payments..." />
+          </div>
+          <button
+            onClick={() => setFormOpen(true)}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
+          >
+            + Record Payment
+          </button>
+        </div>
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : shown.length === 0 ? (
+          <p className="text-gray-400 text-center py-16">No payments yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {shown.map((p) => {
+              const open = expandedId === p.id;
+              return (
+                <div key={p.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(open ? null : p.id)}
+                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">
+                        {p.payment_number} <span className="text-gray-400 font-normal">· {p.customer_name}</span>
+                      </p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {formatJournalDate(p.payment_date)} · {p.payment_mode} → {p.deposit_account_name}
+                      </p>
+                    </div>
+                    <span className="shrink-0 font-semibold text-green-700">{formatRs(p.amount)}</span>
+                    {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                  </button>
+
+                  {open && (
+                    <div className="border-t border-gray-100 p-3 space-y-3">
+                      {p.reference && <p className="text-sm text-gray-600">Reference: {p.reference}</p>}
+                      {p.notes && <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">{p.notes}</p>}
+                      <div className="text-sm space-y-1">
+                        <p className="text-xs text-gray-400 uppercase">Applied to</p>
+                        {p.allocations.map((a) => (
+                          <div key={a.id} className="flex justify-between">
+                            <span className="text-gray-900">{a.invoice_number}</span>
+                            <span>{formatRs(a.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => handleDelete(p)}
+                        className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                      >
+                        <Trash2 size={14} /> Delete payment
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      {formOpen && <PaymentForm onClose={() => setFormOpen(false)} onSaved={load} />}
+    </div>
+  );
+}
+
+// initialCustomerId / initialInvoiceId: used by the "Record payment" button on an invoice
+function PaymentForm({ initialCustomerId = "", initialInvoiceId = null, onClose, onSaved }) {
+  const [customers, setCustomers] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [customerId, setCustomerId] = useState(initialCustomerId);
+  const [date, setDate] = useState(toISODate(new Date()));
+  const [mode, setMode] = useState("Cash");
+  const [depositId, setDepositId] = useState("");
+  const [reference, setReference] = useState("");
+  const [notes, setNotes] = useState("");
+  const [applied, setApplied] = useState({}); // invoice id -> amount typed
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  useEffect(() => {
+    Promise.all([getCustomers(), getInvoices(), getAccounts()])
+      .then(([c, inv, acc]) => {
+        setCustomers(c);
+        setInvoices(inv);
+        const deposits = acc.filter((a) => DEPOSIT_ACCOUNT_TYPES.includes(a.account_type));
+        setAccounts(deposits);
+        const preferred = deposits.find((a) => a.name === "Undeposited Funds") || deposits[0];
+        if (preferred) setDepositId(preferred.id);
+        const start = inv.find((i) => i.id === initialInvoiceId);
+        if (start) setApplied({ [start.id]: String(start.balance_due) });
+      })
+      .catch((err) => setError(err.message));
+  }, []);
+
+  const owed = invoices
+    .filter((i) => i.customer_id === customerId && i.status === "open" && i.balance_due > 0.004)
+    .sort((a, b) => (a.due_date < b.due_date ? -1 : 1));
+  const customerOptions = customers.map((c) => ({ value: c.id, label: c.display_name, search: `${c.display_name} ${c.company_name || ""}` }));
+
+  const pickCustomer = (id) => { setCustomerId(id); setApplied({}); };
+  const setAmount = (id, value) => setApplied((prev) => ({ ...prev, [id]: value }));
+
+  const rows = owed.filter((i) => toCents(applied[i.id]) > 0);
+  const totalCents = rows.reduce((s, i) => s + toCents(applied[i.id]), 0);
+  const tooMuch = (i) => toCents(applied[i.id]) > toCents(i.balance_due);
+  const canSave = Boolean(customerId) && Boolean(depositId) && rows.length > 0 && !rows.some(tooMuch);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createPayment({
+        customer_id: customerId,
+        payment_date: date,
+        payment_mode: mode,
+        deposit_account_id: Number(depositId),
+        reference: reference.trim() || null,
+        notes: notes.trim() || null,
+        allocations: rows.map((i) => ({ invoice_id: i.id, amount: Number(applied[i.id]) })),
+      });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 max-h-[92vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-4">Record Payment</h2>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <FieldLabel>Customer</FieldLabel>
+            <SearchSelect
+              value={customerId}
+              onChange={pickCustomer}
+              options={customerOptions}
+              placeholder="Select a customer..."
+              searchPlaceholder="Search customers..."
+              emptyText="No customers found"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label className="text-xs text-gray-500">
+              Payment date
+              <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Payment mode
+              <select value={mode} onChange={(e) => setMode(e.target.value)} className={cls + " mt-1"}>
+                {PAYMENT_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </label>
+            <label className="text-xs text-gray-500">
+              Deposit to
+              <select value={depositId} onChange={(e) => setDepositId(e.target.value)} className={cls + " mt-1"}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <div className="space-y-2">
+            <FieldLabel>Invoices to pay</FieldLabel>
+            {!customerId ? (
+              <p className="text-sm text-gray-400">Pick a customer to see what they owe.</p>
+            ) : owed.length === 0 ? (
+              <p className="text-sm text-gray-400">This customer has no unpaid invoices.</p>
+            ) : (
+              owed.map((i) => (
+                <div key={i.id} className="border border-gray-200 rounded-lg p-3 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">{i.invoice_number}</p>
+                    <p className="text-xs text-gray-400">
+                      Due {formatJournalDate(i.due_date)} · Owes {formatRs(i.balance_due)}
+                    </p>
+                    {tooMuch(i) && <p className="text-xs text-red-600">More than is owed.</p>}
+                  </div>
+                  <input
+                    type="number" min="0" step="0.01" placeholder="0.00"
+                    value={applied[i.id] ?? ""}
+                    onChange={(e) => setAmount(i.id, e.target.value)}
+                    className={cls + " !w-28"}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setAmount(i.id, String(i.balance_due))}
+                    className="text-xs text-blue-600 font-medium whitespace-nowrap"
+                  >
+                    Pay in full
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <input placeholder="Reference (cheque no., transfer ID...)" value={reference} onChange={(e) => setReference(e.target.value)} className={cls} />
+            <input placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} className={cls} />
+          </div>
+
+          <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
+            <span>Amount received</span>
+            <span>{formatRs(totalCents / 100)}</span>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!canSave || submitting}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {submitting ? "Saving..." : "Save Payment"}
             </button>
           </div>
         </form>
@@ -6013,6 +6336,10 @@ function AppShell() {
 
   } else if (searchParams.get("view") === "invoices" && isAdmin) {
     page = <InvoicesPage isAdmin={isAdmin} go={setSearchParams} />;
+
+  } else if (searchParams.get("view") === "payments" && isAdmin) {
+    page = <PaymentsPage isAdmin={isAdmin} go={setSearchParams} />;
+
   } else if (searchParams.get("view") === "vendors" && isAdmin) {
     page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "manage" && isAdmin) {
