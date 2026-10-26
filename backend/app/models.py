@@ -9,7 +9,9 @@ class Account(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(150), nullable=False)
-    account_type = Column(String(20), nullable=False)  # "cogs" | "income" | "asset"
+    account_type = Column(String(20), nullable=False)  # see account_types.py for every allowed value
+    account_code = Column(String(30))                  # optional, e.g. "1000"
+    description = Column(Text)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
 
@@ -22,6 +24,24 @@ class Vendor(Base):
     phone = Column(String(50))
     email = Column(String(150))
     address = Column(Text)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+class Customer(Base):
+    __tablename__ = "customers"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    customer_type = Column(String(20), nullable=False, default="Business", server_default="Business")
+    display_name = Column(String(150), nullable=False, unique=True)
+    company_name = Column(String(150))
+    contact_person = Column(String(150))
+    email = Column(String(150))
+    phone = Column(String(50))
+    billing_address = Column(Text)
+    shipping_address = Column(Text)
+    payment_terms = Column(String(30), nullable=False, default="Due on Receipt", server_default="Due on Receipt")
+    opening_balance = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    notes = Column(Text)
+    is_active = Column(Boolean, nullable=False, default=True, server_default="1")
     created_at = Column(TIMESTAMP, server_default=func.now())
 
 class Product(Base):
@@ -160,3 +180,41 @@ class IssuedRequestLink(Base):
 
     issued_list = relationship("IssuedList", back_populates="request_links")
     request = relationship("ItemRequest")
+
+
+
+class Journal(Base):
+    """A manual journal: a dated set of debit / credit lines that must balance."""
+    __tablename__ = "journals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    journal_number = Column(String(30), nullable=False, unique=True)   # JNL-0001, JNL-0002 ...
+    journal_date = Column(Date, nullable=False)
+    reference = Column(String(100))
+    notes = Column(Text)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    lines = relationship("JournalLine", back_populates="journal", cascade="all, delete-orphan",
+                         order_by="JournalLine.id")
+
+    @property
+    def total(self):
+        return sum((line.debit or 0) for line in self.lines)
+
+
+class JournalLine(Base):
+    __tablename__ = "journal_lines"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    journal_id = Column(Integer, ForeignKey("journals.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    debit = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    credit = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    description = Column(Text)
+
+    journal = relationship("Journal", back_populates="lines")
+    account = relationship("Account")
+
+    @property
+    def account_name(self):
+        return self.account.name if self.account else ""

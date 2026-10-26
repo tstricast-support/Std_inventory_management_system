@@ -8,7 +8,9 @@ from .departments import DEFAULT_DEPARTMENT
 # ---------- Account (chart of accounts) ----------
 class AccountBase(BaseModel):
     name: str
-    account_type: str  # "cogs" | "income" | "asset"
+    account_type: str  # any key of ACCOUNT_CATEGORY in account_types.py
+    account_code: Optional[str] = None
+    description: Optional[str] = None
 
 class AccountCreate(AccountBase):
     pass
@@ -16,6 +18,8 @@ class AccountCreate(AccountBase):
 class AccountUpdate(BaseModel):
     name: Optional[str] = None
     account_type: Optional[str] = None
+    account_code: Optional[str] = None
+    description: Optional[str] = None
 
 class AccountOut(AccountBase):
     model_config = ConfigDict(from_attributes=True)
@@ -26,6 +30,8 @@ class AccountSummary(AccountOut):
     """Account + its total value (used by the Accounting list page)."""
     total_value: float = 0
     item_count: int = 0
+    category: str = ""
+    ledger_balance: float = 0   # balance from journal entries
 
 class AccountItemValue(BaseModel):
     id: int
@@ -41,6 +47,47 @@ class AccountDetail(AccountSummary):
     value_basis: str           # "cost" | "price"
     items: List[AccountItemValue] = []
 
+
+ # ---------- Manual journals ----------
+class JournalLineCreate(BaseModel):
+    account_id: int
+    debit: float = 0
+    credit: float = 0
+    description: Optional[str] = None
+
+class JournalCreate(BaseModel):
+    journal_date: date
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    lines: List[JournalLineCreate]
+
+class JournalLineOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    account_id: int
+    account_name: str
+    debit: float
+    credit: float
+    description: Optional[str] = None
+
+class JournalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    journal_number: str
+    journal_date: date
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+    total: float
+    lines: List[JournalLineOut] = []
+
+class TrialBalanceRow(BaseModel):
+    account_id: int
+    name: str
+    account_type: str
+    category: str
+    debit: float
+    credit: float
 
 # ---------- Vendor ----------
 class VendorBase(BaseModel):
@@ -58,6 +105,28 @@ class VendorOut(VendorBase):
     id: int
     created_at: datetime
 
+# ---------- Customer ----------
+class CustomerBase(BaseModel):
+    customer_type: str = "Business"          # "Business" | "Individual"
+    display_name: str
+    company_name: Optional[str] = None
+    contact_person: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    billing_address: Optional[str] = None
+    shipping_address: Optional[str] = None
+    payment_terms: str = "Due on Receipt"
+    opening_balance: float = 0
+    notes: Optional[str] = None
+    is_active: bool = True
+
+class CustomerCreate(CustomerBase):
+    pass
+
+class CustomerOut(CustomerBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    created_at: datetime
 
 # ---------- Product Image ----------
 class ProductImageOut(BaseModel):

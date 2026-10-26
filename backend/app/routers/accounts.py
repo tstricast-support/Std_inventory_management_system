@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from .. import models, schemas
+from ..account_types import ACCOUNT_CATEGORY, DEBIT_NORMAL
 from ..database import get_db
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
-VALID_TYPES = {"cogs", "income", "asset"}
+VALID_TYPES = set(ACCOUNT_CATEGORY)
 
 
 @router.get("/", response_model=list[schemas.AccountOut])
@@ -59,33 +60,57 @@ def update_account(account_id: int, payload: schemas.AccountUpdate, db: Session 
     db.refresh(account)
     return account
 
-# An account's total value = sum of (stock quantity x rate) over the items linked to it:
+# An item-linked account's total value = sum of (stock quantity x rate) over the items linked to it:
 #   COGS / Asset accounts -> rate = item cost
 #   Income accounts       -> rate = item sales price
+# Only cogs / income / asset accounts can be linked to items; every other type returns None here.
 def _link_column(account_type: str):
     return {
         "cogs": models.Product.cogs_account_id,
         "income": models.Product.income_account_id,
         "asset": models.Product.asset_account_id,
-    }[account_type]
+    }.get(account_type)
 
 
 def _rate_column(account_type: str):
     return models.Product.price if account_type == "income" else models.Product.cost
 
 
+def ledger_net(db: Session) -> dict:
+    """account_id -> (total debits - total credits) from the journal entries."""
+    rows = db.query(
+        models.JournalLine.account_id,
+        func.coalesce(func.sum(models.JournalLine.debit), 0),
+        func.coalesce(func.sum(models.JournalLine.credit), 0),
+    ).group_by(models.JournalLine.account_id).all()
+    return {account_id: float(d) - float(c) for account_id, d, c in rows}
+
+
+def _ledger_balance(account_type: str, net: float) -> float:
+    """Balance on the account's normal side (debit for assets/expenses, credit for the rest)."""
+    balance = net if ACCOUNT_CATEGORY.get(account_type) in DEBIT_NORMAL else -net
+    return round(balance, 2)
+
+
 @router.get("/summary", response_model=list[schemas.AccountSummary])
 def accounts_summary(db: Session = Depends(get_db)):
-    """Every account with its total value and number of linked items."""
+    """Every account with its item value, number of linked items and journal (ledger) balance."""
+    nets = ledger_net(db)
     result = []
     for a in db.query(models.Account).order_by(models.Account.name).all():
-        count, total = db.query(
-            func.count(models.Product.id),
-            func.coalesce(func.sum(models.Product.quantity * _rate_column(a.account_type)), 0),
-        ).filter(_link_column(a.account_type) == a.id).one()
+        count, total = 0, 0
+        link = _link_column(a.account_type)
+        if link is not None:
+            count, total = db.query(
+                func.count(models.Product.id),
+                func.coalesce(func.sum(models.Product.quantity * _rate_column(a.account_type)), 0),
+            ).filter(link == a.id).one()
         result.append({
             "id": a.id, "name": a.name, "account_type": a.account_type,
+            "account_code": a.account_code, "description": a.description,
             "created_at": a.created_at, "total_value": float(total), "item_count": count,
+            "category": ACCOUNT_CATEGORY.get(a.account_type, ""),
+            "ledger_balance": _ledger_balance(a.account_type, nets.get(a.id, 0.0)),
         })
     return result
 
@@ -96,11 +121,10 @@ def account_detail(account_id: int, db: Session = Depends(get_db)):
     a = db.query(models.Account).get(account_id)
     if not a:
         raise HTTPException(404, "Account not found")
+    link = _link_column(a.account_type)
     products = (
-        db.query(models.Product)
-        .filter(_link_column(a.account_type) == a.id)
-        .order_by(models.Product.name)
-        .all()
+        db.query(models.Product).filter(link == a.id).order_by(models.Product.name).all()
+        if link is not None else []
     )
     items = []
     for p in products:
@@ -111,8 +135,12 @@ def account_detail(account_id: int, db: Session = Depends(get_db)):
             "parent_name": p.parent.name if p.parent else None,
         })
     return {
-        "id": a.id, "name": a.name, "account_type": a.account_type, "created_at": a.created_at,
+        "id": a.id, "name": a.name, "account_type": a.account_type,
+        "account_code": a.account_code, "description": a.description,
+        "created_at": a.created_at,
         "total_value": sum(i["value"] for i in items), "item_count": len(items),
+        "category": ACCOUNT_CATEGORY.get(a.account_type, ""),
+        "ledger_balance": _ledger_balance(a.account_type, ledger_net(db).get(a.id, 0.0)),
         "value_basis": "price" if a.account_type == "income" else "cost",
         "items": items,
     }
@@ -123,6 +151,8 @@ def delete_account(account_id: int, db: Session = Depends(get_db)):
     account = db.query(models.Account).get(account_id)
     if not account:
         raise HTTPException(404, "Account not found")
+    if db.query(models.JournalLine).filter(models.JournalLine.account_id == account_id).first():
+        raise HTTPException(400, "This account has journal entries, so it can't be deleted")
     db.delete(account)
     db.commit()
     return {"message": "Deleted"}

@@ -2,8 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 from app.departments import DEFAULT_DEPARTMENT
+from app.account_types import DEFAULT_ACCOUNTS
 from app.database import Base, engine
-from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts
+from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers,journals 
 Base.metadata.create_all(bind=engine) 
 
 def add_department_column():
@@ -41,6 +42,34 @@ def add_accounting_columns():
 
 
 add_accounting_columns()
+
+def add_account_columns():
+    """create_all() never alters existing tables, so add the new chart-of-accounts columns by hand."""
+    existing = [c["name"] for c in inspect(engine).get_columns("accounts")]
+    with engine.begin() as conn:
+        for col, ddl in {"account_code": "VARCHAR(30)", "description": "TEXT"}.items():
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE accounts ADD COLUMN {col} {ddl}"))
+
+
+add_account_columns()
+
+def seed_default_accounts():
+    """First start after the chart-of-accounts upgrade: add Zoho-style default accounts once."""
+    with engine.begin() as conn:
+        has_new_types = conn.execute(text(
+            "SELECT 1 FROM accounts WHERE account_type NOT IN ('cogs', 'income', 'asset') LIMIT 1"
+        )).first()
+        if has_new_types:
+            return
+        for name, account_type in DEFAULT_ACCOUNTS:
+            conn.execute(
+                text("INSERT INTO accounts (name, account_type) VALUES (:n, :t)"),
+                {"n": name, "t": account_type},
+            )
+
+
+seed_default_accounts()
 
 def merge_photobook_into_i_lab():
     """I Photobook was merged into I Lab: move any products still using the old department."""
@@ -82,7 +111,8 @@ app.include_router(bills.router)
 app.include_router(issued.router)
 app.include_router(vendors.router)
 app.include_router(accounts.router)
-
+app.include_router(customers.router)
+app.include_router(journals.router)
 
 @app.get("/")
 def root():

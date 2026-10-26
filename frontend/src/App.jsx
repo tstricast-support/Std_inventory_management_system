@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
-import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck, CornerDownRight,Bell,Menu, Settings, MoreVertical } from "lucide-react";
+import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck, CornerDownRight,Bell,Menu, Settings, MoreVertical, Users, BookOpen } from "lucide-react";
 import "./index.css";
 
 
@@ -69,6 +69,24 @@ async function deleteVendor(id) {
   return res.json();
 }
 
+// ---------- Customers ----------
+async function customerRequest(path, method, payload, failMsg) {
+  const res = await fetch(`${BASE_URL}/customers/${path}`, {
+    method,
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : failMsg);
+  }
+  return res.json();
+}
+const getCustomers = () => customerRequest("", "GET", null, "Failed to fetch customers");
+const createCustomer = (payload) => customerRequest("", "POST", payload, "Failed to create customer");
+const updateCustomer = (id, payload) => customerRequest(String(id), "PUT", payload, "Failed to update customer");
+const deleteCustomer = (id) => customerRequest(String(id), "DELETE", null, "Failed to delete customer");
+
 // ---------- Accounts (chart of accounts) ----------
 async function getAccounts(accountType) {
   const url = accountType ? `${BASE_URL}/accounts/?account_type=${accountType}` : `${BASE_URL}/accounts/`;
@@ -122,6 +140,24 @@ async function getAccountDetail(id) {
   if (!res.ok) throw new Error(res.status === 404 ? "This account no longer exists." : "Failed to fetch account");
   return res.json();
 }
+
+// ---------- Journals ----------
+async function journalRequest(path, method, payload, failMsg) {
+  const res = await fetch(`${BASE_URL}/journals/${path}`, {
+    method,
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : failMsg);
+  }
+  return res.json();
+}
+const getJournals = () => journalRequest("", "GET", null, "Failed to fetch journals");
+const createJournal = (payload) => journalRequest("", "POST", payload, "Failed to save journal");
+const deleteJournal = (id) => journalRequest(String(id), "DELETE", null, "Failed to delete journal");
+const getTrialBalance = () => journalRequest("trial-balance", "GET", null, "Failed to fetch trial balance");
 
 async function createProduct(formValues, imageFiles) {
   const formData = new FormData();
@@ -2115,11 +2151,13 @@ function HomeTabs({ active, onChange, isAdmin }) {
       {label}
     </button>
   );
-   return (
+  return (
     <div className="flex gap-5 border-b border-gray-100 -mb-4 mt-3 overflow-x-auto">
       {tab("home", "Home", LayoutGrid)}
       {isAdmin && tab("accounting", "Acc.", Landmark)}
+      {isAdmin && tab("journals", "Journals", BookOpen)}
       {tab("items", "Items", Tag)}
+      {isAdmin && tab("customers", "Customers", Users)}
       {isAdmin && tab("vendors", "Vendors", Truck)}
       {isAdmin && tab("bill", "Bill", Receipt)}
       {isAdmin && tab("issued", "Issued", ClipboardList)}
@@ -3189,18 +3227,235 @@ function VendorForm({ initialData, onClose, onSubmit }) {
   );
 }
 
-// ---------- Accounting: chart of accounts (COGS / Income / Asset), admin only ----------
+// ---------- Customers (admin only) ----------
+const CUSTOMER_TERMS = ["Due on Receipt", "Net 15", "Net 30", "Net 45", "Net 60"];
+
+function CustomersPage({ isAdmin, go }) {
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  const load = async () => {
+    try {
+      setCustomers(await getCustomers());
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleDelete = async () => {
+    try {
+      await deleteCustomer(deleteTarget.id);
+      setDeleteTarget(null);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const q = search.trim().toLowerCase();
+  const shown = [...customers]
+    .sort((a, b) => compareNames(a.display_name, b.display_name))
+    .filter((c) => !q || [c.display_name, c.company_name, c.email, c.phone].some((v) => (v || "").toLowerCase().includes(q)));
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active="customers" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+
+      <main className="p-4 sm:p-6 max-w-3xl">
+        <div className="mb-5 flex gap-3 items-center">
+          <div className="flex-1">
+            <SearchBox value={search} onChange={setSearch} placeholder="Search customers..." />
+          </div>
+          <button
+            onClick={() => { setEditing(null); setFormOpen(true); }}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
+          >
+            + New Customer
+          </button>
+        </div>
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : shown.length === 0 ? (
+          <p className="text-gray-400 text-center py-16">No customers yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {shown.map((c) => (
+              <div key={c.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-gray-900 truncate">{c.display_name}</p>
+                  <p className="text-xs text-gray-400 truncate">
+                    {[c.company_name, c.email, c.phone].filter(Boolean).join(" · ") || "No contact details"}
+                  </p>
+                </div>
+                <div className="text-right text-xs text-gray-500 hidden sm:block">
+                  <p>{c.payment_terms}</p>
+                  <p>Opening: {formatRs(c.opening_balance)}</p>
+                </div>
+                <ItemActionsMenu
+                  onEdit={() => { setEditing(c); setFormOpen(true); }}
+                  onDelete={() => setDeleteTarget(c)}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {formOpen && (
+        <CustomerForm
+          initialData={editing}
+          onClose={() => { setFormOpen(false); setEditing(null); }}
+          onSubmit={async (id, payload) => {
+            if (id) await updateCustomer(id, payload);
+            else await createCustomer(payload);
+            await load();
+          }}
+        />
+      )}
+
+      {deleteTarget && (
+        <TypedDeleteConfirm
+          label={deleteTarget.display_name}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
+        />
+      )}
+    </div>
+  );
+}
+
+function CustomerForm({ initialData, onClose, onSubmit }) {
+  const isEditMode = Boolean(initialData);
+  const [form, setForm] = useState({
+    customer_type: initialData?.customer_type || "Business",
+    display_name: initialData?.display_name || "",
+    company_name: initialData?.company_name || "",
+    contact_person: initialData?.contact_person || "",
+    email: initialData?.email || "",
+    phone: initialData?.phone || "",
+    billing_address: initialData?.billing_address || "",
+    shipping_address: initialData?.shipping_address || "",
+    payment_terms: initialData?.payment_terms || "Due on Receipt",
+    opening_balance: initialData?.opening_balance ?? 0,
+    notes: initialData?.notes || "",
+    is_active: initialData?.is_active ?? true,
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSubmit(isEditMode ? initialData.id : null, { ...form, opening_balance: Number(form.opening_balance) || 0 });
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-4">{isEditMode ? "Edit Customer" : "New Customer"}</h2>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="flex gap-4 text-sm">
+            {["Business", "Individual"].map((t) => (
+              <label key={t} className="flex items-center gap-1.5">
+                <input type="radio" checked={form.customer_type === t} onChange={() => set("customer_type", t)} />
+                {t}
+              </label>
+            ))}
+          </div>
+          <input required placeholder="Customer display name *" value={form.display_name} onChange={(e) => set("display_name", e.target.value)} className={cls} />
+          <div className="grid grid-cols-2 gap-3">
+            <input placeholder="Company name" value={form.company_name} onChange={(e) => set("company_name", e.target.value)} className={cls} />
+            <input placeholder="Contact person" value={form.contact_person} onChange={(e) => set("contact_person", e.target.value)} className={cls} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <input type="email" placeholder="Email" value={form.email} onChange={(e) => set("email", e.target.value)} className={cls} />
+            <input placeholder="Phone" value={form.phone} onChange={(e) => set("phone", e.target.value)} className={cls} />
+          </div>
+          <textarea rows={2} placeholder="Billing address" value={form.billing_address} onChange={(e) => set("billing_address", e.target.value)} className={cls} />
+          <textarea rows={2} placeholder="Shipping address" value={form.shipping_address} onChange={(e) => set("shipping_address", e.target.value)} className={cls} />
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs text-gray-500">
+              Payment terms
+              <select value={form.payment_terms} onChange={(e) => set("payment_terms", e.target.value)} className={cls + " mt-1"}>
+                {CUSTOMER_TERMS.map((t) => <option key={t}>{t}</option>)}
+              </select>
+            </label>
+            <label className="text-xs text-gray-500">
+              Opening balance (Rs.)
+              <input type="number" step="0.01" value={form.opening_balance} onChange={(e) => set("opening_balance", e.target.value)} className={cls + " mt-1"} />
+            </label>
+          </div>
+          <textarea rows={2} placeholder="Notes" value={form.notes} onChange={(e) => set("notes", e.target.value)} className={cls} />
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={form.is_active} onChange={(e) => set("is_active", e.target.checked)} />
+            Active
+          </label>
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+              {submitting ? "Saving..." : "Save Customer"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Accounting: chart of accounts, admin only ----------
+// key = account_type stored in the database (must match backend/app/account_types.py)
+// cogs / income / asset are the original item-linked types; the rest are the new Zoho-style types.
 const ACCOUNT_TYPES = [
-  { key: "cogs", label: "Cost of Goods Sold (COGS) Accounts" },
-  { key: "income", label: "Income Accounts" },
-  { key: "asset", label: "Asset Accounts" },
+  { key: "cash", label: "Cash Accounts", name: "Cash account", group: "Asset" },
+  { key: "bank", label: "Bank Accounts", name: "Bank account", group: "Asset" },
+  { key: "accounts_receivable", label: "Accounts Receivable", name: "Accounts receivable", group: "Asset" },
+  { key: "other_current_asset", label: "Other Current Assets", name: "Other current asset", group: "Asset" },
+  { key: "asset", label: "Asset Accounts", name: "Asset account", group: "Asset" },
+  { key: "fixed_asset", label: "Fixed Assets", name: "Fixed asset", group: "Asset" },
+  { key: "accounts_payable", label: "Accounts Payable", name: "Accounts payable", group: "Liability" },
+  { key: "credit_card", label: "Credit Cards", name: "Credit card", group: "Liability" },
+  { key: "current_liability", label: "Other Current Liabilities", name: "Other current liability", group: "Liability" },
+  { key: "long_term_liability", label: "Long Term Liabilities", name: "Long term liability", group: "Liability" },
+  { key: "equity", label: "Equity", name: "Equity account", group: "Equity" },
+  { key: "income", label: "Income Accounts", name: "Income account", group: "Income" },
+  { key: "other_income", label: "Other Income", name: "Other income", group: "Income" },
+  { key: "cogs", label: "Cost of Goods Sold (COGS) Accounts", name: "COGS account", group: "Expense" },
+  { key: "expense", label: "Expenses", name: "Expense account", group: "Expense" },
+  { key: "other_expense", label: "Other Expenses", name: "Other expense", group: "Expense" },
 ];
+const ACCOUNT_GROUPS = ["Asset", "Liability", "Equity", "Income", "Expense"];
+const ACCOUNT_GROUP_OF = Object.fromEntries(ACCOUNT_TYPES.map((t) => [t.key, t.group]));
+// only these three can be picked on an item (Items form); they show stock value instead of ledger balance
+const ITEM_LINKED_TYPES = new Set(["cogs", "income", "asset"]);
 
 const formatRs = (n) =>
   `Rs.${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const ACCOUNT_TYPE_NAMES = { cogs: "COGS account", income: "Income account", asset: "Asset account" };
-
+const ACCOUNT_TYPE_NAMES = Object.fromEntries(ACCOUNT_TYPES.map((t) => [t.key, t.name]));
 
 
 function TypedDeleteConfirm({ label, onConfirm, onCancel }) {
@@ -3257,7 +3512,7 @@ function AccountDetail({ accountId, go, fromParam }) {
     return () => { cancelled = true; };
   }, [accountId]);
 
-    const handleDelete = async () => {
+  const handleDelete = async () => {
     try {
       await deleteAccount(data.id);
       back();
@@ -3267,6 +3522,7 @@ function AccountDetail({ accountId, go, fromParam }) {
   };
 
   const basisLabel = data?.value_basis === "price" ? "sales price" : "cost";
+  const itemLinked = data ? ITEM_LINKED_TYPES.has(data.account_type) : false;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -3284,57 +3540,67 @@ function AccountDetail({ accountId, go, fromParam }) {
           <>
             <div className="bg-white border border-gray-200 rounded-xl p-4">
               <dl className="space-y-2 text-sm">
-                <DetailRow label="Total value" value={formatRs(data.total_value)} />
-                <DetailRow label="Items linked" value={data.item_count} />
-                <DetailRow label="Calculated as" value={`Stock quantity × ${basisLabel}`} />
+                <DetailRow label="Category" value={data.category || "—"} />
+                {data.account_code && <DetailRow label="Account code" value={data.account_code} />}
+                <DetailRow label="Ledger balance" value={formatRs(data.ledger_balance)} />
+                {itemLinked && (
+                  <>
+                    <DetailRow label="Total value" value={formatRs(data.total_value)} />
+                    <DetailRow label="Items linked" value={data.item_count} />
+                    <DetailRow label="Calculated as" value={`Stock quantity × ${basisLabel}`} />
+                  </>
+                )}
+                {data.description && <DetailRow label="Description" value={data.description} />}
               </dl>
             </div>
 
-            <div>
-              <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
-                Items using this account <span className="text-gray-400 font-normal">({data.items.length})</span>
-              </h2>
-              {data.items.length === 0 ? (
-                <p className="text-gray-400 text-sm">No items use this account yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {data.items.map((i) => (
-                    <button
-                      key={i.id}
-                      type="button"
-                      onClick={() => go({ view: "items", item: String(i.id) })}
-                      className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-gray-900 truncate">{i.name}</p>
-                        <p className="text-xs text-gray-400 truncate">
-                          {i.parent_name ? `Subitem of ${i.parent_name} · ` : ""}
-                          {DEPARTMENTS.find((d) => d.slug === i.department)?.name || i.department}
-                          {" · "}{i.quantity} × {formatRs(i.unit_value)}
-                        </p>
-                      </div>
-                      <span className="shrink-0 font-semibold text-gray-900">{formatRs(i.value)}</span>
-                      <ChevronRight size={16} className="shrink-0 text-gray-400" />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            {itemLinked && (
+              <div>
+                <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
+                  Items using this account <span className="text-gray-400 font-normal">({data.items.length})</span>
+                </h2>
+                {data.items.length === 0 ? (
+                  <p className="text-gray-400 text-sm">No items use this account yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {data.items.map((i) => (
+                      <button
+                        key={i.id}
+                        type="button"
+                        onClick={() => go({ view: "items", item: String(i.id) })}
+                        className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-900 truncate">{i.name}</p>
+                          <p className="text-xs text-gray-400 truncate">
+                            {i.parent_name ? `Subitem of ${i.parent_name} · ` : ""}
+                            {DEPARTMENTS.find((d) => d.slug === i.department)?.name || i.department}
+                            {" · "}{i.quantity} × {formatRs(i.unit_value)}
+                          </p>
+                        </div>
+                        <span className="shrink-0 font-semibold text-gray-900">{formatRs(i.value)}</span>
+                        <ChevronRight size={16} className="shrink-0 text-gray-400" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex gap-2">
-            <button
-              onClick={() => setShowEditForm(true)}
-              className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50"
-            >
-              <Pencil size={16} /> Edit account
-            </button>
-            <button
-              onClick={() => setShowDeleteConfirm(true)}
-              className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-50"
-            >
-              <Trash2 size={16} /> Delete account
-            </button>
-          </div>
+              <button
+                onClick={() => setShowEditForm(true)}
+                className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50"
+              >
+                <Pencil size={16} /> Edit account
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-50"
+              >
+                <Trash2 size={16} /> Delete account
+              </button>
+            </div>
           </>
         )}
       </main>
@@ -3360,7 +3626,6 @@ function AccountDetail({ accountId, go, fromParam }) {
     </div>
   );
 }
-
 function AccountingPage({ isAdmin, go }) {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -3403,32 +3668,38 @@ function AccountingPage({ isAdmin, go }) {
             const list = accounts
               .filter((a) => a.account_type === key)
               .sort((a, b) => compareNames(a.name, b.name));
+            if (list.length === 0) return null; // only show account types that have accounts
             return (
               <div key={key}>
                 <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
                   {label} <span className="text-gray-400 font-normal">({list.length})</span>
                 </h2>
-                {list.length === 0 ? (
-                  <p className="text-gray-400 text-sm">No accounts yet.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {list.map((a) => (
-                      <button
-                        key={a.id}
-                        type="button"
-                        onClick={() => go({ view: "accounting", account: String(a.id) })}
-                        className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors"
-                      >
-                        <div className="w-9 h-9 shrink-0 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
-                          <Landmark size={16} />
-                        </div>
-                        <p className="flex-1 min-w-0 font-medium text-gray-900 truncate">{a.name}</p>
-                        <span className="shrink-0 font-semibold text-gray-900">{formatRs(a.total_value)}</span>
-                        <ChevronRight size={16} className="shrink-0 text-gray-400" />
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-2">
+                  {list.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => go({ view: "accounting", account: String(a.id) })}
+                      className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="w-9 h-9 shrink-0 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                        <Landmark size={16} />
+                      </div>
+                      <p className="flex-1 min-w-0 font-medium text-gray-900 truncate">
+                        {a.account_code ? `${a.account_code} · ` : ""}{a.name}
+                      </p>
+                      <span className="shrink-0 text-right">
+                        <span className="block font-semibold text-gray-900">
+                          {formatRs(ITEM_LINKED_TYPES.has(a.account_type) ? a.total_value : a.ledger_balance)}
+                        </span>
+                        {ITEM_LINKED_TYPES.has(a.account_type) && a.ledger_balance !== 0 && (
+                          <span className="block text-xs text-gray-400">Ledger {formatRs(a.ledger_balance)}</span>
+                        )}
+                      </span>
+                      <ChevronRight size={16} className="shrink-0 text-gray-400" />
+                    </button>
+                  ))}
+                </div>
               </div>
             );
           })
@@ -3450,6 +3721,8 @@ function AccountForm({ initialData, onClose, onSubmit }) {
   const [form, setForm] = useState({
     name: initialData?.name || "",
     account_type: initialData?.account_type || "cogs",
+    account_code: initialData?.account_code || "",
+    description: initialData?.description || "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -3473,32 +3746,356 @@ function AccountForm({ initialData, onClose, onSubmit }) {
     }
   };
 
+  const fieldCls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
         <h2 className="text-lg font-semibold mb-4">{isEditMode ? "Edit Account" : "Add Account"}</h2>
         {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-3">
           <input required placeholder="Account name" value={form.name} onChange={(e) => handleChange("name", e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className={fieldCls} />
           <div>
             <label className="block text-xs text-gray-500 mb-1">Account type</label>
             <select
               value={form.account_type}
               onChange={(e) => handleChange("account_type", e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className={fieldCls}
             >
-              {ACCOUNT_TYPES.map((t) => (
-                <option key={t.key} value={t.key}>{t.label}</option>
+              {ACCOUNT_GROUPS.map((g) => (
+                <optgroup key={g} label={g}>
+                  {ACCOUNT_TYPES.filter((t) => t.group === g).map((t) => (
+                    <option key={t.key} value={t.key}>{t.label}</option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </div>
+          <input placeholder="Account code (optional)" value={form.account_code}
+            onChange={(e) => handleChange("account_code", e.target.value)} className={fieldCls} />
+          <textarea placeholder="Description (optional)" rows={2} value={form.description}
+            onChange={(e) => handleChange("description", e.target.value)} className={fieldCls} />
           <div className="flex gap-2 pt-2">
             <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
               Cancel
             </button>
             <button type="submit" disabled={submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
               {submitting ? "Saving..." : "Save Account"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Manual journals + trial balance (admin only) ----------
+const formatJournalDate = (iso) =>
+  new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+
+function JournalsPage({ isAdmin, go }) {
+  const [tab, setTab] = useState("journals"); // "journals" | "trial"
+  const [journals, setJournals] = useState([]);
+  const [trial, setTrial] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  const load = async () => {
+    try {
+      const [j, t] = await Promise.all([getJournals(), getTrialBalance()]);
+      setJournals(j);
+      setTrial(t);
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleDelete = async () => {
+    try {
+      await deleteJournal(deleteTarget.id);
+      setDeleteTarget(null);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const totalDebit = trial.reduce((s, r) => s + r.debit, 0);
+  const totalCredit = trial.reduce((s, r) => s + r.credit, 0);
+
+  const subTab = (id, label) => (
+    <button
+      onClick={() => setTab(id)}
+      className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+        tab === id ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active="journals" onTab={(t) => go(t === "home" ? {} : { view: t })} />
+
+      <main className="p-4 sm:p-6 max-w-3xl">
+        <div className="mb-5 flex items-center gap-2">
+          {subTab("journals", "Journals")}
+          {subTab("trial", "Trial balance")}
+          <div className="flex-1" />
+          {tab === "journals" && (
+            <button
+              onClick={() => setFormOpen(true)}
+              className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
+            >
+              + New Journal
+            </button>
+          )}
+        </div>
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : tab === "journals" ? (
+          journals.length === 0 ? (
+            <p className="text-gray-400 text-center py-16">No manual journals yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {journals.map((j) => (
+                <div key={j.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(expandedId === j.id ? null : j.id)}
+                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">{j.journal_number}</p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {formatJournalDate(j.journal_date)}
+                        {(j.reference || j.notes) && ` · ${j.reference || j.notes}`}
+                      </p>
+                    </div>
+                    <span className="shrink-0 font-semibold text-gray-900">{formatRs(j.total)}</span>
+                    {expandedId === j.id ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                  </button>
+
+                  {expandedId === j.id && (
+                    <div className="border-t border-gray-100 p-3 space-y-3">
+                      {j.notes && <p className="text-sm text-gray-600">{j.notes}</p>}
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-xs text-gray-400 uppercase text-left">
+                            <th className="font-medium pb-1">Account</th>
+                            <th className="font-medium pb-1 text-right">Debit</th>
+                            <th className="font-medium pb-1 text-right">Credit</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {j.lines.map((l) => (
+                            <tr key={l.id} className="border-t border-gray-50">
+                              <td className="py-1.5 pr-2">
+                                <p className="text-gray-900">{l.account_name}</p>
+                                {l.description && <p className="text-xs text-gray-400">{l.description}</p>}
+                              </td>
+                              <td className="py-1.5 text-right">{l.debit > 0 ? formatRs(l.debit) : ""}</td>
+                              <td className="py-1.5 text-right">{l.credit > 0 ? formatRs(l.credit) : ""}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <button
+                        onClick={() => setDeleteTarget(j)}
+                        className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                      >
+                        <Trash2 size={14} /> Delete journal
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )
+        ) : trial.length === 0 ? (
+          <p className="text-gray-400 text-center py-16">Nothing to show yet. Add a journal first.</p>
+        ) : (
+          <div className="bg-white border border-gray-200 rounded-xl p-3">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-gray-400 uppercase text-left">
+                  <th className="font-medium pb-1">Account</th>
+                  <th className="font-medium pb-1 text-right">Debit</th>
+                  <th className="font-medium pb-1 text-right">Credit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trial.map((r) => (
+                  <tr key={r.account_id} className="border-t border-gray-50">
+                    <td className="py-1.5 pr-2">
+                      <p className="text-gray-900">{r.name}</p>
+                      <p className="text-xs text-gray-400">{ACCOUNT_TYPE_NAMES[r.account_type] || r.account_type}</p>
+                    </td>
+                    <td className="py-1.5 text-right">{r.debit > 0 ? formatRs(r.debit) : ""}</td>
+                    <td className="py-1.5 text-right">{r.credit > 0 ? formatRs(r.credit) : ""}</td>
+                  </tr>
+                ))}
+                <tr className="border-t-2 border-gray-200 font-semibold">
+                  <td className="py-2">Total</td>
+                  <td className="py-2 text-right">{formatRs(totalDebit)}</td>
+                  <td className="py-2 text-right">{formatRs(totalCredit)}</td>
+                </tr>
+              </tbody>
+            </table>
+            <p className={`mt-2 text-xs ${Math.abs(totalDebit - totalCredit) < 0.005 ? "text-green-600" : "text-red-600"}`}>
+              {Math.abs(totalDebit - totalCredit) < 0.005 ? "Balanced: debits equal credits." : "Out of balance!"}
+            </p>
+          </div>
+        )}
+      </main>
+
+      {formOpen && <JournalForm onClose={() => setFormOpen(false)} onSaved={load} />}
+
+      {deleteTarget && (
+        <TypedDeleteConfirm
+          label={deleteTarget.journal_number}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
+        />
+      )}
+    </div>
+  );
+}
+
+const blankJournalLine = () => ({ account_id: "", debit: "", credit: "", description: "" });
+const toCents = (v) => Math.round((Number(v) || 0) * 100);
+
+function JournalForm({ onClose, onSaved }) {
+  const [accounts, setAccounts] = useState([]);
+  const [date, setDate] = useState(toISODate(new Date()));
+  const [reference, setReference] = useState("");
+  const [notes, setNotes] = useState("");
+  const [lines, setLines] = useState([blankJournalLine(), blankJournalLine()]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  useEffect(() => {
+    getAccounts().then(setAccounts).catch((err) => setError(err.message));
+  }, []);
+
+  const setLine = (i, patch) => setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+
+  const totalDebit = lines.reduce((s, l) => s + toCents(l.debit), 0);
+  const totalCredit = lines.reduce((s, l) => s + toCents(l.credit), 0);
+  const hasAmount = (l) => toCents(l.debit) > 0 || toCents(l.credit) > 0;
+  const filled = lines.filter((l) => l.account_id && hasAmount(l));
+  const missingAccount = lines.some((l) => hasAmount(l) && !l.account_id);
+  const canSave = filled.length >= 2 && !missingAccount && totalDebit === totalCredit && totalDebit > 0;
+  const difference = (totalDebit - totalCredit) / 100;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createJournal({
+        journal_date: date,
+        reference: reference.trim() || null,
+        notes: notes.trim() || null,
+        lines: filled.map((l) => ({
+          account_id: Number(l.account_id),
+          debit: Number(l.debit) || 0,
+          credit: Number(l.credit) || 0,
+          description: l.description.trim() || null,
+        })),
+      });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 max-h-[92vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-4">New Manual Journal</h2>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs text-gray-500">
+              Date
+              <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Reference
+              <input value={reference} onChange={(e) => setReference(e.target.value)} className={cls + " mt-1"} />
+            </label>
+          </div>
+          <textarea rows={2} placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} className={cls} />
+
+          <div className="space-y-3">
+            {lines.map((l, i) => (
+              <div key={i} className="border border-gray-200 rounded-lg p-3 space-y-2">
+                <select value={l.account_id} onChange={(e) => setLine(i, { account_id: e.target.value })} className={cls}>
+                  <option value="">Select account...</option>
+                  {ACCOUNT_GROUPS.map((g) => (
+                    <optgroup key={g} label={g}>
+                      {accounts
+                        .filter((a) => ACCOUNT_GROUP_OF[a.account_type] === g)
+                        .sort((a, b) => compareNames(a.name, b.name))
+                        .map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </optgroup>
+                  ))}
+                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="number" min="0" step="0.01" placeholder="Debit" value={l.debit}
+                    onChange={(e) => setLine(i, { debit: e.target.value, credit: e.target.value ? "" : l.credit })} className={cls} />
+                  <input type="number" min="0" step="0.01" placeholder="Credit" value={l.credit}
+                    onChange={(e) => setLine(i, { credit: e.target.value, debit: e.target.value ? "" : l.debit })} className={cls} />
+                </div>
+                <div className="flex gap-2">
+                  <input placeholder="Description (optional)" value={l.description}
+                    onChange={(e) => setLine(i, { description: e.target.value })} className={cls} />
+                  {lines.length > 2 && (
+                    <button type="button" title="Remove line"
+                      onClick={() => setLines((prev) => prev.filter((_, idx) => idx !== i))}
+                      className="shrink-0 border border-gray-300 rounded-lg px-3 text-gray-500 hover:bg-gray-50">
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+            <button type="button" onClick={() => setLines((prev) => [...prev, blankJournalLine()])}
+              className="text-sm text-blue-600 font-medium inline-flex items-center gap-1">
+              <Plus size={14} /> Add another line
+            </button>
+          </div>
+
+          <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
+            <div className="flex justify-between"><span className="text-gray-500">Total debit</span><span>{formatRs(totalDebit / 100)}</span></div>
+            <div className="flex justify-between"><span className="text-gray-500">Total credit</span><span>{formatRs(totalCredit / 100)}</span></div>
+            <div className={`flex justify-between font-semibold ${difference === 0 ? "text-green-600" : "text-red-600"}`}>
+              <span>Difference</span><span>{formatRs(Math.abs(difference))}</span>
+            </div>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={!canSave || submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+              {submitting ? "Saving..." : "Save Journal"}
             </button>
           </div>
         </form>
@@ -5003,6 +5600,10 @@ function AppShell() {
     page = searchParams.get("account")
       ? <AccountDetail accountId={searchParams.get("account")} go={setSearchParams} fromParam={searchParams.get("from")} />
       : <AccountingPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "journals" && isAdmin) {
+    page = <JournalsPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "customers" && isAdmin) {
+    page = <CustomersPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "vendors" && isAdmin) {
     page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "manage" && isAdmin) {
