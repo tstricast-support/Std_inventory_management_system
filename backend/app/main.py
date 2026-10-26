@@ -4,7 +4,7 @@ from sqlalchemy import inspect, text
 from app.departments import DEFAULT_DEPARTMENT
 from app.account_types import DEFAULT_ACCOUNTS
 from app.database import Base, engine
-from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers,journals 
+from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices
 Base.metadata.create_all(bind=engine) 
 
 def add_department_column():
@@ -53,6 +53,18 @@ def add_account_columns():
 
 
 add_account_columns()
+
+
+def add_journal_columns():
+    """create_all() never alters existing tables, so add the journal source columns by hand."""
+    existing = [c["name"] for c in inspect(engine).get_columns("journals")]
+    with engine.begin() as conn:
+        for col, ddl in {"source_type": "VARCHAR(30)", "source_id": "INTEGER"}.items():
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE journals ADD COLUMN {col} {ddl}"))
+
+
+add_journal_columns()
 
 def seed_default_accounts():
     """First start after the chart-of-accounts upgrade: add Zoho-style default accounts once."""
@@ -113,6 +125,7 @@ app.include_router(vendors.router)
 app.include_router(accounts.router)
 app.include_router(customers.router)
 app.include_router(journals.router)
+app.include_router(invoices.router)
 
 @app.get("/")
 def root():

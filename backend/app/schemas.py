@@ -317,3 +317,55 @@ class IssuedListOut(BaseModel):
     created_at: datetime
     items: List[IssuedItemOut] = []
     covered_requests: List[CoveredRequestOut] = []
+
+
+
+# ---------- Invoices ----------
+class InvoiceItemCreate(BaseModel):
+    product_id: int
+    description: Optional[str] = None
+    quantity: int
+    rate: float
+
+class InvoiceCreate(BaseModel):
+    customer_id: int
+    invoice_date: date
+    due_date: Optional[date] = None      # left empty -> worked out from the customer's payment terms
+    order_number: Optional[str] = None
+    notes: Optional[str] = None
+    items: List[InvoiceItemCreate]
+
+class InvoiceProductOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    sku: Optional[str] = None
+    images: List[ProductImageOut] = []
+
+class InvoiceItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    product_id: Optional[int] = None
+    item_name: str
+    description: Optional[str] = None
+    quantity: int
+    rate: float
+    amount: float
+    product: Optional[InvoiceProductOut] = None
+
+class InvoiceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    invoice_number: str
+    customer_id: int
+    customer_name: str
+    invoice_date: date
+    due_date: date
+    order_number: Optional[str] = None
+    notes: Optional[str] = None
+    status: str
+    total: float
+    amount_paid: float
+    balance_due: float
+    created_at: datetime
+    items: List[InvoiceItemOut] = []

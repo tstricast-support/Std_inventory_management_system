@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
-import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck, CornerDownRight,Bell,Menu, Settings, MoreVertical, Users, BookOpen } from "lucide-react";
+import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck, CornerDownRight,Bell,Menu, Settings, MoreVertical, Users, BookOpen,FileText } from "lucide-react";
 import "./index.css";
 
 
@@ -86,6 +86,24 @@ const getCustomers = () => customerRequest("", "GET", null, "Failed to fetch cus
 const createCustomer = (payload) => customerRequest("", "POST", payload, "Failed to create customer");
 const updateCustomer = (id, payload) => customerRequest(String(id), "PUT", payload, "Failed to update customer");
 const deleteCustomer = (id) => customerRequest(String(id), "DELETE", null, "Failed to delete customer");
+
+
+// ---------- Invoices ----------
+async function invoiceRequest(path, method, payload, failMsg) {
+  const res = await fetch(`${BASE_URL}/invoices/${path}`, {
+    method,
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : failMsg);
+  }
+  return res.json();
+}
+const getInvoices = () => invoiceRequest("", "GET", null, "Failed to fetch invoices");
+const createInvoice = (payload) => invoiceRequest("", "POST", payload, "Failed to save invoice");
+const voidInvoice = (id) => invoiceRequest(`${id}/void`, "PUT", null, "Failed to void invoice");
 
 // ---------- Accounts (chart of accounts) ----------
 async function getAccounts(accountType) {
@@ -2158,6 +2176,7 @@ function HomeTabs({ active, onChange, isAdmin }) {
       {isAdmin && tab("journals", "Journals", BookOpen)}
       {tab("items", "Items", Tag)}
       {isAdmin && tab("customers", "Customers", Users)}
+      {isAdmin && tab("invoices", "Invoices", FileText)}
       {isAdmin && tab("vendors", "Vendors", Truck)}
       {isAdmin && tab("bill", "Bill", Receipt)}
       {isAdmin && tab("issued", "Issued", ClipboardList)}
@@ -4104,6 +4123,393 @@ function JournalForm({ onClose, onSaved }) {
   );
 }
 
+// ---------- Invoices (sales: lowers stock + posts to the ledger, admin only) ----------
+const INVOICE_TERM_DAYS = { "Due on Receipt": 0, "Net 15": 15, "Net 30": 30, "Net 45": 45, "Net 60": 60 };
+const STOCK_TRACKED_TYPE = "Inventory Part"; // only this item type has stock that goes down when sold
+
+const addDaysISO = (iso, days) => {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return toISODate(d);
+};
+
+const primaryImageOf = (product) => product?.images?.find((i) => i.is_primary) || product?.images?.[0];
+
+// small square picture of an item (falls back to a tag icon when it has no image)
+function ItemThumb({ product, size = 40 }) {
+  const img = primaryImageOf(product);
+  return (
+    <div
+      style={{ width: size, height: size }}
+      className="shrink-0 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center text-gray-300"
+    >
+      {img ? <img src={img.image_url} alt="" className="w-full h-full object-cover" /> : <Tag size={Math.round(size / 2)} />}
+    </div>
+  );
+}
+
+function invoiceStatus(inv) {
+  if (inv.status === "void") return { label: "Void", cls: "bg-gray-100 text-gray-500" };
+  if (inv.balance_due <= 0.004) return { label: "Paid", cls: "bg-green-100 text-green-700" };
+  if (inv.due_date < toISODate(new Date())) return { label: "Overdue", cls: "bg-red-100 text-red-700" };
+  if (inv.amount_paid > 0) return { label: "Partially paid", cls: "bg-amber-100 text-amber-700" };
+  return { label: "Open", cls: "bg-blue-100 text-blue-700" };
+}
+
+function InvoicesPage({ isAdmin, go }) {
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+
+  const load = async () => {
+    try {
+      setInvoices(await getInvoices());
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleVoid = async (inv) => {
+    if (!window.confirm(`Void ${inv.invoice_number}? The stock goes back and its ledger entry is removed.`)) return;
+    try {
+      await voidInvoice(inv.id);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const q = search.trim().toLowerCase();
+  const shown = invoices.filter(
+    (inv) => !q || [inv.invoice_number, inv.customer_name, inv.order_number].some((v) => (v || "").toLowerCase().includes(q))
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active="invoices" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+
+      <main className="p-4 sm:p-6 max-w-3xl">
+        <div className="mb-5 flex gap-3 items-center">
+          <div className="flex-1">
+            <SearchBox value={search} onChange={setSearch} placeholder="Search invoices..." />
+          </div>
+          <button
+            onClick={() => setFormOpen(true)}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
+          >
+            + New Invoice
+          </button>
+        </div>
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : shown.length === 0 ? (
+          <p className="text-gray-400 text-center py-16">No invoices yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {shown.map((inv) => {
+              const st = invoiceStatus(inv);
+              const open = expandedId === inv.id;
+              return (
+                <div key={inv.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(open ? null : inv.id)}
+                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">
+                        {inv.invoice_number} <span className="text-gray-400 font-normal">· {inv.customer_name}</span>
+                      </p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {formatJournalDate(inv.invoice_date)} · Due {formatJournalDate(inv.due_date)}
+                        {inv.order_number && ` · PO ${inv.order_number}`}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-semibold text-gray-900">{formatRs(inv.total)}</p>
+                      <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                    </div>
+                    {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                  </button>
+
+                  {open && (
+                    <div className="border-t border-gray-100 p-3 space-y-3">
+                      {inv.items.map((l) => (
+                        <div key={l.id} className="flex items-center gap-3">
+                          <ItemThumb product={l.product} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-gray-900 truncate">{l.item_name}</p>
+                            <p className="text-xs text-gray-400 truncate">
+                              {l.quantity} × {formatRs(l.rate)}
+                              {l.description && ` · ${l.description}`}
+                            </p>
+                          </div>
+                          <span className="text-sm font-medium text-gray-900 shrink-0">{formatRs(l.amount)}</span>
+                        </div>
+                      ))}
+
+                      {inv.notes && <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">{inv.notes}</p>}
+
+                      <div className="border-t border-gray-100 pt-2 text-sm space-y-1">
+                        <div className="flex justify-between"><span className="text-gray-500">Total</span><span>{formatRs(inv.total)}</span></div>
+                        <div className="flex justify-between"><span className="text-gray-500">Paid</span><span>{formatRs(inv.amount_paid)}</span></div>
+                        <div className="flex justify-between font-semibold"><span>Balance due</span><span>{formatRs(inv.balance_due)}</span></div>
+                      </div>
+
+                      {inv.status !== "void" && (
+                        <button
+                          onClick={() => handleVoid(inv)}
+                          className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                        >
+                          <Trash2 size={14} /> Void invoice
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      {formOpen && <InvoiceForm onClose={() => setFormOpen(false)} onSaved={load} />}
+    </div>
+  );
+}
+
+const blankInvoiceLine = () => ({ product_id: "", description: "", quantity: "1", rate: "" });
+
+function InvoiceForm({ onClose, onSaved }) {
+  const [customers, setCustomers] = useState([]);
+  const [items, setItems] = useState([]);
+  const [customerId, setCustomerId] = useState("");
+  const [date, setDate] = useState(toISODate(new Date()));
+  const [dueDate, setDueDate] = useState(""); // empty = follow the customer's payment terms
+  const [orderNumber, setOrderNumber] = useState("");
+  const [notes, setNotes] = useState("");
+  const [lines, setLines] = useState([blankInvoiceLine()]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  useEffect(() => {
+    Promise.all([getCustomers(), getProducts()])
+      .then(([c, p]) => {
+        setCustomers(c.filter((x) => x.is_active));
+        // only real, sellable items: a parent that has subitems can't be sold itself
+        setItems(flattenParents(p).filter((x) => !(x.subitems?.length > 0)));
+      })
+      .catch((err) => setError(err.message));
+  }, []);
+
+  const customer = customers.find((c) => c.id === customerId);
+  const autoDue = addDaysISO(date, INVOICE_TERM_DAYS[customer?.payment_terms] ?? 0);
+  const effectiveDue = dueDate || autoDue;
+
+  const itemById = Object.fromEntries(items.map((p) => [p.id, p]));
+  const customerOptions = customers.map((c) => ({
+    value: c.id,
+    label: c.display_name,
+    hint: c.payment_terms,
+    search: `${c.display_name} ${c.company_name || ""}`,
+  }));
+  const itemOptions = items.map((p) => ({
+    value: p.id,
+    label: p.label,
+    hint: p.item_type === STOCK_TRACKED_TYPE ? `${p.quantity} in stock` : p.item_type,
+    search: `${p.label} ${p.sku || ""}`,
+  }));
+
+  const setLine = (i, patch) => setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  const pickItem = (i, productId) => {
+    const p = itemById[productId];
+    setLine(i, { product_id: productId, description: p?.description || "", rate: p ? String(p.price ?? 0) : "" });
+  };
+
+  // the same item can be on two lines, so stock is checked against the combined quantity
+  const used = {};
+  lines.forEach((l) => {
+    if (l.product_id) used[l.product_id] = (used[l.product_id] || 0) + (Number(l.quantity) || 0);
+  });
+  const overStock = (l) => {
+    const p = itemById[l.product_id];
+    return Boolean(p) && p.item_type === STOCK_TRACKED_TYPE && used[l.product_id] > p.quantity;
+  };
+
+  const filled = lines.filter((l) => l.product_id);
+  const lineCents = (l) => (Number(l.quantity) || 0) * toCents(l.rate);
+  const totalCents = filled.reduce((s, l) => s + lineCents(l), 0);
+  const canSave =
+    Boolean(customerId) &&
+    filled.length > 0 &&
+    filled.every((l) => Number.isInteger(Number(l.quantity)) && Number(l.quantity) > 0 && toCents(l.rate) >= 0) &&
+    !filled.some(overStock) &&
+    totalCents > 0 &&
+    effectiveDue >= date;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createInvoice({
+        customer_id: customerId,
+        invoice_date: date,
+        due_date: effectiveDue,
+        order_number: orderNumber.trim() || null,
+        notes: notes.trim() || null,
+        items: filled.map((l) => ({
+          product_id: l.product_id,
+          description: l.description.trim() || null,
+          quantity: Number(l.quantity),
+          rate: Number(l.rate) || 0,
+        })),
+      });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-4">New Invoice</h2>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <FieldLabel>Customer</FieldLabel>
+            <SearchSelect
+              value={customerId}
+              onChange={setCustomerId}
+              options={customerOptions}
+              placeholder="Select a customer..."
+              searchPlaceholder="Search customers..."
+              emptyText="No customers found"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label className="text-xs text-gray-500">
+              Invoice date
+              <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Due date {customer && !dueDate && <span className="text-gray-400">({customer.payment_terms})</span>}
+              <input required type="date" value={effectiveDue} min={date} onChange={(e) => setDueDate(e.target.value)} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Order / PO number
+              <input value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} className={cls + " mt-1"} />
+            </label>
+          </div>
+
+          <div className="space-y-3">
+            <FieldLabel>Items</FieldLabel>
+            {lines.map((l, i) => {
+              const p = itemById[l.product_id];
+              return (
+                <div key={i} className="border border-gray-200 rounded-lg p-3 space-y-2">
+                  <div className="flex items-start gap-3">
+                    <ItemThumb product={p} size={56} />
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <SearchSelect
+                        value={l.product_id}
+                        onChange={(v) => pickItem(i, v)}
+                        options={itemOptions}
+                        placeholder="Select an item..."
+                        searchPlaceholder="Search items..."
+                        emptyText="No items found"
+                      />
+                      <input
+                        placeholder="Description (optional)"
+                        value={l.description}
+                        onChange={(e) => setLine(i, { description: e.target.value })}
+                        className={cls}
+                      />
+                    </div>
+                    {lines.length > 1 && (
+                      <button
+                        type="button"
+                        title="Remove line"
+                        onClick={() => setLines((prev) => prev.filter((_, idx) => idx !== i))}
+                        className="shrink-0 border border-gray-300 rounded-lg p-2 text-gray-500 hover:bg-gray-50"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <label className="text-xs text-gray-500">
+                      Qty
+                      <input type="number" min="1" step="1" value={l.quantity}
+                        onChange={(e) => setLine(i, { quantity: e.target.value })} className={cls + " mt-1"} />
+                    </label>
+                    <label className="text-xs text-gray-500">
+                      Rate
+                      <input type="number" min="0" step="0.01" value={l.rate}
+                        onChange={(e) => setLine(i, { rate: e.target.value })} className={cls + " mt-1"} />
+                    </label>
+                    <div className="text-xs text-gray-500">
+                      Amount
+                      <p className="mt-1 py-2 text-sm font-medium text-gray-900">{formatRs(lineCents(l) / 100)}</p>
+                    </div>
+                  </div>
+
+                  {overStock(l) && <p className="text-xs text-red-600">Only {p.quantity} in stock.</p>}
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setLines((prev) => [...prev, blankInvoiceLine()])}
+              className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+            >
+              <Plus size={14} /> Add another line
+            </button>
+          </div>
+
+          <textarea rows={2} placeholder="Notes for the customer" value={notes} onChange={(e) => setNotes(e.target.value)} className={cls} />
+
+          <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
+            <span>Total</span>
+            <span>{formatRs(totalCents / 100)}</span>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!canSave || submitting}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {submitting ? "Saving..." : "Save Invoice"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ---------- Bill (bulk stock entry, admin only) ----------
 // A "bill" is a batch of restocks saved together (see /api/bills on the backend).
 const inputCls =
@@ -5604,6 +6010,9 @@ function AppShell() {
     page = <JournalsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "customers" && isAdmin) {
     page = <CustomersPage isAdmin={isAdmin} go={setSearchParams} />;
+
+  } else if (searchParams.get("view") === "invoices" && isAdmin) {
+    page = <InvoicesPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "vendors" && isAdmin) {
     page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "manage" && isAdmin) {

@@ -191,6 +191,8 @@ class Journal(Base):
     journal_number = Column(String(30), nullable=False, unique=True)   # JNL-0001, JNL-0002 ...
     journal_date = Column(Date, nullable=False)
     reference = Column(String(100))
+    source_type = Column(String(30), nullable=True)   # None = typed in by hand; "invoice" = posted automatically by an invoice
+    source_id = Column(Integer, nullable=True)        # id of that invoice
     notes = Column(Text)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
@@ -218,3 +220,53 @@ class JournalLine(Base):
     @property
     def account_name(self):
         return self.account.name if self.account else ""
+
+
+
+class Invoice(Base):
+    """A sales invoice. Saving it lowers stock and posts a journal (see routers/invoices.py)."""
+    __tablename__ = "invoices"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    invoice_number = Column(String(30), nullable=False, unique=True)   # INV-0001, INV-0002 ...
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    invoice_date = Column(Date, nullable=False)
+    due_date = Column(Date, nullable=False)
+    order_number = Column(String(100))
+    notes = Column(Text)
+    status = Column(String(20), nullable=False, default="open", server_default="open")  # open / void
+    total = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    amount_paid = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")  # step 4 (payments) fills this
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    customer = relationship("Customer")
+    items = relationship("InvoiceItem", back_populates="invoice", cascade="all, delete-orphan",
+                         order_by="InvoiceItem.id")
+
+    @property
+    def customer_name(self):
+        return self.customer.display_name if self.customer else ""
+
+    @property
+    def balance_due(self):
+        if self.status == "void":
+            return 0.0
+        return float(self.total or 0) - float(self.amount_paid or 0)
+
+
+class InvoiceItem(Base):
+    __tablename__ = "invoice_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False)
+    # SET NULL: deleting an item later must never delete the sales history
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
+    item_name = Column(String(200), nullable=False)    # name at the time of sale
+    description = Column(Text)
+    quantity = Column(Integer, nullable=False)
+    rate = Column(Numeric(12, 2), nullable=False, default=0)
+    unit_cost = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")  # item cost at the time of sale
+    amount = Column(Numeric(12, 2), nullable=False, default=0)
+
+    invoice = relationship("Invoice", back_populates="items")
+    product = relationship("Product")

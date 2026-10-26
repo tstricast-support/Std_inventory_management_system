@@ -24,6 +24,7 @@ def _next_number(db: Session) -> str:
 def list_journals(db: Session = Depends(get_db)):
     return (
         db.query(models.Journal)
+        .filter(models.Journal.source_type.is_(None))   # manual journals only; invoice postings are hidden here
         .order_by(models.Journal.journal_date.desc(), models.Journal.id.desc())
         .all()
     )
@@ -72,7 +73,10 @@ def create_journal(payload: schemas.JournalCreate, db: Session = Depends(get_db)
 def delete_journal(journal_id: int, db: Session = Depends(get_db)):
     journal = db.query(models.Journal).get(journal_id)
     if not journal:
-        raise HTTPException(404, "Journal not found")
+        raise HTTPException(404, "Journal not found")\
+
+    if journal.source_type:
+        raise HTTPException(400, "This entry was posted by an invoice. Void the invoice instead.")
     db.delete(journal)
     db.commit()
     return {"message": "Deleted"}

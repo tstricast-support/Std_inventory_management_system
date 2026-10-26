@@ -57,6 +57,8 @@ def delete_customer(customer_id: int, db: Session = Depends(get_db)):
     customer = db.query(models.Customer).get(customer_id)
     if not customer:
         raise HTTPException(404, "Customer not found")
+    if db.query(models.Invoice).filter(models.Invoice.customer_id == customer_id).first():
+        raise HTTPException(400, "This customer has invoices, so it can't be deleted. Mark it inactive instead.")
     db.delete(customer)
     db.commit()
     return {"message": "Deleted"}
