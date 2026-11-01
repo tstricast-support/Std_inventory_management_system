@@ -7,9 +7,12 @@ import App from "./App.jsx";
 
 // One-time cleanup of any old service worker and cached files
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.getRegistrations().then((regs) => {
-    regs.forEach((reg) => reg.unregister());
-  });
+  navigator.serviceWorker
+    .getRegistrations()
+    .then((regs) => {
+      regs.forEach((reg) => reg.unregister());
+    })
+    .catch(() => {});
 }
 if ("caches" in window) {
   caches.keys().then((keys) => keys.forEach((key) => caches.delete(key)));

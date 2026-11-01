@@ -35,6 +35,7 @@ import {
   Download,
   Percent,
   Banknote,
+  TrendingUp,
 } from "lucide-react";
 import "./index.css";
 
@@ -172,6 +173,20 @@ const getReconcileLines = (id, statementDate) => bankRequest(`accounts/${id}/rec
 const finishReconciliation = (id, payload) => bankRequest(`accounts/${id}/reconcile`, "POST", payload, "Failed to save reconciliation");
 const getReconciliations = (id) => bankRequest(`accounts/${id}/reconciliations`, "GET", null, "Failed to fetch reconciliations");
 const undoReconciliation = (recId) => bankRequest(`reconciliations/${recId}`, "DELETE", null, "Failed to undo reconciliation");
+
+
+// ---------- Reports ----------
+async function reportRequest(path, failMsg) {
+  const res = await fetch(`${BASE_URL}/reports/${path}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : failMsg);
+  }
+  return res.json();
+}
+const getProfitLoss = (from, to) => reportRequest(`profit-and-loss?date_from=${from}&date_to=${to}`, "Failed to load Profit & Loss");
+const getBalanceSheet = (asOf) => reportRequest(`balance-sheet?as_of=${asOf}`, "Failed to load Balance Sheet");
+const getAgeing = (kind, asOf) => reportRequest(`${kind}-ageing?as_of=${asOf}`, "Failed to load the ageing report");
 
 // ---------- Invoices ----------
 async function invoiceRequest(path, method, payload, failMsg) {
@@ -2988,6 +3003,7 @@ function HomeTabs({ active, onChange, isAdmin }) {
       {isAdmin && tab("purchases", "Purchases", ShoppingCart)}
       {isAdmin && tab("vendorpayments", "Payments Made", CreditCard)}
       {isAdmin && tab("banking", "Banking", Banknote)}
+      {isAdmin && tab("reports", "Reports", TrendingUp)}
       {isAdmin && tab("taxes", "Taxes", Percent)}
       {isAdmin && tab("bill", "Bill", Receipt)}
       {isAdmin && tab("issued", "Issued", ClipboardList)}
@@ -4229,6 +4245,464 @@ function TaxForm({ initialData, onClose, onSubmit }) {
   );
 }
 
+// ---------- Step 9: Reports (admin only): Profit & Loss, Balance Sheet, Receivables / Payables Ageing ----------
+const localIso = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+const REPORT_TABS = [
+  ["pl", "Profit & Loss"],
+  ["bs", "Balance Sheet"],
+  ["ar", "Receivables Ageing"],
+  ["ap", "Payables Ageing"],
+];
+
+function ReportsPage({ isAdmin, go }) {
+  const [report, setReport] = useState("pl");
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active="reports" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <main className="p-4 sm:p-6 max-w-4xl">
+        <h1 className="text-xl font-bold text-gray-900 mb-3">Reports</h1>
+        <div className="flex flex-wrap gap-2 mb-5">
+          {REPORT_TABS.map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setReport(key)}
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border ${
+                report === key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {report === "pl" && <ProfitLossReport />}
+        {report === "bs" && <BalanceSheetReport />}
+        {report === "ar" && <AgeingReport key="ar" kind="receivables" />}
+        {report === "ap" && <AgeingReport key="ap" kind="payables" />}
+      </main>
+    </div>
+  );
+}
+
+// loads a report whenever its inputs change; ignores answers that arrive after the inputs changed again
+function useReport(fetcher, deps) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetcher()
+      .then((d) => {
+        if (!cancelled) {
+          setData(d);
+          setError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, deps);
+  return { data, loading, error };
+}
+
+function ReportBody({ loading, error, data, children }) {
+  if (loading && !data) return <p className="text-gray-400 text-center py-16">Loading...</p>;
+  if (error) return <p className="text-red-500 text-center py-16">{error}</p>;
+  if (!data) return null;
+  return children;
+}
+
+function ReportLine({ label, amount, bold = false, indent = false, tone }) {
+  const color = tone === "good" ? "text-green-700" : tone === "bad" ? "text-red-600" : "text-gray-900";
+  return (
+    <div className={`flex justify-between gap-3 py-1.5 text-sm ${indent ? "pl-4" : ""} ${bold ? "font-semibold" : ""}`}>
+      <span className={bold ? "text-gray-900" : "text-gray-600"}>{label}</span>
+      <span className={`shrink-0 ${bold ? color : "text-gray-900"}`}>{formatRs(amount)}</span>
+    </div>
+  );
+}
+
+function ReportCard({ title, children }) {
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
+      {title && <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">{title}</h2>}
+      {children}
+    </div>
+  );
+}
+
+const dateInputCls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1";
+
+function ProfitLossReport() {
+  const [from, setFrom] = useState(`${new Date().getFullYear()}-01-01`);
+  const [to, setTo] = useState(localIso());
+
+  const { data, loading, error } = useReport(
+    () => getProfitLoss(from, to),
+    [from, to],
+  );
+
+  const subtotals = data
+    ? {
+        cogs: ["Gross Profit", data.gross_profit],
+        expense: ["Operating Profit", data.operating_profit],
+      }
+    : {};
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 mb-4 max-w-sm">
+        <label className="text-xs text-gray-500">
+          From
+          <input
+            type="date"
+            value={from}
+            max={to}
+            onChange={(e) => e.target.value && setFrom(e.target.value)}
+            className={dateInputCls}
+          />
+        </label>
+
+        <label className="text-xs text-gray-500">
+          To
+          <input
+            type="date"
+            value={to}
+            min={from}
+            onChange={(e) => e.target.value && setTo(e.target.value)}
+            className={dateInputCls}
+          />
+        </label>
+      </div>
+
+      <ReportBody loading={loading} error={error} data={data}>
+        {data && (
+          <ReportCard>
+            <p className="text-xs text-gray-400 mb-2">
+              Accrual basis · {formatJournalDate(data.date_from)} to{" "}
+              {formatJournalDate(data.date_to)}
+            </p>
+
+            {(data.sections || []).map((s) => {
+              if (
+                (s.key === "other_income" || s.key === "other_expense") &&
+                (!s.accounts || s.accounts.length === 0)
+              ) {
+                return null;
+              }
+
+              return (
+                <div key={s.key}>
+                  <p className="text-sm font-semibold text-gray-900 mt-3">
+                    {s.title}
+                  </p>
+
+                  {(!s.accounts || s.accounts.length === 0) && (
+                    <p className="text-xs text-gray-400 pl-4 py-1">
+                      No entries in this period
+                    </p>
+                  )}
+
+                  {(s.accounts || []).map((a) => (
+                    <ReportLine
+                      key={a.id}
+                      label={a.name}
+                      amount={a.amount}
+                      indent
+                    />
+                  ))}
+
+                  <div className="border-t border-gray-100 mt-1">
+                    <ReportLine
+                      label={`Total ${s.title}`}
+                      amount={s.total}
+                      bold
+                    />
+                  </div>
+
+                  {subtotals[s.key] && (
+                    <div className="bg-gray-50 rounded-lg px-2 mt-2">
+                      <ReportLine
+                        label={subtotals[s.key][0]}
+                        amount={subtotals[s.key][1]}
+                        bold
+                        tone={subtotals[s.key][1] < 0 ? "bad" : "good"}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            <div className="bg-gray-100 rounded-lg px-2 mt-4">
+              <ReportLine
+                label="Net Profit / Loss"
+                amount={data.net_profit}
+                bold
+                tone={data.net_profit < 0 ? "bad" : "good"}
+              />
+            </div>
+          </ReportCard>
+        )}
+      </ReportBody>
+    </>
+  );
+}
+
+function BalanceSheetReport() {
+  const [asOf, setAsOf] = useState(localIso());
+  const { data, loading, error } = useReport(
+    () => getBalanceSheet(asOf),
+    [asOf],
+  );
+
+  const side = (title, groups, total) => (
+    <ReportCard title={title}>
+      {groups.map((g) => (
+        <div key={g.title}>
+          <p className="text-sm font-semibold text-gray-900 mt-2">{g.title}</p>
+          {g.accounts.length === 0 && (
+            <p className="text-xs text-gray-400 pl-4 py-1">Nothing here</p>
+          )}
+          {g.accounts.map((a) => (
+            <ReportLine
+              key={a.id ?? a.name}
+              label={a.name}
+              amount={a.amount}
+              indent
+            />
+          ))}
+          <div className="border-t border-gray-100 mt-1">
+            <ReportLine label={`Total ${g.title}`} amount={g.total} bold />
+          </div>
+        </div>
+      ))}
+      <div className="bg-gray-100 rounded-lg px-2 mt-3">
+        <ReportLine label={`Total ${title}`} amount={total} bold />
+      </div>
+    </ReportCard>
+  );
+
+  return (
+    <>
+      <label className="text-xs text-gray-500 block mb-4 max-w-[12rem]">
+        As of
+        <input
+          type="date"
+          value={asOf}
+          onChange={(e) => e.target.value && setAsOf(e.target.value)}
+          className={dateInputCls}
+        />
+      </label>
+      <ReportBody loading={loading} error={error} data={data}>
+        {data && (
+          <>
+            {Math.abs(data.difference) >= 0.005 && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4">
+                The sheet is out of balance by {formatRs(data.difference)}.
+                Check your journal entries.
+              </p>
+            )}
+            {side("Assets", data.assets, data.total_assets)}
+            {side("Liabilities", data.liabilities, data.total_liabilities)}
+            {side("Equity", data.equity, data.total_equity)}
+            <ReportCard>
+              <ReportLine
+                label="Total Liabilities + Equity"
+                amount={data.total_liabilities_and_equity}
+                bold
+              />
+            </ReportCard>
+          </>
+        )}
+      </ReportBody>
+    </>
+  );
+}
+
+const AGE_COLS = [
+  ["current", "Current"],
+  ["d1_15", "1-15"],
+  ["d16_30", "16-30"],
+  ["d31_45", "31-45"],
+  ["d45_plus", "> 45"],
+];
+
+// kind: "receivables" (customers, invoices) | "payables" (vendors, bills). Days are counted past the due date.
+function AgeingReport({ kind }) {
+  const isAr = kind === "receivables";
+  const asOf = localIso();
+  const { data, loading, error } = useReport(
+    () => getAgeing(kind, asOf),
+    [kind],
+  );
+  const [open, setOpen] = useState(() => new Set());
+  const toggle = (id) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const th = "px-3 py-2 text-right font-medium whitespace-nowrap";
+  const td = "px-3 py-2 text-right whitespace-nowrap";
+  const money = (n) => (n ? formatRs(n) : "-");
+
+  return (
+    <ReportBody loading={loading} error={error} data={data}>
+      {data && (
+        <>
+          <p className="text-xs text-gray-400 mb-3">
+            {isAr ? "What customers owe you" : "What you owe vendors"}, by days
+            past the due date · as of {formatJournalDate(asOf)}
+          </p>
+          {!data.matches_ledger && (
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+              {isAr ? "Receivables" : "Payables"} here (
+              {formatRs(data.totals.net)}) differ from your ledger account (
+              {formatRs(data.ledger_balance)}). Usually a manual journal posted
+              to {isAr ? "Accounts Receivable" : "Accounts Payable"}, or an
+              entry made before the ledger existed.
+            </p>
+          )}
+          {data.rows.length === 0 ? (
+            <p className="text-gray-400 text-center py-16">
+              {isAr ? "No unpaid invoices." : "No unpaid bills."}
+            </p>
+          ) : (
+            <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+              <table className="w-full text-sm min-w-[720px]">
+                <thead className="bg-gray-50 text-gray-500 text-xs">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">
+                      {isAr ? "Customer" : "Vendor"}
+                    </th>
+                    {AGE_COLS.map(([k, label]) => (
+                      <th key={k} className={th}>
+                        {label}
+                      </th>
+                    ))}
+                    <th className={th}>Total</th>
+                    {isAr && <th className={th}>Unused credits</th>}
+                    {isAr && <th className={th}>Net</th>}
+                  </tr>
+                </thead>
+                {data.rows.map((r) => (
+                  <tbody key={r.party_id} className="border-t border-gray-100">
+                    <tr
+                      onClick={() =>
+                        r.documents.length > 0 && toggle(r.party_id)
+                      }
+                      className={
+                        r.documents.length > 0
+                          ? "cursor-pointer hover:bg-gray-50"
+                          : ""
+                      }
+                    >
+                      <td className="px-3 py-2 font-medium text-gray-900">
+                        {r.documents.length > 0 &&
+                          (open.has(r.party_id) ? (
+                            <ChevronDown
+                              size={14}
+                              className="inline mr-1 text-gray-400"
+                            />
+                          ) : (
+                            <ChevronRight
+                              size={14}
+                              className="inline mr-1 text-gray-400"
+                            />
+                          ))}
+                        {r.party_name}
+                      </td>
+                      {AGE_COLS.map(([k]) => (
+                        <td
+                          key={k}
+                          className={`${td} ${k !== "current" && r[k] > 0 ? "text-red-600" : "text-gray-700"}`}
+                        >
+                          {money(r[k])}
+                        </td>
+                      ))}
+                      <td className={`${td} font-medium`}>{money(r.total)}</td>
+                      {isAr && (
+                        <td className={`${td} text-green-700`}>
+                          {r.credits ? `-${formatRs(r.credits)}` : "-"}
+                        </td>
+                      )}
+                      {isAr && (
+                        <td className={`${td} font-semibold`}>
+                          {formatRs(r.net)}
+                        </td>
+                      )}
+                    </tr>
+                    {open.has(r.party_id) &&
+                      r.documents.map((d) => (
+                        <tr
+                          key={d.id}
+                          className="bg-gray-50 text-xs text-gray-500"
+                        >
+                          <td
+                            className="pl-8 pr-3 py-1.5"
+                            colSpan={AGE_COLS.length + 1}
+                          >
+                            {d.number} · dated {formatJournalDate(d.doc_date)} ·
+                            due {formatJournalDate(d.due_date)}
+                            {d.days_overdue > 0 ? (
+                              <span className="text-red-600">
+                                {" "}
+                                · {d.days_overdue} days overdue
+                              </span>
+                            ) : (
+                              " · not due yet"
+                            )}
+                          </td>
+                          <td
+                            className="px-3 py-1.5 text-right whitespace-nowrap"
+                            colSpan={isAr ? 3 : 1}
+                          >
+                            {formatRs(d.balance)}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                ))}
+                <tfoot className="bg-gray-100 font-semibold text-gray-900">
+                  <tr>
+                    <td className="px-3 py-2">Total</td>
+                    {AGE_COLS.map(([k]) => (
+                      <td key={k} className={td}>
+                        {money(data.totals[k])}
+                      </td>
+                    ))}
+                    <td className={td}>{money(data.totals.total)}</td>
+                    {isAr && (
+                      <td className={`${td} text-green-700`}>
+                        {data.totals.credits
+                          ? `-${formatRs(data.totals.credits)}`
+                          : "-"}
+                      </td>
+                    )}
+                    {isAr && (
+                      <td className={td}>{formatRs(data.totals.net)}</td>
+                    )}
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </ReportBody>
+  );
+}
+
 // ---------- Banking (admin only): bank / cash accounts, their transactions, deposits, withdrawals, transfers ----------
 function BankingPage({ isAdmin, go, accountId, reconcile }) {
   if (accountId && reconcile) {
@@ -4615,7 +5089,7 @@ function BankRegister({ isAdmin, go, accountId }) {
 
 // ---------- Step 8B: Bank reconciliation - match your books to the bank statement ----------
 function BankReconcile({ isAdmin, go, accountId }) {
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = localIso();
   const [account, setAccount] = useState(null);
   const [history, setHistory] = useState([]);
   const [stmtDate, setStmtDate] = useState(todayIso);
@@ -9468,6 +9942,8 @@ function AppShell() {
         reconcile={searchParams.get("reconcile")}
       />
     );
+  } else if (searchParams.get("view") === "reports" && isAdmin) {
+    page = <ReportsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "vendors" && isAdmin) {
     page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "manage" && isAdmin) {

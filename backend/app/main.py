@@ -4,7 +4,7 @@ from sqlalchemy import inspect, text
 from app.departments import DEFAULT_DEPARTMENT
 from app.account_types import DEFAULT_ACCOUNTS
 from app.database import Base, engine
-from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments,sales_documents,credit_notes,taxes,banking
+from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments,sales_documents,credit_notes,taxes,banking,reports
 Base.metadata.create_all(bind=engine) 
 
 def add_department_column():
@@ -134,11 +134,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173",
-                   "https://stdinventorymanagementsystem-production.up.railway.app",
-                   "http://localhost:8000",
-],
-
+    allow_origins=[
+        "https://stdinventorymanagementsystem-production.up.railway.app",
+        "http://localhost:8000",
+    ],
+    # any localhost / 127.0.0.1 port (Vite moves to 5174, 5175... when 5173 is busy)
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -161,6 +162,7 @@ app.include_router(sales_documents.router)
 app.include_router(credit_notes.router)
 app.include_router(taxes.router)
 app.include_router(banking.router)
+app.include_router(reports.router)
 
 @app.get("/")
 def root():
