@@ -416,3 +416,129 @@ class VendorPaymentAllocation(Base):
     @property
     def bill_number(self):
         return self.bill.bill_number if self.bill else ""
+
+
+
+# ---------- Step 6: quotes + sales orders ----------
+class SalesDocument(Base):
+    """A quote or a sales order. Neither touches stock or the ledger - only the invoice made from it does."""
+    __tablename__ = "sales_documents"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    doc_type = Column(String(20), nullable=False)                      # "quote" or "sales_order"
+    doc_number = Column(String(30), nullable=False, unique=True)       # QT-0001 / SO-0001 ...
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    doc_date = Column(Date, nullable=False)
+    expiry_date = Column(Date, nullable=True)                          # quote: expiry date / sales order: expected shipment
+    reference = Column(String(100))
+    notes = Column(Text)
+    # quote: draft / sent / accepted / declined / converted / invoiced      sales order: open / invoiced
+    status = Column(String(20), nullable=False, default="draft", server_default="draft")
+    total = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True)   # set once invoiced
+    source_id = Column(Integer, nullable=True)                         # sales order: id of the quote it was made from
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    customer = relationship("Customer")
+    invoice = relationship("Invoice")
+    items = relationship("SalesDocumentItem", back_populates="document", cascade="all, delete-orphan",
+                         order_by="SalesDocumentItem.id")
+
+    @property
+    def customer_name(self):
+        return self.customer.display_name if self.customer else ""
+
+    @property
+    def invoice_number(self):
+        return self.invoice.invoice_number if self.invoice else None
+
+
+class SalesDocumentItem(Base):
+    __tablename__ = "sales_document_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    document_id = Column(Integer, ForeignKey("sales_documents.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
+    item_name = Column(String(200), nullable=False)
+    description = Column(Text)
+    quantity = Column(Integer, nullable=False)
+    rate = Column(Numeric(12, 2), nullable=False, default=0)
+    amount = Column(Numeric(12, 2), nullable=False, default=0)
+
+    document = relationship("SalesDocument", back_populates="items")
+    product = relationship("Product")
+
+
+
+# ---------- Step 6B: credit notes ----------
+class CreditNote(Base):
+    """Money / goods given back to a customer. Posts a journal, can put stock back, and can be applied to invoices."""
+    __tablename__ = "credit_notes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    credit_number = Column(String(30), nullable=False, unique=True)    # CN-0001, CN-0002 ...
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True)   # the invoice it is about (optional)
+    credit_date = Column(Date, nullable=False)
+    reason = Column(Text)
+    restock = Column(Boolean, nullable=False, default=True, server_default="1")   # goods came back -> stock goes up
+    status = Column(String(20), nullable=False, default="open", server_default="open")   # open / void
+    total = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    amount_applied = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")   # already used on invoices
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    customer = relationship("Customer")
+    invoice = relationship("Invoice")
+    items = relationship("CreditNoteItem", back_populates="credit_note", cascade="all, delete-orphan",
+                         order_by="CreditNoteItem.id")
+    applications = relationship("CreditNoteApplication", back_populates="credit_note", cascade="all, delete-orphan",
+                                order_by="CreditNoteApplication.id")
+
+    @property
+    def customer_name(self):
+        return self.customer.display_name if self.customer else ""
+
+    @property
+    def invoice_number(self):
+        return self.invoice.invoice_number if self.invoice else None
+
+    @property
+    def balance(self):
+        if self.status == "void":
+            return 0.0
+        return float(self.total or 0) - float(self.amount_applied or 0)
+
+
+class CreditNoteItem(Base):
+    __tablename__ = "credit_note_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    credit_note_id = Column(Integer, ForeignKey("credit_notes.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
+    item_name = Column(String(200), nullable=False)
+    description = Column(Text)
+    quantity = Column(Integer, nullable=False)
+    rate = Column(Numeric(12, 2), nullable=False, default=0)
+    unit_cost = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")   # cost of the goods that came back
+    amount = Column(Numeric(12, 2), nullable=False, default=0)
+
+    credit_note = relationship("CreditNote", back_populates="items")
+    product = relationship("Product")
+
+
+class CreditNoteApplication(Base):
+    """How much of a credit note was used to pay down one invoice."""
+    __tablename__ = "credit_note_applications"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    credit_note_id = Column(Integer, ForeignKey("credit_notes.id", ondelete="CASCADE"), nullable=False)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    credit_note = relationship("CreditNote", back_populates="applications")
+    invoice = relationship("Invoice")
+
+    @property
+    def invoice_number(self):
+        return self.invoice.invoice_number if self.invoice else ""

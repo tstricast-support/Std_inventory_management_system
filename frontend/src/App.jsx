@@ -29,6 +29,9 @@ import {
   Wallet,
   ShoppingCart,
   CreditCard,
+  FileSignature,
+  ClipboardCheck,
+  RotateCcw,
 } from "lucide-react";
 import "./index.css";
 
@@ -134,6 +137,425 @@ const getInvoices = () => invoiceRequest("", "GET", null, "Failed to fetch invoi
 const createInvoice = (payload) => invoiceRequest("", "POST", payload, "Failed to save invoice");
 const voidInvoice = (id) => invoiceRequest(`${id}/void`, "PUT", null, "Failed to void invoice");
 
+// ---------- Quotes + Sales orders (step 6: no stock or ledger effect until they become an invoice) ----------
+const SALES_DOC_INFO = {
+  quote: { title: "Quote", tab: "quotes", dateLabel: "Quote date", endLabel: "Expiry date", empty: "No quotes yet." },
+  sales_order: { title: "Sales Order", tab: "salesorders", dateLabel: "Order date", endLabel: "Expected shipment", empty: "No sales orders yet." },
+};
+
+function salesDocStatus(doc) {
+  const fixed = {
+    invoiced: ["Invoiced", "bg-green-100 text-green-700"],
+    converted: ["Converted", "bg-purple-100 text-purple-700"],
+    accepted: ["Accepted", "bg-green-100 text-green-700"],
+    declined: ["Declined", "bg-red-100 text-red-700"],
+    open: ["Open", "bg-blue-100 text-blue-700"],
+  };
+  if (fixed[doc.status]) return { label: fixed[doc.status][0], cls: fixed[doc.status][1] };
+  if (doc.expiry_date && doc.expiry_date < toISODate(new Date())) return { label: "Expired", cls: "bg-amber-100 text-amber-700" };
+  if (doc.status === "sent") return { label: "Sent", cls: "bg-blue-100 text-blue-700" };
+  return { label: "Draft", cls: "bg-gray-100 text-gray-500" };
+}
+
+function SalesDocumentsPage({ isAdmin, go, docType }) {
+  const info = SALES_DOC_INFO[docType];
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const [invoiceFor, setInvoiceFor] = useState(null); // the quote / sales order being turned into an invoice
+
+  const load = async () => {
+    try {
+      setDocs(await getSalesDocs(docType));
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [docType]);
+
+  const run = async (action) => {
+    try {
+      await action();
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleDelete = (doc) => {
+    if (!window.confirm(`Delete ${doc.doc_number}?`)) return;
+    run(() => deleteSalesDoc(doc.id));
+  };
+
+  const handleToSalesOrder = (doc) => {
+    if (!window.confirm(`Create a sales order from ${doc.doc_number}?`)) return;
+    run(() => quoteToSalesOrder(doc.id));
+  };
+
+  const q = search.trim().toLowerCase();
+  const shown = docs.filter(
+    (d) => !q || [d.doc_number, d.customer_name, d.reference].some((v) => (v || "").toLowerCase().includes(q))
+  );
+
+  const btn = "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium";
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active={info.tab} onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+
+      <main className="p-4 sm:p-6 max-w-3xl">
+        <div className="mb-5 flex gap-3 items-center">
+          <div className="flex-1">
+            <SearchBox value={search} onChange={setSearch} placeholder={`Search ${info.title.toLowerCase()}s...`} />
+          </div>
+          <button
+            onClick={() => setFormOpen(true)}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
+          >
+            + New {info.title}
+          </button>
+        </div>
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : shown.length === 0 ? (
+          <p className="text-gray-400 text-center py-16">{info.empty}</p>
+        ) : (
+          <div className="space-y-2">
+            {shown.map((doc) => {
+              const st = salesDocStatus(doc);
+              const open = expandedId === doc.id;
+              const canInvoice = ["draft", "sent", "accepted", "open"].includes(doc.status);
+              const canConvert = doc.doc_type === "quote" && ["draft", "sent", "accepted"].includes(doc.status);
+              const canDelete = !["invoiced", "converted"].includes(doc.status);
+              return (
+                <div key={doc.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(open ? null : doc.id)}
+                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">
+                        {doc.doc_number} <span className="text-gray-400 font-normal">· {doc.customer_name}</span>
+                      </p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {formatJournalDate(doc.doc_date)}
+                        {doc.expiry_date && ` · ${info.endLabel} ${formatJournalDate(doc.expiry_date)}`}
+                        {doc.reference && ` · Ref ${doc.reference}`}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-semibold text-gray-900">{formatRs(doc.total)}</p>
+                      <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                    </div>
+                    {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                  </button>
+
+                  {open && (
+                    <div className="border-t border-gray-100 p-3 space-y-3">
+                      {doc.items.map((l) => (
+                        <div key={l.id} className="flex items-center gap-3">
+                          <ItemThumb product={l.product} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-gray-900 truncate">{l.item_name}</p>
+                            <p className="text-xs text-gray-400 truncate">
+                              {l.quantity} × {formatRs(l.rate)}
+                              {l.description && ` · ${l.description}`}
+                            </p>
+                          </div>
+                          <span className="text-sm font-medium text-gray-900 shrink-0">{formatRs(l.amount)}</span>
+                        </div>
+                      ))}
+
+                      {doc.notes && <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">{doc.notes}</p>}
+                      {doc.source_id && <p className="text-xs text-gray-400">Created from a quote.</p>}
+                      {doc.invoice_number && <p className="text-xs text-gray-400">Invoiced as {doc.invoice_number}.</p>}
+
+                      <div className="border-t border-gray-100 pt-2 text-sm flex justify-between font-semibold">
+                        <span>Total</span>
+                        <span>{formatRs(doc.total)}</span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {doc.doc_type === "quote" && doc.status === "draft" && (
+                          <button onClick={() => run(() => setSalesDocStatus(doc.id, "sent"))}
+                            className={`${btn} border border-gray-300 text-gray-700 hover:bg-gray-50`}>
+                            Mark as sent
+                          </button>
+                        )}
+                        {doc.doc_type === "quote" && ["draft", "sent"].includes(doc.status) && (
+                          <>
+                            <button onClick={() => run(() => setSalesDocStatus(doc.id, "accepted"))}
+                              className={`${btn} border border-green-200 text-green-700 hover:bg-green-50`}>
+                              <Check size={14} /> Accepted
+                            </button>
+                            <button onClick={() => run(() => setSalesDocStatus(doc.id, "declined"))}
+                              className={`${btn} border border-gray-300 text-gray-700 hover:bg-gray-50`}>
+                              Declined
+                            </button>
+                          </>
+                        )}
+                        {canConvert && (
+                          <button onClick={() => handleToSalesOrder(doc)}
+                            className={`${btn} border border-blue-200 text-blue-600 hover:bg-blue-50`}>
+                            Convert to sales order
+                          </button>
+                        )}
+                        {canInvoice && (
+                          <button onClick={() => setInvoiceFor(doc)}
+                            className={`${btn} bg-green-600 text-white hover:bg-green-700`}>
+                            <FileText size={14} /> Convert to invoice
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button onClick={() => handleDelete(doc)}
+                            className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}>
+                            <Trash2 size={14} /> Delete
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      {formOpen && <SalesDocumentForm docType={docType} onClose={() => setFormOpen(false)} onSaved={load} />}
+
+      {invoiceFor && <InvoiceForm fromDoc={invoiceFor} onClose={() => setInvoiceFor(null)} onSaved={load} />}
+    </div>
+  );
+}
+
+function SalesDocumentForm({ docType, onClose, onSaved }) {
+  const fromDoc = null;
+  const info = SALES_DOC_INFO[docType];
+  const [customers, setCustomers] = useState([]);
+  const [items, setItems] = useState([]);
+      const [customerId, setCustomerId] = useState(
+        fromDoc ? fromDoc.customer_id : "",
+      );
+  const [date, setDate] = useState(toISODate(new Date()));
+  const [endDate, setEndDate] = useState("");
+  const [reference, setReference] = useState("");
+  const [notes, setNotes] = useState(fromDoc?.notes || "");
+  const [lines, setLines] = useState(
+        fromDoc && fromDoc.items.some((l) => l.product_id)
+          ? fromDoc.items
+              .filter((l) => l.product_id)
+              .map((l) => ({
+                product_id: l.product_id,
+                description: l.description || "",
+                quantity: String(l.quantity),
+                rate: String(l.rate),
+              }))
+          : [blankInvoiceLine()],
+      );
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  useEffect(() => {
+    Promise.all([getCustomers(), getProducts()])
+      .then(([c, p]) => {
+        setCustomers(c.filter((x) => x.is_active));
+        setItems(flattenParents(p).filter((x) => !(x.subitems?.length > 0)));
+      })
+      .catch((err) => setError(err.message));
+  }, []);
+
+  const itemById = Object.fromEntries(items.map((p) => [p.id, p]));
+  const customerOptions = customers.map((c) => ({
+    value: c.id,
+    label: c.display_name,
+    hint: c.payment_terms,
+    search: `${c.display_name} ${c.company_name || ""}`,
+  }));
+  const itemOptions = items.map((p) => ({
+    value: p.id,
+    label: p.label,
+    hint: p.item_type === STOCK_TRACKED_TYPE ? `${p.quantity} in stock` : p.item_type,
+    search: `${p.label} ${p.sku || ""}`,
+  }));
+
+  const setLine = (i, patch) => setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  const pickItem = (i, productId) => {
+    const p = itemById[productId];
+    setLine(i, { product_id: productId, description: p?.description || "", rate: p ? String(p.price ?? 0) : "" });
+  };
+
+  const filled = lines.filter((l) => l.product_id);
+  const lineCents = (l) => (Number(l.quantity) || 0) * toCents(l.rate);
+  const totalCents = filled.reduce((s, l) => s + lineCents(l), 0);
+  const canSave =
+    Boolean(customerId) &&
+    filled.length > 0 &&
+    filled.every((l) => Number.isInteger(Number(l.quantity)) && Number(l.quantity) > 0 && toCents(l.rate) >= 0) &&
+    totalCents > 0 &&
+    (!endDate || endDate >= date);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createSalesDoc({
+        doc_type: docType,
+        customer_id: customerId,
+        doc_date: date,
+        expiry_date: endDate || null,
+        reference: reference.trim() || null,
+        notes: notes.trim() || null,
+        items: filled.map((l) => ({
+          product_id: l.product_id,
+          description: l.description.trim() || null,
+          quantity: Number(l.quantity),
+          rate: Number(l.rate) || 0,
+        })),
+      });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-4">New {info.title}</h2>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <FieldLabel>Customer</FieldLabel>
+            <SearchSelect
+              value={customerId}
+              onChange={setCustomerId}
+              options={customerOptions}
+              placeholder="Select a customer..."
+              searchPlaceholder="Search customers..."
+              emptyText="No customers found"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label className="text-xs text-gray-500">
+              {info.dateLabel}
+              <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              {info.endLabel} (optional)
+              <input type="date" value={endDate} min={date} onChange={(e) => setEndDate(e.target.value)} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Reference #
+              <input value={reference} onChange={(e) => setReference(e.target.value)} className={cls + " mt-1"} />
+            </label>
+          </div>
+
+          <div className="space-y-3">
+            <FieldLabel>Items</FieldLabel>
+            {lines.map((l, i) => {
+              const p = itemById[l.product_id];
+              return (
+                <div key={i} className="border border-gray-200 rounded-lg p-3 space-y-2">
+                  <div className="flex items-start gap-3">
+                    <ItemThumb product={p} size={56} />
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <SearchSelect
+                        value={l.product_id}
+                        onChange={(v) => pickItem(i, v)}
+                        options={itemOptions}
+                        placeholder="Select an item..."
+                        searchPlaceholder="Search items..."
+                        emptyText="No items found"
+                      />
+                      <input
+                        placeholder="Description (optional)"
+                        value={l.description}
+                        onChange={(e) => setLine(i, { description: e.target.value })}
+                        className={cls}
+                      />
+                    </div>
+                    {lines.length > 1 && (
+                      <button
+                        type="button"
+                        title="Remove line"
+                        onClick={() => setLines((prev) => prev.filter((_, idx) => idx !== i))}
+                        className="shrink-0 border border-gray-300 rounded-lg p-2 text-gray-500 hover:bg-gray-50"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <label className="text-xs text-gray-500">
+                      Qty
+                      <input type="number" min="1" step="1" value={l.quantity}
+                        onChange={(e) => setLine(i, { quantity: e.target.value })} className={cls + " mt-1"} />
+                    </label>
+                    <label className="text-xs text-gray-500">
+                      Rate
+                      <input type="number" min="0" step="0.01" value={l.rate}
+                        onChange={(e) => setLine(i, { rate: e.target.value })} className={cls + " mt-1"} />
+                    </label>
+                    <div className="text-xs text-gray-500">
+                      Amount
+                      <p className="mt-1 py-2 text-sm font-medium text-gray-900">{formatRs(lineCents(l) / 100)}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setLines((prev) => [...prev, blankInvoiceLine()])}
+              className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+            >
+              <Plus size={14} /> Add another line
+            </button>
+          </div>
+
+          <textarea rows={2} placeholder="Notes for the customer" value={notes} onChange={(e) => setNotes(e.target.value)} className={cls} />
+
+          <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
+            <span>Total</span>
+            <span>{formatRs(totalCents / 100)}</span>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!canSave || submitting}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {submitting ? "Saving..." : `Save ${info.title}`}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 // ---------- Payments received ----------
 async function paymentRequest(path, method, payload, failMsg) {
@@ -185,6 +607,45 @@ async function vendorPaymentRequest(path, method, payload, failMsg) {
 const getVendorPayments = () => vendorPaymentRequest("", "GET", null, "Failed to fetch vendor payments");
 const createVendorPayment = (payload) => vendorPaymentRequest("", "POST", payload, "Failed to save vendor payment");
 const deleteVendorPayment = (id) => vendorPaymentRequest(String(id), "DELETE", null, "Failed to delete vendor payment");
+
+
+// ---------- Quotes + Sales orders ----------
+async function salesDocRequest(path, method, payload, failMsg) {
+  const res = await fetch(`${BASE_URL}/sales-documents/${path}`, {
+    method,
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : failMsg);
+  }
+  return res.json();
+}
+const getSalesDocs = (docType) => salesDocRequest(`?doc_type=${docType}`, "GET", null, "Failed to fetch documents");
+const createSalesDoc = (payload) => salesDocRequest("", "POST", payload, "Failed to save document");
+const setSalesDocStatus = (id, status) => salesDocRequest(`${id}/status`, "PUT", { status }, "Failed to change status");
+const quoteToSalesOrder = (id) => salesDocRequest(`${id}/to-sales-order`, "POST", null, "Failed to convert quote");
+const deleteSalesDoc = (id) => salesDocRequest(String(id), "DELETE", null, "Failed to delete");
+
+// ---------- Credit notes ----------
+async function creditNoteRequest(path, method, payload, failMsg) {
+  const res = await fetch(`${BASE_URL}/credit-notes/${path}`, {
+    method,
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : failMsg);
+  }
+  return res.json();
+}
+const getCreditNotes = () => creditNoteRequest("", "GET", null, "Failed to fetch credit notes");
+const createCreditNote = (payload) => creditNoteRequest("", "POST", payload, "Failed to save credit note");
+const applyCreditNote = (id, payload) => creditNoteRequest(`${id}/apply`, "POST", payload, "Failed to apply credit");
+const removeCreditApplication = (id, appId) => creditNoteRequest(`${id}/applications/${appId}`, "DELETE", null, "Failed to remove credit");
+const voidCreditNote = (id) => creditNoteRequest(`${id}/void`, "PUT", null, "Failed to void credit note");
 
 // ---------- Accounts (chart of accounts) ----------
 async function getAccounts(accountType) {
@@ -2257,8 +2718,11 @@ function HomeTabs({ active, onChange, isAdmin }) {
       {isAdmin && tab("journals", "Journals", BookOpen)}
       {tab("items", "Items", Tag)}
       {isAdmin && tab("customers", "Customers", Users)}
+      {isAdmin && tab("quotes", "Quotes", FileSignature)}
+      {isAdmin && tab("salesorders", "Sales Orders", ClipboardCheck)}
       {isAdmin && tab("invoices", "Invoices", FileText)}
       {isAdmin && tab("payments", "Payments", Wallet)}
+      {isAdmin && tab("creditnotes", "Credit Notes", RotateCcw)}
       {isAdmin && tab("vendors", "Vendors", Truck)}
       {isAdmin && tab("purchases", "Purchases", ShoppingCart)}
       {isAdmin && tab("vendorpayments", "Payments Made", CreditCard)}
@@ -4259,10 +4723,18 @@ function InvoicesPage({ isAdmin, go }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
   const [payFor, setPayFor] = useState(null); // the invoice whose "Record payment" button was pressed
+  const [creditFor, setCreditFor] = useState(null); // the invoice whose "Credit note" button was pressed
   const handleVoid = async (inv) => {
-    if (!window.confirm(`Void ${inv.invoice_number}? The stock goes back and its ledger entry is removed.`)) return;
+    if (
+      !window.confirm(
+        `Void ${inv.invoice_number}? The stock goes back and its ledger entry is removed.`,
+      )
+    )
+      return;
     try {
       await voidInvoice(inv.id);
       await load();
@@ -4273,17 +4745,29 @@ function InvoicesPage({ isAdmin, go }) {
 
   const q = search.trim().toLowerCase();
   const shown = invoices.filter(
-    (inv) => !q || [inv.invoice_number, inv.customer_name, inv.order_number].some((v) => (v || "").toLowerCase().includes(q))
+    (inv) =>
+      !q ||
+      [inv.invoice_number, inv.customer_name, inv.order_number].some((v) =>
+        (v || "").toLowerCase().includes(q),
+      ),
   );
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="invoices" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="invoices"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
 
       <main className="p-4 sm:p-6 max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
-            <SearchBox value={search} onChange={setSearch} placeholder="Search invoices..." />
+            <SearchBox
+              value={search}
+              onChange={setSearch}
+              placeholder="Search invoices..."
+            />
           </div>
           <button
             onClick={() => setFormOpen(true)}
@@ -4305,7 +4789,10 @@ function InvoicesPage({ isAdmin, go }) {
               const st = invoiceStatus(inv);
               const open = expandedId === inv.id;
               return (
-                <div key={inv.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div
+                  key={inv.id}
+                  className="bg-white border border-gray-200 rounded-xl overflow-hidden"
+                >
                   <button
                     type="button"
                     onClick={() => setExpandedId(open ? null : inv.id)}
@@ -4313,18 +4800,32 @@ function InvoicesPage({ isAdmin, go }) {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 truncate">
-                        {inv.invoice_number} <span className="text-gray-400 font-normal">· {inv.customer_name}</span>
+                        {inv.invoice_number}{" "}
+                        <span className="text-gray-400 font-normal">
+                          · {inv.customer_name}
+                        </span>
                       </p>
                       <p className="text-xs text-gray-400 truncate">
-                        {formatJournalDate(inv.invoice_date)} · Due {formatJournalDate(inv.due_date)}
+                        {formatJournalDate(inv.invoice_date)} · Due{" "}
+                        {formatJournalDate(inv.due_date)}
                         {inv.order_number && ` · PO ${inv.order_number}`}
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="font-semibold text-gray-900">{formatRs(inv.total)}</p>
-                      <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                      <p className="font-semibold text-gray-900">
+                        {formatRs(inv.total)}
+                      </p>
+                      <span
+                        className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}
+                      >
+                        {st.label}
+                      </span>
                     </div>
-                    {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                    {open ? (
+                      <ChevronDown size={16} className="text-gray-400" />
+                    ) : (
+                      <ChevronRight size={16} className="text-gray-400" />
+                    )}
                   </button>
 
                   {open && (
@@ -4333,22 +4834,39 @@ function InvoicesPage({ isAdmin, go }) {
                         <div key={l.id} className="flex items-center gap-3">
                           <ItemThumb product={l.product} />
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm text-gray-900 truncate">{l.item_name}</p>
+                            <p className="text-sm text-gray-900 truncate">
+                              {l.item_name}
+                            </p>
                             <p className="text-xs text-gray-400 truncate">
                               {l.quantity} × {formatRs(l.rate)}
                               {l.description && ` · ${l.description}`}
                             </p>
                           </div>
-                          <span className="text-sm font-medium text-gray-900 shrink-0">{formatRs(l.amount)}</span>
+                          <span className="text-sm font-medium text-gray-900 shrink-0">
+                            {formatRs(l.amount)}
+                          </span>
                         </div>
                       ))}
 
-                      {inv.notes && <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">{inv.notes}</p>}
+                      {inv.notes && (
+                        <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">
+                          {inv.notes}
+                        </p>
+                      )}
 
                       <div className="border-t border-gray-100 pt-2 text-sm space-y-1">
-                        <div className="flex justify-between"><span className="text-gray-500">Total</span><span>{formatRs(inv.total)}</span></div>
-                        <div className="flex justify-between"><span className="text-gray-500">Paid</span><span>{formatRs(inv.amount_paid)}</span></div>
-                        <div className="flex justify-between font-semibold"><span>Balance due</span><span>{formatRs(inv.balance_due)}</span></div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Total</span>
+                          <span>{formatRs(inv.total)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Paid</span>
+                          <span>{formatRs(inv.amount_paid)}</span>
+                        </div>
+                        <div className="flex justify-between font-semibold">
+                          <span>Balance due</span>
+                          <span>{formatRs(inv.balance_due)}</span>
+                        </div>
                       </div>
 
                       {inv.status !== "void" && (
@@ -4361,6 +4879,13 @@ function InvoicesPage({ isAdmin, go }) {
                               <Wallet size={14} /> Record payment
                             </button>
                           )}
+                            <button
+                              onClick={() => setCreditFor(inv)}
+                              className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
+                            >
+                              <RotateCcw size={14} /> Credit note
+                            </button>
+
                           <button
                             onClick={() => handleVoid(inv)}
                             className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
@@ -4378,7 +4903,13 @@ function InvoicesPage({ isAdmin, go }) {
         )}
       </main>
 
-      {formOpen && <InvoiceForm onClose={() => setFormOpen(false)} onSaved={load} />}
+      {formOpen && (
+        <InvoiceForm onClose={() => setFormOpen(false)} onSaved={load} />
+      )}
+      
+      {creditFor && (
+          <CreditNoteForm fromInvoice={creditFor} onClose={() => setCreditFor(null)} onSaved={load} />
+        )}
 
       {payFor && (
         <PaymentForm
@@ -4394,18 +4925,32 @@ function InvoicesPage({ isAdmin, go }) {
 
 const blankInvoiceLine = () => ({ product_id: "", description: "", quantity: "1", rate: "" });
 
-function InvoiceForm({ onClose, onSaved }) {
+function InvoiceForm({ fromDoc = null, onClose, onSaved }) {
   const [customers, setCustomers] = useState([]);
   const [items, setItems] = useState([]);
-  const [customerId, setCustomerId] = useState("");
+  const [customerId, setCustomerId] = useState(
+    fromDoc ? fromDoc.customer_id : "",
+  );
   const [date, setDate] = useState(toISODate(new Date()));
   const [dueDate, setDueDate] = useState(""); // empty = follow the customer's payment terms
-  const [orderNumber, setOrderNumber] = useState("");
-  const [notes, setNotes] = useState("");
-  const [lines, setLines] = useState([blankInvoiceLine()]);
+  const [orderNumber, setOrderNumber] = useState(fromDoc?.reference || "");
+  const [notes, setNotes] = useState(fromDoc?.notes || "");
+  const [lines, setLines] = useState(
+    fromDoc && fromDoc.items.some((l) => l.product_id)
+      ? fromDoc.items
+          .filter((l) => l.product_id)
+          .map((l) => ({
+            product_id: l.product_id,
+            description: l.description || "",
+            quantity: String(l.quantity),
+            rate: String(l.rate),
+          }))
+      : [blankInvoiceLine()],
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   useEffect(() => {
     Promise.all([getCustomers(), getProducts()])
@@ -4418,7 +4963,10 @@ function InvoiceForm({ onClose, onSaved }) {
   }, []);
 
   const customer = customers.find((c) => c.id === customerId);
-  const autoDue = addDaysISO(date, INVOICE_TERM_DAYS[customer?.payment_terms] ?? 0);
+  const autoDue = addDaysISO(
+    date,
+    INVOICE_TERM_DAYS[customer?.payment_terms] ?? 0,
+  );
   const effectiveDue = dueDate || autoDue;
 
   const itemById = Object.fromEntries(items.map((p) => [p.id, p]));
@@ -4431,24 +4979,40 @@ function InvoiceForm({ onClose, onSaved }) {
   const itemOptions = items.map((p) => ({
     value: p.id,
     label: p.label,
-    hint: p.item_type === STOCK_TRACKED_TYPE ? `${p.quantity} in stock` : p.item_type,
+    hint:
+      p.item_type === STOCK_TRACKED_TYPE
+        ? `${p.quantity} in stock`
+        : p.item_type,
     search: `${p.label} ${p.sku || ""}`,
   }));
 
-  const setLine = (i, patch) => setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  const setLine = (i, patch) =>
+    setLines((prev) =>
+      prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
+    );
   const pickItem = (i, productId) => {
     const p = itemById[productId];
-    setLine(i, { product_id: productId, description: p?.description || "", rate: p ? String(p.price ?? 0) : "" });
+    setLine(i, {
+      product_id: productId,
+      description: p?.description || "",
+      rate: p ? String(p.price ?? 0) : "",
+    });
   };
 
   // the same item can be on two lines, so stock is checked against the combined quantity
   const used = {};
   lines.forEach((l) => {
-    if (l.product_id) used[l.product_id] = (used[l.product_id] || 0) + (Number(l.quantity) || 0);
+    if (l.product_id)
+      used[l.product_id] =
+        (used[l.product_id] || 0) + (Number(l.quantity) || 0);
   });
   const overStock = (l) => {
     const p = itemById[l.product_id];
-    return Boolean(p) && p.item_type === STOCK_TRACKED_TYPE && used[l.product_id] > p.quantity;
+    return (
+      Boolean(p) &&
+      p.item_type === STOCK_TRACKED_TYPE &&
+      used[l.product_id] > p.quantity
+    );
   };
 
   const filled = lines.filter((l) => l.product_id);
@@ -4457,7 +5021,12 @@ function InvoiceForm({ onClose, onSaved }) {
   const canSave =
     Boolean(customerId) &&
     filled.length > 0 &&
-    filled.every((l) => Number.isInteger(Number(l.quantity)) && Number(l.quantity) > 0 && toCents(l.rate) >= 0) &&
+    filled.every(
+      (l) =>
+        Number.isInteger(Number(l.quantity)) &&
+        Number(l.quantity) > 0 &&
+        toCents(l.rate) >= 0,
+    ) &&
     !filled.some(overStock) &&
     totalCents > 0 &&
     effectiveDue >= date;
@@ -4469,6 +5038,7 @@ function InvoiceForm({ onClose, onSaved }) {
     try {
       await createInvoice({
         customer_id: customerId,
+        sales_document_id: fromDoc ? fromDoc.id : null,
         invoice_date: date,
         due_date: effectiveDue,
         order_number: orderNumber.trim() || null,
@@ -4493,7 +5063,11 @@ function InvoiceForm({ onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
         <h2 className="text-lg font-semibold mb-4">New Invoice</h2>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <FieldLabel>Customer</FieldLabel>
@@ -4510,20 +5084,462 @@ function InvoiceForm({ onClose, onSaved }) {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="text-xs text-gray-500">
               Invoice date
-              <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1"} />
+              <input
+                required
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
-              Due date {customer && !dueDate && <span className="text-gray-400">({customer.payment_terms})</span>}
-              <input required type="date" value={effectiveDue} min={date} onChange={(e) => setDueDate(e.target.value)} className={cls + " mt-1"} />
+              Due date{" "}
+              {customer && !dueDate && (
+                <span className="text-gray-400">
+                  ({customer.payment_terms})
+                </span>
+              )}
+              <input
+                required
+                type="date"
+                value={effectiveDue}
+                min={date}
+                onChange={(e) => setDueDate(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               Order / PO number
-              <input value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} className={cls + " mt-1"} />
+              <input
+                value={orderNumber}
+                onChange={(e) => setOrderNumber(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
           </div>
 
           <div className="space-y-3">
             <FieldLabel>Items</FieldLabel>
+            {lines.map((l, i) => {
+              const p = itemById[l.product_id];
+              return (
+                <div
+                  key={i}
+                  className="border border-gray-200 rounded-lg p-3 space-y-2"
+                >
+                  <div className="flex items-start gap-3">
+                    <ItemThumb product={p} size={56} />
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <SearchSelect
+                        value={l.product_id}
+                        onChange={(v) => pickItem(i, v)}
+                        options={itemOptions}
+                        placeholder="Select an item..."
+                        searchPlaceholder="Search items..."
+                        emptyText="No items found"
+                      />
+                      <input
+                        placeholder="Description (optional)"
+                        value={l.description}
+                        onChange={(e) =>
+                          setLine(i, { description: e.target.value })
+                        }
+                        className={cls}
+                      />
+                    </div>
+                    {lines.length > 1 && (
+                      <button
+                        type="button"
+                        title="Remove line"
+                        onClick={() =>
+                          setLines((prev) => prev.filter((_, idx) => idx !== i))
+                        }
+                        className="shrink-0 border border-gray-300 rounded-lg p-2 text-gray-500 hover:bg-gray-50"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <label className="text-xs text-gray-500">
+                      Qty
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={l.quantity}
+                        onChange={(e) =>
+                          setLine(i, { quantity: e.target.value })
+                        }
+                        className={cls + " mt-1"}
+                      />
+                    </label>
+                    <label className="text-xs text-gray-500">
+                      Rate
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={l.rate}
+                        onChange={(e) => setLine(i, { rate: e.target.value })}
+                        className={cls + " mt-1"}
+                      />
+                    </label>
+                    <div className="text-xs text-gray-500">
+                      Amount
+                      <p className="mt-1 py-2 text-sm font-medium text-gray-900">
+                        {formatRs(lineCents(l) / 100)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {overStock(l) && (
+                    <p className="text-xs text-red-600">
+                      Only {p.quantity} in stock.
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setLines((prev) => [...prev, blankInvoiceLine()])}
+              className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+            >
+              <Plus size={14} /> Add another line
+            </button>
+          </div>
+
+          <textarea
+            rows={2}
+            placeholder="Notes for the customer"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className={cls}
+          />
+
+          <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
+            <span>Total</span>
+            <span>{formatRs(totalCents / 100)}</span>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!canSave || submitting}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {submitting ? "Saving..." : "Save Invoice"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Credit notes (step 6B: goods / money given back; posts to the ledger, admin only) ----------
+function creditNoteStatus(cn) {
+  if (cn.status === "void") return { label: "Void", cls: "bg-gray-100 text-gray-500" };
+  if (cn.balance <= 0.004) return { label: "Applied", cls: "bg-green-100 text-green-700" };
+  if (cn.amount_applied > 0) return { label: "Partially applied", cls: "bg-amber-100 text-amber-700" };
+  return { label: "Open", cls: "bg-blue-100 text-blue-700" };
+}
+
+function CreditNotesPage({ isAdmin, go }) {
+  const [notes, setNotes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const [applyFor, setApplyFor] = useState(null); // the credit note whose "Apply to invoice" button was pressed
+
+  const load = async () => {
+    try {
+      setNotes(await getCreditNotes());
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const run = async (action) => {
+    try {
+      await action();
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleVoid = (cn) => {
+    if (!window.confirm(`Void ${cn.credit_number}? Returned stock is taken out again and its ledger entry is removed.`)) return;
+    run(() => voidCreditNote(cn.id));
+  };
+
+  const handleRemoveApplication = (cn, app) => {
+    if (!window.confirm(`Take ${formatRs(app.amount)} off ${app.invoice_number}? That invoice will owe it again.`)) return;
+    run(() => removeCreditApplication(cn.id, app.id));
+  };
+
+  const q = search.trim().toLowerCase();
+  const shown = notes.filter(
+    (n) => !q || [n.credit_number, n.customer_name, n.invoice_number].some((v) => (v || "").toLowerCase().includes(q))
+  );
+
+  const btn = "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium";
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active="creditnotes" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+
+      <main className="p-4 sm:p-6 max-w-3xl">
+        <div className="mb-5 flex gap-3 items-center">
+          <div className="flex-1">
+            <SearchBox value={search} onChange={setSearch} placeholder="Search credit notes..." />
+          </div>
+          <button
+            onClick={() => setFormOpen(true)}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
+          >
+            + New Credit Note
+          </button>
+        </div>
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : shown.length === 0 ? (
+          <p className="text-gray-400 text-center py-16">No credit notes yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {shown.map((cn) => {
+              const st = creditNoteStatus(cn);
+              const open = expandedId === cn.id;
+              return (
+                <div key={cn.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(open ? null : cn.id)}
+                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">
+                        {cn.credit_number} <span className="text-gray-400 font-normal">· {cn.customer_name}</span>
+                      </p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {formatJournalDate(cn.credit_date)}
+                        {cn.invoice_number && ` · For ${cn.invoice_number}`}
+                        {cn.restock ? " · Stock returned" : " · No stock returned"}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-semibold text-gray-900">{formatRs(cn.total)}</p>
+                      <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                    </div>
+                    {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                  </button>
+
+                  {open && (
+                    <div className="border-t border-gray-100 p-3 space-y-3">
+                      {cn.items.map((l) => (
+                        <div key={l.id} className="flex items-center gap-3">
+                          <ItemThumb product={l.product} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-gray-900 truncate">{l.item_name}</p>
+                            <p className="text-xs text-gray-400 truncate">
+                              {l.quantity} × {formatRs(l.rate)}
+                              {l.description && ` · ${l.description}`}
+                            </p>
+                          </div>
+                          <span className="text-sm font-medium text-gray-900 shrink-0">{formatRs(l.amount)}</span>
+                        </div>
+                      ))}
+
+                      {cn.reason && <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">{cn.reason}</p>}
+
+                      {cn.applications.length > 0 && (
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-gray-500">Applied to</p>
+                          {cn.applications.map((a) => (
+                            <div key={a.id} className="flex items-center justify-between text-sm">
+                              <span className="text-gray-700">{a.invoice_number}</span>
+                              <span className="flex items-center gap-2">
+                                {formatRs(a.amount)}
+                                {cn.status !== "void" && (
+                                  <button
+                                    type="button"
+                                    title="Remove from invoice"
+                                    onClick={() => handleRemoveApplication(cn, a)}
+                                    className="text-gray-400 hover:text-red-600"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                )}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="border-t border-gray-100 pt-2 text-sm space-y-1">
+                        <div className="flex justify-between"><span className="text-gray-500">Total</span><span>{formatRs(cn.total)}</span></div>
+                        <div className="flex justify-between"><span className="text-gray-500">Used on invoices</span><span>{formatRs(cn.amount_applied)}</span></div>
+                        <div className="flex justify-between font-semibold"><span>Credit left</span><span>{formatRs(cn.balance)}</span></div>
+                      </div>
+
+                      {cn.status !== "void" && (
+                        <div className="flex flex-wrap gap-2">
+                          {cn.balance > 0.004 && (
+                            <button onClick={() => setApplyFor(cn)}
+                              className={`${btn} bg-green-600 text-white hover:bg-green-700`}>
+                              <FileText size={14} /> Apply to invoice
+                            </button>
+                          )}
+                          <button onClick={() => handleVoid(cn)}
+                            className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}>
+                            <Trash2 size={14} /> Void credit note
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      {formOpen && <CreditNoteForm onClose={() => setFormOpen(false)} onSaved={load} />}
+      {applyFor && <ApplyCreditModal credit={applyFor} onClose={() => setApplyFor(null)} onSaved={load} />}
+    </div>
+  );
+}
+
+// fromInvoice: used by the "Credit note" button on an invoice (pre-fills the customer and the lines)
+function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
+  const [customers, setCustomers] = useState([]);
+  const [items, setItems] = useState([]);
+  const [customerId, setCustomerId] = useState(fromInvoice ? fromInvoice.customer_id : "");
+  const [date, setDate] = useState(toISODate(new Date()));
+  const [reason, setReason] = useState("");
+  const [restock, setRestock] = useState(true);
+  const [lines, setLines] = useState(
+    fromInvoice && fromInvoice.items.some((l) => l.product_id)
+      ? fromInvoice.items.filter((l) => l.product_id).map((l) => ({
+          product_id: l.product_id, description: l.description || "", quantity: String(l.quantity), rate: String(l.rate),
+        }))
+      : [blankInvoiceLine()]
+  );
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  useEffect(() => {
+    Promise.all([getCustomers(), getProducts()])
+      .then(([c, p]) => {
+        setCustomers(c.filter((x) => x.is_active || x.id === fromInvoice?.customer_id));
+        setItems(flattenParents(p).filter((x) => !(x.subitems?.length > 0)));
+      })
+      .catch((err) => setError(err.message));
+  }, []);
+
+  const itemById = Object.fromEntries(items.map((p) => [p.id, p]));
+  const customerOptions = customers.map((c) => ({
+    value: c.id,
+    label: c.display_name,
+    hint: c.payment_terms,
+    search: `${c.display_name} ${c.company_name || ""}`,
+  }));
+  const itemOptions = items.map((p) => ({
+    value: p.id,
+    label: p.label,
+    hint: p.item_type === STOCK_TRACKED_TYPE ? `${p.quantity} in stock` : p.item_type,
+    search: `${p.label} ${p.sku || ""}`,
+  }));
+
+  const setLine = (i, patch) => setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  const pickItem = (i, productId) => {
+    const p = itemById[productId];
+    setLine(i, { product_id: productId, description: p?.description || "", rate: p ? String(p.price ?? 0) : "" });
+  };
+
+  const filled = lines.filter((l) => l.product_id);
+  const lineCents = (l) => (Number(l.quantity) || 0) * toCents(l.rate);
+  const totalCents = filled.reduce((s, l) => s + lineCents(l), 0);
+  const canSave =
+    Boolean(customerId) &&
+    filled.length > 0 &&
+    filled.every((l) => Number.isInteger(Number(l.quantity)) && Number(l.quantity) > 0 && toCents(l.rate) >= 0) &&
+    totalCents > 0;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createCreditNote({
+        customer_id: customerId,
+        invoice_id: fromInvoice ? fromInvoice.id : null,
+        credit_date: date,
+        reason: reason.trim() || null,
+        restock,
+        items: filled.map((l) => ({
+          product_id: l.product_id,
+          description: l.description.trim() || null,
+          quantity: Number(l.quantity),
+          rate: Number(l.rate) || 0,
+        })),
+      });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-4">New Credit Note{fromInvoice ? ` for ${fromInvoice.invoice_number}` : ""}</h2>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <FieldLabel>Customer</FieldLabel>
+            <SearchSelect
+              value={customerId}
+              onChange={setCustomerId}
+              options={customerOptions}
+              placeholder="Select a customer..."
+              searchPlaceholder="Search customers..."
+              emptyText="No customers found"
+            />
+          </div>
+
+          <label className="text-xs text-gray-500 block">
+            Credit note date
+            <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1 sm:w-56"} />
+          </label>
+
+          <div className="space-y-3">
+            <FieldLabel>Items being credited</FieldLabel>
             {lines.map((l, i) => {
               const p = itemById[l.product_id];
               return (
@@ -4574,8 +5590,6 @@ function InvoiceForm({ onClose, onSaved }) {
                       <p className="mt-1 py-2 text-sm font-medium text-gray-900">{formatRs(lineCents(l) / 100)}</p>
                     </div>
                   </div>
-
-                  {overStock(l) && <p className="text-xs text-red-600">Only {p.quantity} in stock.</p>}
                 </div>
               );
             })}
@@ -4588,10 +5602,18 @@ function InvoiceForm({ onClose, onSaved }) {
             </button>
           </div>
 
-          <textarea rows={2} placeholder="Notes for the customer" value={notes} onChange={(e) => setNotes(e.target.value)} className={cls} />
+          <label className="flex items-start gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={restock} onChange={(e) => setRestock(e.target.checked)} className="mt-1" />
+            <span>
+              The goods came back, so put them back in stock
+              <span className="block text-xs text-gray-400">Untick this for a price adjustment or a discount where nothing was returned.</span>
+            </span>
+          </label>
+
+          <textarea rows={2} placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} className={cls} />
 
           <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
-            <span>Total</span>
+            <span>Credit total</span>
             <span>{formatRs(totalCents / 100)}</span>
           </div>
 
@@ -4604,10 +5626,101 @@ function InvoiceForm({ onClose, onSaved }) {
               disabled={!canSave || submitting}
               className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
-              {submitting ? "Saving..." : "Save Invoice"}
+              {submitting ? "Saving..." : "Save Credit Note"}
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// pays down one open invoice of the same customer with this credit note
+function ApplyCreditModal({ credit, onClose, onSaved }) {
+  const [invoices, setInvoices] = useState([]);
+  const [invoiceId, setInvoiceId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  useEffect(() => {
+    getInvoices()
+      .then((all) =>
+        setInvoices(all.filter((i) => i.customer_id === credit.customer_id && i.status === "open" && i.balance_due > 0.004))
+      )
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const pick = (id) => {
+    setInvoiceId(id);
+    const inv = invoices.find((i) => String(i.id) === String(id));
+    setAmount(inv ? String(Math.min(inv.balance_due, credit.balance).toFixed(2)) : "");
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await applyCreditNote(credit.id, { invoice_id: Number(invoiceId), amount: Number(amount) });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+        <h2 className="text-lg font-semibold mb-1">Apply {credit.credit_number}</h2>
+        <p className="text-sm text-gray-500 mb-4">{credit.customer_name} · Credit left {formatRs(credit.balance)}</p>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-8">Loading...</p>
+        ) : invoices.length === 0 ? (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-500">This customer has no unpaid invoices to apply the credit to.</p>
+            <button onClick={onClose} className="w-full border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">Close</button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <label className="text-xs text-gray-500 block">
+              Invoice
+              <select required value={invoiceId} onChange={(e) => pick(e.target.value)} className={cls + " mt-1"}>
+                <option value="">Select an invoice...</option>
+                {invoices.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.invoice_number} · owes {formatRs(i.balance_due)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-gray-500 block">
+              Amount to apply
+              <input required type="number" min="0.01" step="0.01" value={amount}
+                onChange={(e) => setAmount(e.target.value)} className={cls + " mt-1"} />
+            </label>
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!invoiceId || !(Number(amount) > 0) || submitting}
+                className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                {submitting ? "Saving..." : "Apply credit"}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
@@ -7103,6 +8216,27 @@ function AppShell() {
     page = <JournalsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "customers" && isAdmin) {
     page = <CustomersPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "quotes" && isAdmin) {
+    page = (
+      <SalesDocumentsPage
+        key="quote"
+        isAdmin={isAdmin}
+        go={setSearchParams}
+        docType="quote"
+      />
+    );
+  } else if (searchParams.get("view") === "salesorders" && isAdmin) {
+    page = (
+      <SalesDocumentsPage
+        key="sales_order"
+        isAdmin={isAdmin}
+        go={setSearchParams}
+        docType="sales_order"
+      />
+    );
+
+  } else if (searchParams.get("view") === "creditnotes" && isAdmin) {
+    page = <CreditNotesPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "invoices" && isAdmin) {
     page = <InvoicesPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "payments" && isAdmin) {

@@ -334,6 +334,7 @@ class InvoiceCreate(BaseModel):
     order_number: Optional[str] = None
     notes: Optional[str] = None
     items: List[InvoiceItemCreate]
+    sales_document_id: Optional[int] = None   # set when this invoice is made from a quote / sales order
 
 class InvoiceProductOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -371,6 +372,44 @@ class InvoiceOut(BaseModel):
     items: List[InvoiceItemOut] = []
 
 
+
+# ---------- Quotes + sales orders (step 6) ----------
+class SalesDocumentItemCreate(BaseModel):
+    product_id: int
+    description: Optional[str] = None
+    quantity: int
+    rate: float
+
+class SalesDocumentCreate(BaseModel):
+    doc_type: str                           # "quote" or "sales_order"
+    customer_id: int
+    doc_date: date
+    expiry_date: Optional[date] = None
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    items: List[SalesDocumentItemCreate]
+
+class SalesDocumentStatusUpdate(BaseModel):
+    status: str
+
+class SalesDocumentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    doc_type: str
+    doc_number: str
+    customer_id: int
+    customer_name: str
+    doc_date: date
+    expiry_date: Optional[date] = None
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    status: str
+    total: float
+    invoice_id: Optional[int] = None
+    invoice_number: Optional[str] = None
+    source_id: Optional[int] = None
+    created_at: datetime
+    items: List[InvoiceItemOut] = []
 
 # ---------- Payments received ----------
 class PaymentAllocationCreate(BaseModel):
@@ -491,3 +530,51 @@ class VendorPaymentOut(BaseModel):
     notes: Optional[str] = None
     created_at: datetime
     allocations: List[VendorPaymentAllocationOut] = []
+
+
+
+# ---------- Credit notes (step 6B) ----------
+class CreditNoteItemCreate(BaseModel):
+    product_id: int
+    description: Optional[str] = None
+    quantity: int
+    rate: float
+
+class CreditNoteCreate(BaseModel):
+    customer_id: int
+    credit_date: date
+    invoice_id: Optional[int] = None
+    reason: Optional[str] = None
+    restock: bool = True
+    items: List[CreditNoteItemCreate]
+
+class CreditApplyCreate(BaseModel):
+    invoice_id: int
+    amount: float
+
+class CreditNoteApplicationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    invoice_id: int
+    invoice_number: str
+    amount: float
+    created_at: datetime
+
+class CreditNoteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    credit_number: str
+    customer_id: int
+    customer_name: str
+    invoice_id: Optional[int] = None
+    invoice_number: Optional[str] = None
+    credit_date: date
+    reason: Optional[str] = None
+    restock: bool
+    status: str
+    total: float
+    amount_applied: float
+    balance: float
+    created_at: datetime
+    items: List[InvoiceItemOut] = []
+    applications: List[CreditNoteApplicationOut] = []

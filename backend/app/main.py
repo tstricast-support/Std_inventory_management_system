@@ -4,7 +4,7 @@ from sqlalchemy import inspect, text
 from app.departments import DEFAULT_DEPARTMENT
 from app.account_types import DEFAULT_ACCOUNTS
 from app.database import Base, engine
-from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments
+from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments,sales_documents,credit_notes
 Base.metadata.create_all(bind=engine) 
 
 def add_department_column():
@@ -130,6 +130,8 @@ app.include_router(invoices.router)
 app.include_router(payments.router)
 app.include_router(purchase_bills.router)
 app.include_router(vendor_payments.router)
+app.include_router(sales_documents.router)
+app.include_router(credit_notes.router)
 
 @app.get("/")
 def root():

@@ -77,6 +77,17 @@ def create_invoice(payload: schemas.InvoiceCreate, db: Session = Depends(get_db)
         raise HTTPException(400, "This customer is inactive")
     if not payload.items:
         raise HTTPException(400, "Add at least one item")
+    
+        # made from a quote / sales order? check it before anything is saved
+    doc = None
+    if payload.sales_document_id:
+        doc = db.query(models.SalesDocument).get(payload.sales_document_id)
+        if not doc:
+            raise HTTPException(404, "Quote / sales order not found")
+        if doc.customer_id != customer.id:
+            raise HTTPException(400, f"{doc.doc_number} belongs to a different customer")
+        if doc.status in ("invoiced", "converted", "declined"):
+            raise HTTPException(400, f"{doc.doc_number} can't be invoiced (status: {doc.status})")
 
     due_date = payload.due_date or payload.invoice_date + timedelta(days=TERM_DAYS.get(customer.payment_terms, 0))
     if due_date < payload.invoice_date:
@@ -165,6 +176,10 @@ def create_invoice(payload: schemas.InvoiceCreate, db: Session = Depends(get_db)
     db.add(invoice)
     db.flush()
 
+    if doc:
+        doc.status = "invoiced"
+        doc.invoice_id = invoice.id
+
     for pid, qty in wanted.items():
         if products[pid].item_type == STOCK_TRACKED_TYPE:
             products[pid].quantity -= qty
@@ -213,6 +228,11 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
         models.Journal.source_type == "invoice", models.Journal.source_id == invoice.id
     ).all():
         db.delete(journal)
+
+        # a quote / sales order that was invoiced becomes usable again
+    for doc in db.query(models.SalesDocument).filter(models.SalesDocument.invoice_id == invoice.id).all():
+        doc.status = "open" if doc.doc_type == "sales_order" else "accepted"
+        doc.invoice_id = None
 
     invoice.status = "void"
     db.commit()
