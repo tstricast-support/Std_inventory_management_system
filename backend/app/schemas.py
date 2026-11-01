@@ -604,3 +604,45 @@ class TaxOut(BaseModel):
     rate: float
     is_active: bool
     is_default: bool
+
+
+
+# ---------- Step 8: banking ----------
+class BankAccountCreate(BaseModel):
+    name: str
+    account_type: str = "bank"            # "bank" or "cash"
+    account_code: Optional[str] = None
+    opening_balance: float = 0
+    opening_date: Optional[date] = None
+
+class BankAccountOut(BaseModel):
+    id: int
+    name: str
+    account_type: str
+    account_code: Optional[str] = None
+    balance: float
+    transaction_count: int
+
+class BankTransactionCreate(BaseModel):
+    txn_type: str                         # "deposit" | "withdrawal" | "transfer"
+    txn_date: date
+    amount: float
+    account_id: int                       # the bank / cash account (for a transfer: the one money leaves)
+    other_account_id: int                 # where it came from / went to (for a transfer: the one money goes into)
+    reference: Optional[str] = None
+    description: Optional[str] = None
+
+class BankTransactionOut(BaseModel):
+    line_id: int
+    journal_id: int
+    journal_number: str
+    date: date
+    source_type: Optional[str] = None
+    kind: str
+    reference: Optional[str] = None
+    description: Optional[str] = None
+    other_accounts: str = ""
+    money_in: float
+    money_out: float
+    balance: float
+    can_delete: bool

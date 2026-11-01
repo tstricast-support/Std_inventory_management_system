@@ -33,7 +33,8 @@ import {
   ClipboardCheck,
   RotateCcw,
   Download,
-  Percent
+  Percent,
+  Banknote,
 } from "lucide-react";
 import "./index.css";
 
@@ -139,6 +140,32 @@ const getTaxes = () => taxRequest("", "GET", null, "Failed to fetch taxes");
 const createTax = (payload) => taxRequest("", "POST", payload, "Failed to save tax");
 const updateTax = (id, payload) => taxRequest(String(id), "PUT", payload, "Failed to update tax");
 const deleteTax = (id) => taxRequest(String(id), "DELETE", null, "Failed to delete tax");
+
+
+// ---------- Banking ----------
+async function bankRequest(path, method, payload, failMsg) {
+  const res = await fetch(`${BASE_URL}/banking/${path}`, {
+    method,
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : failMsg);
+  }
+  return res.json();
+}
+const getBankAccounts = () => bankRequest("accounts", "GET", null, "Failed to fetch bank accounts");
+const createBankAccount = (payload) => bankRequest("accounts", "POST", payload, "Failed to save account");
+const getBankTransactions = (id, from, to) => {
+  const q = new URLSearchParams();
+  if (from) q.set("date_from", from);
+  if (to) q.set("date_to", to);
+  const qs = q.toString();
+  return bankRequest(`accounts/${id}/transactions${qs ? `?${qs}` : ""}`, "GET", null, "Failed to fetch transactions");
+};
+const createBankTransaction = (payload) => bankRequest("transactions", "POST", payload, "Failed to save transaction");
+const deleteBankTransaction = (journalId) => bankRequest(`transactions/${journalId}`, "DELETE", null, "Failed to delete transaction");
 
 // ---------- Invoices ----------
 async function invoiceRequest(path, method, payload, failMsg) {
@@ -2954,6 +2981,7 @@ function HomeTabs({ active, onChange, isAdmin }) {
       {isAdmin && tab("vendors", "Vendors", Truck)}
       {isAdmin && tab("purchases", "Purchases", ShoppingCart)}
       {isAdmin && tab("vendorpayments", "Payments Made", CreditCard)}
+      {isAdmin && tab("banking", "Banking", Banknote)}
       {isAdmin && tab("taxes", "Taxes", Percent)}
       {isAdmin && tab("bill", "Bill", Receipt)}
       {isAdmin && tab("issued", "Issued", ClipboardList)}
@@ -4187,6 +4215,418 @@ function TaxForm({ initialData, onClose, onSubmit }) {
             <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
             <button type="submit" disabled={submitting || !form.name.trim() || !rateOk} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
               {submitting ? "Saving..." : "Save Tax"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Banking (admin only): bank / cash accounts, their transactions, deposits, withdrawals, transfers ----------
+function BankingPage({ isAdmin, go, accountId }) {
+  return accountId ? (
+    <BankRegister isAdmin={isAdmin} go={go} accountId={Number(accountId)} />
+  ) : (
+    <BankAccountsList isAdmin={isAdmin} go={go} />
+  );
+}
+
+function BankAccountsList({ isAdmin, go }) {
+  const [accounts, setAccounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+
+  const load = async () => {
+    try {
+      setAccounts(await getBankAccounts());
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const total = accounts.reduce((s, a) => s + a.balance, 0);
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active="banking" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+
+      <main className="p-4 sm:p-6 max-w-3xl">
+        <div className="mb-5 flex flex-wrap gap-2 items-center">
+          <div className="flex-1 min-w-[10rem]">
+            <p className="text-xs text-gray-400">Total in bank and cash accounts</p>
+            <p className="text-2xl font-bold text-gray-900">{formatRs(total)}</p>
+          </div>
+          {accounts.length >= 2 && (
+            <button
+              onClick={() => setTransferOpen(true)}
+              className="border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap"
+            >
+              Transfer
+            </button>
+          )}
+          <button
+            onClick={() => setAddOpen(true)}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
+          >
+            + Add Account
+          </button>
+        </div>
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : accounts.length === 0 ? (
+          <p className="text-gray-400 text-center py-16">No bank or cash accounts yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {accounts.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => go({ view: "banking", account: a.id })}
+                className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50"
+              >
+                <div className="w-10 h-10 shrink-0 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Banknote size={20} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-gray-900 truncate">{a.name}</p>
+                  <p className="text-xs text-gray-400">
+                    {a.account_type === "bank" ? "Bank account" : "Cash account"}
+                    {a.account_code && ` · ${a.account_code}`} · {a.transaction_count} transaction{a.transaction_count === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <p className={`font-semibold shrink-0 ${a.balance < 0 ? "text-red-600" : "text-gray-900"}`}>{formatRs(a.balance)}</p>
+                <ChevronRight size={16} className="text-gray-400" />
+              </button>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {addOpen && <BankAccountForm onClose={() => setAddOpen(false)} onSaved={load} />}
+      {transferOpen && (
+        <BankTxnForm type="transfer" bankAccounts={accounts} onClose={() => setTransferOpen(false)} onSaved={load} />
+      )}
+    </div>
+  );
+}
+
+function BankAccountForm({ onClose, onSaved }) {
+  const [form, setForm] = useState({
+    name: "",
+    account_type: "bank",
+    account_code: "",
+    opening_balance: "",
+    opening_date: toISODate(new Date()),
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createBankAccount({
+        name: form.name.trim(),
+        account_type: form.account_type,
+        account_code: form.account_code.trim() || null,
+        opening_balance: Number(form.opening_balance) || 0,
+        opening_date: form.opening_date || null,
+      });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+        <h2 className="text-lg font-semibold mb-4">Add Bank / Cash Account</h2>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="flex gap-4 text-sm">
+            {[["bank", "Bank account"], ["cash", "Cash account"]].map(([k, label]) => (
+              <label key={k} className="flex items-center gap-1.5">
+                <input type="radio" checked={form.account_type === k} onChange={() => set("account_type", k)} />
+                {label}
+              </label>
+            ))}
+          </div>
+          <input required placeholder="Account name * (e.g. BOC Current)" value={form.name} onChange={(e) => set("name", e.target.value)} className={cls} />
+          <input placeholder="Account number / code (optional)" value={form.account_code} onChange={(e) => set("account_code", e.target.value)} className={cls} />
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs text-gray-500">
+              Opening balance (Rs.)
+              <input type="number" step="0.01" value={form.opening_balance} onChange={(e) => set("opening_balance", e.target.value)} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              As of
+              <input type="date" value={form.opening_date} onChange={(e) => set("opening_date", e.target.value)} className={cls + " mt-1"} />
+            </label>
+          </div>
+          <p className="text-xs text-gray-400">Leave the opening balance empty if the account starts at zero. A negative number means overdrawn.</p>
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={submitting || !form.name.trim()} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+              {submitting ? "Saving..." : "Save Account"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function BankRegister({ isAdmin, go, accountId }) {
+  const [accounts, setAccounts] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [txnType, setTxnType] = useState(null); // "deposit" | "withdrawal" | "transfer" while a form is open
+
+  const load = async () => {
+    try {
+      const [accs, txns] = await Promise.all([getBankAccounts(), getBankTransactions(accountId, from, to)]);
+      setAccounts(accs);
+      setRows(txns);
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [accountId, from, to]);
+
+  const account = accounts.find((a) => a.id === accountId);
+
+  const handleDelete = async (row) => {
+    if (!window.confirm(`Delete this ${row.kind.toLowerCase()} (${formatRs(row.money_in || row.money_out)})? The ledger entry is removed.`)) return;
+    try {
+      await deleteBankTransaction(row.journal_id);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const btn = "px-3 py-1.5 rounded-lg text-sm font-medium border";
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active="banking" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+
+      <main className="p-4 sm:p-6 max-w-3xl">
+        <button onClick={() => go({ view: "banking" })} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3">
+          <ArrowLeft size={16} /> All bank accounts
+        </button>
+
+        <div className="mb-4">
+          <h1 className="text-xl font-bold text-gray-900">{account?.name || "Account"}</h1>
+          <p className="text-xs text-gray-400">Balance in your books</p>
+          <p className={`text-2xl font-bold ${account && account.balance < 0 ? "text-red-600" : "text-gray-900"}`}>
+            {formatRs(account?.balance ?? 0)}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button onClick={() => setTxnType("deposit")} className={`${btn} border-green-200 text-green-700 hover:bg-green-50`}>+ Deposit</button>
+          <button onClick={() => setTxnType("withdrawal")} className={`${btn} border-red-200 text-red-600 hover:bg-red-50`}>+ Withdrawal</button>
+          {accounts.length >= 2 && (
+            <button onClick={() => setTxnType("transfer")} className={`${btn} border-gray-300 text-gray-700 hover:bg-gray-50`}>Transfer</button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4 max-w-sm">
+          <label className="text-xs text-gray-500">
+            From
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" />
+          </label>
+          <label className="text-xs text-gray-500">
+            To
+            <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" />
+          </label>
+        </div>
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : rows.length === 0 ? (
+          <p className="text-gray-400 text-center py-16">No transactions {from || to ? "in this period" : "yet"}.</p>
+        ) : (
+          <div className="space-y-2">
+            {rows.map((r) => (
+              <div key={r.line_id} className="bg-white border border-gray-200 rounded-xl p-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900 truncate">
+                    {r.kind}
+                    {r.other_accounts && <span className="text-gray-400 font-normal"> · {r.other_accounts}</span>}
+                  </p>
+                  <p className="text-xs text-gray-400 truncate">
+                    {formatJournalDate(r.date)} · {r.journal_number}
+                    {r.reference && ` · ${r.reference}`}
+                    {r.description && ` · ${r.description}`}
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className={`text-sm font-semibold ${r.money_in > 0 ? "text-green-700" : "text-red-600"}`}>
+                    {r.money_in > 0 ? "+" : "-"}{formatRs(r.money_in > 0 ? r.money_in : r.money_out)}
+                  </p>
+                  <p className="text-xs text-gray-400">Bal. {formatRs(r.balance)}</p>
+                </div>
+                {r.can_delete ? (
+                  <button title="Delete" onClick={() => handleDelete(r)} className="shrink-0 p-1.5 text-gray-400 hover:text-red-600">
+                    <Trash2 size={15} />
+                  </button>
+                ) : (
+                  <span className="w-[27px] shrink-0" />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {txnType && (
+        <BankTxnForm
+          type={txnType}
+          fromAccount={account}
+          bankAccounts={accounts}
+          onClose={() => setTxnType(null)}
+          onSaved={load}
+        />
+      )}
+    </div>
+  );
+}
+
+// type: "deposit" | "withdrawal" | "transfer".  fromAccount: the open account (leave out on the list page's Transfer button)
+function BankTxnForm({ type, fromAccount = null, bankAccounts, onClose, onSaved }) {
+  const [accounts, setAccounts] = useState([]);
+  const [accountId, setAccountId] = useState(fromAccount ? fromAccount.id : "");
+  const [otherId, setOtherId] = useState("");
+  const [date, setDate] = useState(toISODate(new Date()));
+  const [amount, setAmount] = useState("");
+  const [reference, setReference] = useState("");
+  const [description, setDescription] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  useEffect(() => {
+    if (type !== "transfer") getAccounts().then(setAccounts).catch((err) => setError(err.message));
+  }, [type]);
+
+  const title = { deposit: "New Deposit", withdrawal: "New Withdrawal", transfer: "Transfer Between Accounts" }[type];
+  const otherLabel = { deposit: "Deposit from (account)", withdrawal: "Paid to (account)", transfer: "Transfer to" }[type];
+
+  // deposit -> income / equity first; withdrawal -> expenses first. Receivable / payable only move through invoices and bills.
+  const groupOrder = type === "withdrawal"
+    ? ["Expense", "Liability", "Equity", "Asset", "Income"]
+    : ["Income", "Equity", "Liability", "Asset", "Expense"];
+  const otherChoices = type === "transfer"
+    ? []
+    : accounts.filter((a) => !["accounts_receivable", "accounts_payable"].includes(a.account_type) && a.id !== Number(accountId));
+  const bankChoices = bankAccounts.filter((a) => a.id !== Number(accountId));
+
+  const canSave = Boolean(accountId) && Boolean(otherId) && Number(amount) > 0 && Boolean(date);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createBankTransaction({
+        txn_type: type,
+        txn_date: date,
+        amount: Number(amount),
+        account_id: Number(accountId),
+        other_account_id: Number(otherId),
+        reference: reference.trim() || null,
+        description: description.trim() || null,
+      });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[92vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-4">{title}</h2>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          {type === "transfer" ? (
+            <label className="text-xs text-gray-500 block">
+              Transfer from
+              <select value={accountId} onChange={(e) => { setAccountId(e.target.value); setOtherId(""); }} className={cls + " mt-1"}>
+                <option value="">Select an account...</option>
+                {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.name} ({formatRs(a.balance)})</option>)}
+              </select>
+            </label>
+          ) : (
+            <p className="text-sm text-gray-600">Account: <span className="font-medium text-gray-900">{fromAccount?.name}</span></p>
+          )}
+
+          <label className="text-xs text-gray-500 block">
+            {otherLabel}
+            <select value={otherId} onChange={(e) => setOtherId(e.target.value)} className={cls + " mt-1"}>
+              <option value="">Select an account...</option>
+              {type === "transfer"
+                ? bankChoices.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)
+                : groupOrder.map((g) => {
+                    const inGroup = otherChoices.filter((a) => ACCOUNT_GROUP_OF[a.account_type] === g);
+                    return inGroup.length === 0 ? null : (
+                      <optgroup key={g} label={g}>
+                        {inGroup.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      </optgroup>
+                    );
+                  })}
+            </select>
+          </label>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs text-gray-500">
+              Date
+              <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Amount (Rs.)
+              <input required type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className={cls + " mt-1"} />
+            </label>
+          </div>
+          <input placeholder="Reference # (cheque no., slip no.)" value={reference} onChange={(e) => setReference(e.target.value)} className={cls} />
+          <textarea rows={2} placeholder="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} className={cls} />
+
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={!canSave || submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+              {submitting ? "Saving..." : "Save"}
             </button>
           </div>
         </form>
@@ -8715,6 +9155,14 @@ function AppShell() {
     page = <VendorPaymentsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "taxes" && isAdmin) {
     page = <TaxesPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "banking" && isAdmin) {
+    page = (
+      <BankingPage
+        isAdmin={isAdmin}
+        go={setSearchParams}
+        accountId={searchParams.get("account")}
+      />
+    );
   } else if (searchParams.get("view") === "vendors" && isAdmin) {
     page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "manage" && isAdmin) {
