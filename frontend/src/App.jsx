@@ -36,6 +36,7 @@ import {
   Percent,
   Banknote,
   TrendingUp,
+  LayoutDashboard,
 } from "lucide-react";
 import "./index.css";
 
@@ -187,6 +188,12 @@ async function reportRequest(path, failMsg) {
 const getProfitLoss = (from, to) => reportRequest(`profit-and-loss?date_from=${from}&date_to=${to}`, "Failed to load Profit & Loss");
 const getBalanceSheet = (asOf) => reportRequest(`balance-sheet?as_of=${asOf}`, "Failed to load Balance Sheet");
 const getAgeing = (kind, asOf) => reportRequest(`${kind}-ageing?as_of=${asOf}`, "Failed to load the ageing report");
+
+const getDashboard = async () => {
+  const res = await fetch(`${BASE_URL}/dashboard`);
+  if (!res.ok) throw new Error("Failed to load the dashboard");
+  return res.json();
+};
 
 // ---------- Invoices ----------
 async function invoiceRequest(path, method, payload, failMsg) {
@@ -2990,6 +2997,7 @@ function HomeTabs({ active, onChange, isAdmin }) {
   return (
     <div className="flex gap-5 border-b border-gray-100 -mb-4 mt-3 overflow-x-auto">
       {tab("home", "Home", LayoutGrid)}
+      {isAdmin && tab("dashboard", "Dashboard", LayoutDashboard)}
       {isAdmin && tab("accounting", "Acc.", Landmark)}
       {isAdmin && tab("journals", "Journals", BookOpen)}
       {tab("items", "Items", Tag)}
@@ -4700,6 +4708,84 @@ function AgeingReport({ kind }) {
         </>
       )}
     </ReportBody>
+  );
+}
+
+// ---------- Step 10: Dashboard (admin only) ----------
+function DashboardPage({ isAdmin, go }) {
+  const { data, loading, error } = useReport(() => getDashboard(), []);
+  const max = data ? Math.max(1, ...data.chart.flatMap((m) => [m.income, m.expense])) : 1;
+  const barH = (v) => (v > 0 ? `${Math.max(2, (v / max) * 100)}%` : "0%");
+
+  const stat = (label, value, sub, onClick, tone) => (
+    <div
+      onClick={onClick}
+      className={`bg-white border border-gray-200 rounded-xl p-4 ${onClick ? "cursor-pointer hover:bg-gray-50" : ""}`}
+    >
+      <p className="text-xs text-gray-400">{label}</p>
+      <p className={`text-lg font-bold mt-1 ${tone || "text-gray-900"}`}>{formatRs(value)}</p>
+      {sub && <p className="text-xs text-gray-500 mt-1">{sub}</p>}
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active="dashboard" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <main className="p-4 sm:p-6 max-w-4xl">
+        <h1 className="text-xl font-bold text-gray-900 mb-3">Dashboard</h1>
+        <ReportBody loading={loading} error={error} data={data}>
+          {data && (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                {stat("Cash & bank", data.cash_total, `${data.cash_accounts.length} account(s)`, () => go({ view: "banking" }), data.cash_total < 0 ? "text-red-600" : undefined)}
+                {stat("Receivables", data.receivables, data.receivables_overdue > 0 ? `${formatRs(data.receivables_overdue)} overdue` : "Nothing overdue", () => go({ view: "reports" }))}
+                {stat("Payables", data.payables, data.payables_overdue > 0 ? `${formatRs(data.payables_overdue)} overdue` : "Nothing overdue", () => go({ view: "reports" }))}
+              </div>
+
+              <ReportCard title="Income and expense, last 6 months">
+                <div className="flex gap-4 text-xs text-gray-500 mb-2">
+                  <span><span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1" />Income {formatRs(data.income_6m)}</span>
+                  <span><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1" />Expense {formatRs(data.expense_6m)}</span>
+                </div>
+                <div className="flex gap-2 h-36 items-stretch">
+                  {data.chart.map((m) => (
+                    <div key={m.month} className="flex-1 flex flex-col">
+                      <div className="flex-1 flex items-end justify-center gap-1">
+                        <div className="w-3 sm:w-5 bg-green-500 rounded-t" style={{ height: barH(m.income) }} title={`Income ${formatRs(m.income)}`} />
+                        <div className="w-3 sm:w-5 bg-red-400 rounded-t" style={{ height: barH(m.expense) }} title={`Expense ${formatRs(m.expense)}`} />
+                      </div>
+                      <p className="text-[10px] text-gray-400 text-center mt-1">{m.month}</p>
+                    </div>
+                  ))}
+                </div>
+              </ReportCard>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <ReportCard title="Top expenses this year">
+                  {data.top_expenses.length === 0 && <p className="text-xs text-gray-400 py-1">No expenses yet</p>}
+                  {data.top_expenses.map((a) => <ReportLine key={a.id} label={a.name} amount={a.amount} />)}
+                </ReportCard>
+
+                <ReportCard title={`Low stock (${data.low_stock_count})`}>
+                  {data.low_stock.length === 0 && <p className="text-xs text-gray-400 py-1">All items are above their reorder level</p>}
+                  {data.low_stock.map((p) => (
+                    <div key={p.id} className="flex justify-between gap-3 py-1.5 text-sm">
+                      <span className="text-gray-600 truncate">{p.name}</span>
+                      <span className="shrink-0 text-red-600">{p.quantity} / min {p.reorder_min}</span>
+                    </div>
+                  ))}
+                </ReportCard>
+              </div>
+
+              <ReportCard title="Cash & bank accounts">
+                {data.cash_accounts.length === 0 && <p className="text-xs text-gray-400 py-1">No cash or bank accounts yet</p>}
+                {data.cash_accounts.map((a) => <ReportLine key={a.id} label={a.name} amount={a.balance} />)}
+              </ReportCard>
+            </>
+          )}
+        </ReportBody>
+      </main>
+    </div>
   );
 }
 
@@ -9944,6 +10030,8 @@ function AppShell() {
     );
   } else if (searchParams.get("view") === "reports" && isAdmin) {
     page = <ReportsPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "dashboard" && isAdmin) {
+    page = <DashboardPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "vendors" && isAdmin) {
     page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "manage" && isAdmin) {
