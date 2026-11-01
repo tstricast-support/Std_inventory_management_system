@@ -5,7 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from .. import models, schemas
 from ..database import get_db
-from .accounts import ledger_net
+from .accounts import ledger_net, block_if_reconciled
 
 router = APIRouter(prefix="/api/banking", tags=["banking"])
 
@@ -149,7 +149,8 @@ def bank_transactions(account_id: int, date_from: date | None = None, date_to: d
             "reference": j.reference, "description": line.description or j.notes,
             "other_accounts": ", ".join(dict.fromkeys(others)),
             "money_in": float(debit), "money_out": float(credit), "balance": float(running),
-            "can_delete": bool(j.source_type and j.source_type.startswith("bank_")),
+            "reconciled": line.reconciliation_id is not None,
+            "can_delete": bool(j.source_type and j.source_type.startswith("bank_")) and not any(l.reconciliation_id for l in j.lines),
         })
     rows.reverse()
     return rows
@@ -209,6 +210,136 @@ def delete_bank_transaction(journal_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Transaction not found")
     if not (journal.source_type or "").startswith("bank_"):
         raise HTTPException(400, "Only deposits, withdrawals, transfers and opening balances can be deleted here. Void the invoice / delete the payment instead.")
+
+    block_if_reconciled(journal)
     db.delete(journal)
     db.commit()
     return {"deleted": True}
+
+
+
+# ---------- Step 8B: reconciliation ----------
+def _reconciled_balance(db: Session, account_id: int) -> Decimal:
+    """Net (money in - money out) of every line on the account that an earlier reconciliation already matched."""
+    debit, credit = db.query(
+        func.coalesce(func.sum(models.JournalLine.debit), 0), func.coalesce(func.sum(models.JournalLine.credit), 0)
+    ).filter(models.JournalLine.account_id == account_id, models.JournalLine.reconciliation_id.isnot(None)).one()
+    return _money(debit) - _money(credit)
+
+
+def _latest_reconciliation(db: Session, account_id: int):
+    return (
+        db.query(models.BankReconciliation).filter(models.BankReconciliation.account_id == account_id)
+        .order_by(models.BankReconciliation.id.desc()).first()
+    )
+
+
+def _rec_out(rec: models.BankReconciliation, can_undo: bool) -> dict:
+    return {
+        "id": rec.id, "account_id": rec.account_id, "statement_date": rec.statement_date,
+        "statement_balance": float(rec.statement_balance), "opening_balance": float(rec.opening_balance),
+        "cleared_count": rec.cleared_count, "created_at": rec.created_at, "can_undo": can_undo,
+    }
+
+
+@router.get("/accounts/{account_id}/reconcile", response_model=schemas.ReconcileStart)
+def reconcile_start(account_id: int, statement_date: date, db: Session = Depends(get_db)):
+    """The not-yet-reconciled lines dated on / before the statement date, plus the starting (already reconciled) balance."""
+    account = _bank_account(db, account_id)
+    lines = (
+        db.query(models.JournalLine)
+        .join(models.Journal, models.JournalLine.journal_id == models.Journal.id)
+        .filter(
+            models.JournalLine.account_id == account_id,
+            models.JournalLine.reconciliation_id.is_(None),
+            models.Journal.journal_date <= statement_date,
+        )
+        .options(joinedload(models.JournalLine.journal).joinedload(models.Journal.lines).joinedload(models.JournalLine.account))
+        .order_by(models.Journal.journal_date, models.Journal.id, models.JournalLine.id)
+        .all()
+    )
+    rows = []
+    for line in lines:
+        j = line.journal
+        others = [l.account.name for l in j.lines if l.account_id != account_id and l.account]
+        rows.append({
+            "line_id": line.id, "journal_id": j.id, "journal_number": j.journal_number, "date": j.journal_date,
+            "kind": KIND_LABELS.get(j.source_type, j.source_type or "Journal"),
+            "reference": j.reference, "description": line.description or j.notes,
+            "other_accounts": ", ".join(dict.fromkeys(others)),
+            "money_in": float(_money(line.debit)), "money_out": float(_money(line.credit)),
+        })
+    last = _latest_reconciliation(db, account_id)
+    return {
+        "account_id": account.id, "account_name": account.name, "statement_date": statement_date,
+        "opening_balance": float(_reconciled_balance(db, account_id)),
+        "last_statement_date": last.statement_date if last else None,
+        "lines": rows,
+    }
+
+
+@router.post("/accounts/{account_id}/reconcile", response_model=schemas.ReconciliationOut)
+def reconcile_finish(account_id: int, payload: schemas.ReconcileFinish, db: Session = Depends(get_db)):
+    """Match the ticked lines to the statement. Only saved when the difference is exactly 0."""
+    _bank_account(db, account_id)
+    ids = set(payload.line_ids)
+    if not ids:
+        raise HTTPException(400, "Tick at least one transaction")
+    lines = (
+        db.query(models.JournalLine).options(joinedload(models.JournalLine.journal))
+        .filter(models.JournalLine.id.in_(ids)).all()
+    )
+    if len(lines) != len(ids):
+        raise HTTPException(400, "Some of the ticked transactions no longer exist. Reload and try again.")
+    for line in lines:
+        if line.account_id != account_id:
+            raise HTTPException(400, "A ticked transaction belongs to a different account")
+        if line.reconciliation_id is not None:
+            raise HTTPException(400, "A ticked transaction is already reconciled. Reload and try again.")
+        if line.journal.journal_date > payload.statement_date:
+            raise HTTPException(400, f"{line.journal.journal_number} is dated after the statement date")
+
+    opening = _reconciled_balance(db, account_id)
+    cleared = opening + sum((_money(l.debit) - _money(l.credit) for l in lines), Decimal("0"))
+    difference = _money(payload.statement_balance) - cleared
+    if difference != 0:
+        raise HTTPException(400, f"The difference is Rs.{difference:,.2f}. It must be 0.00 before you can finish.")
+
+    rec = models.BankReconciliation(
+        account_id=account_id, statement_date=payload.statement_date,
+        statement_balance=_money(payload.statement_balance), opening_balance=opening, cleared_count=len(lines),
+    )
+    db.add(rec)
+    db.flush()
+    for line in lines:
+        line.reconciliation_id = rec.id
+    db.commit()
+    db.refresh(rec)
+    return _rec_out(rec, can_undo=True)
+
+
+@router.get("/accounts/{account_id}/reconciliations", response_model=list[schemas.ReconciliationOut])
+def list_reconciliations(account_id: int, db: Session = Depends(get_db)):
+    _bank_account(db, account_id)
+    recs = (
+        db.query(models.BankReconciliation).filter(models.BankReconciliation.account_id == account_id)
+        .order_by(models.BankReconciliation.id.desc()).all()
+    )
+    return [_rec_out(r, can_undo=(i == 0)) for i, r in enumerate(recs)]
+
+
+@router.delete("/reconciliations/{reconciliation_id}")
+def undo_reconciliation(reconciliation_id: int, db: Session = Depends(get_db)):
+    """Only the most recent reconciliation of an account can be undone (its lines become un-ticked again)."""
+    rec = db.query(models.BankReconciliation).get(reconciliation_id)
+    if not rec:
+        raise HTTPException(404, "Reconciliation not found")
+    latest = _latest_reconciliation(db, rec.account_id)
+    if latest.id != rec.id:
+        raise HTTPException(400, "Only the most recent reconciliation can be undone. Undo the newer ones first.")
+    db.query(models.JournalLine).filter(models.JournalLine.reconciliation_id == rec.id).update(
+        {"reconciliation_id": None}, synchronize_session=False
+    )
+    db.delete(rec)
+    db.commit()
+    return {"undone": True}

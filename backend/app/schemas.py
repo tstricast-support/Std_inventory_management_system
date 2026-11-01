@@ -645,4 +645,43 @@ class BankTransactionOut(BaseModel):
     money_in: float
     money_out: float
     balance: float
-    can_delete: bool
+    can_delete: bool = False
+    reconciled: bool = False
+
+
+
+# ---------- Step 8B: bank reconciliation ----------
+class ReconcileLine(BaseModel):
+    line_id: int
+    journal_id: int
+    journal_number: str
+    date: date
+    kind: str
+    reference: Optional[str] = None
+    description: Optional[str] = None
+    other_accounts: str = ""
+    money_in: float
+    money_out: float
+
+class ReconcileStart(BaseModel):
+    account_id: int
+    account_name: str
+    statement_date: date
+    opening_balance: float                       # everything already reconciled before this one
+    last_statement_date: Optional[date] = None
+    lines: List[ReconcileLine]
+
+class ReconcileFinish(BaseModel):
+    statement_date: date
+    statement_balance: float
+    line_ids: List[int]
+
+class ReconciliationOut(BaseModel):
+    id: int
+    account_id: int
+    statement_date: date
+    statement_balance: float
+    opening_balance: float
+    cleared_count: int
+    created_at: Optional[datetime] = None
+    can_undo: bool = False

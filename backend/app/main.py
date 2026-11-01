@@ -66,6 +66,19 @@ def add_journal_columns():
 
 add_journal_columns()
 
+
+def add_reconciliation_column():
+    """Step 8B: journal_lines.reconciliation_id (create_all() only builds the new bank_reconciliations table)."""
+    existing = [c["name"] for c in inspect(engine).get_columns("journal_lines")]
+    if "reconciliation_id" not in existing:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE journal_lines ADD COLUMN reconciliation_id INTEGER REFERENCES bank_reconciliations(id) ON DELETE SET NULL"
+            ))
+
+
+add_reconciliation_column()
+
 def seed_default_accounts():
     """First start after the chart-of-accounts upgrade: add Zoho-style default accounts once."""
     with engine.begin() as conn:

@@ -214,6 +214,8 @@ class JournalLine(Base):
     credit = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
     description = Column(Text)
 
+    reconciliation_id = Column(Integer, ForeignKey("bank_reconciliations.id", ondelete="SET NULL"), nullable=True)   # step 8B
+
     journal = relationship("Journal", back_populates="lines")
     account = relationship("Account")
 
@@ -221,7 +223,17 @@ class JournalLine(Base):
     def account_name(self):
         return self.account.name if self.account else ""
 
+class BankReconciliation(Base):
+    """Step 8B: one finished bank reconciliation (statement date + ending balance it was matched to)."""
+    __tablename__ = "bank_reconciliations"
 
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    statement_date = Column(Date, nullable=False)
+    statement_balance = Column(Numeric(12, 2), nullable=False)
+    opening_balance = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    cleared_count = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(TIMESTAMP, server_default=func.now())
 
 class Invoice(Base):
     """A sales invoice. Saving it lowers stock and posts a journal (see routers/invoices.py)."""
@@ -557,4 +569,3 @@ class Tax(Base):
     is_default = Column(Boolean, nullable=False, default=False, server_default="0")   # pre-selected on new lines
     created_at = Column(TIMESTAMP, server_default=func.now())
 
-    

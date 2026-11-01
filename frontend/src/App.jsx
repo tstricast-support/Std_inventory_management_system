@@ -167,6 +167,12 @@ const getBankTransactions = (id, from, to) => {
 const createBankTransaction = (payload) => bankRequest("transactions", "POST", payload, "Failed to save transaction");
 const deleteBankTransaction = (journalId) => bankRequest(`transactions/${journalId}`, "DELETE", null, "Failed to delete transaction");
 
+// step 8B: reconciliation
+const getReconcileLines = (id, statementDate) => bankRequest(`accounts/${id}/reconcile?statement_date=${statementDate}`, "GET", null, "Failed to load transactions");
+const finishReconciliation = (id, payload) => bankRequest(`accounts/${id}/reconcile`, "POST", payload, "Failed to save reconciliation");
+const getReconciliations = (id) => bankRequest(`accounts/${id}/reconciliations`, "GET", null, "Failed to fetch reconciliations");
+const undoReconciliation = (recId) => bankRequest(`reconciliations/${recId}`, "DELETE", null, "Failed to undo reconciliation");
+
 // ---------- Invoices ----------
 async function invoiceRequest(path, method, payload, failMsg) {
   const res = await fetch(`${BASE_URL}/invoices/${path}`, {
@@ -4224,7 +4230,12 @@ function TaxForm({ initialData, onClose, onSubmit }) {
 }
 
 // ---------- Banking (admin only): bank / cash accounts, their transactions, deposits, withdrawals, transfers ----------
-function BankingPage({ isAdmin, go, accountId }) {
+function BankingPage({ isAdmin, go, accountId, reconcile }) {
+  if (accountId && reconcile) {
+    return (
+      <BankReconcile isAdmin={isAdmin} go={go} accountId={Number(accountId)} />
+    );
+  }
   return accountId ? (
     <BankRegister isAdmin={isAdmin} go={go} accountId={Number(accountId)} />
   ) : (
@@ -4405,7 +4416,10 @@ function BankRegister({ isAdmin, go, accountId }) {
 
   const load = async () => {
     try {
-      const [accs, txns] = await Promise.all([getBankAccounts(), getBankTransactions(accountId, from, to)]);
+      const [accs, txns] = await Promise.all([
+        getBankAccounts(),
+        getBankTransactions(accountId, from, to),
+      ]);
       setAccounts(accs);
       setRows(txns);
       setError(null);
@@ -4416,12 +4430,19 @@ function BankRegister({ isAdmin, go, accountId }) {
     }
   };
 
-  useEffect(() => { load(); }, [accountId, from, to]);
+  useEffect(() => {
+    load();
+  }, [accountId, from, to]);
 
   const account = accounts.find((a) => a.id === accountId);
 
   const handleDelete = async (row) => {
-    if (!window.confirm(`Delete this ${row.kind.toLowerCase()} (${formatRs(row.money_in || row.money_out)})? The ledger entry is removed.`)) return;
+    if (
+      !window.confirm(
+        `Delete this ${row.kind.toLowerCase()} (${formatRs(row.money_in || row.money_out)})? The ledger entry is removed.`,
+      )
+    )
+      return;
     try {
       await deleteBankTransaction(row.journal_id);
       await load();
@@ -4434,37 +4455,82 @@ function BankRegister({ isAdmin, go, accountId }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="banking" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="banking"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
 
       <main className="p-4 sm:p-6 max-w-3xl">
-        <button onClick={() => go({ view: "banking" })} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3">
+        <button
+          onClick={() => go({ view: "banking" })}
+          className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3"
+        >
           <ArrowLeft size={16} /> All bank accounts
         </button>
 
         <div className="mb-4">
-          <h1 className="text-xl font-bold text-gray-900">{account?.name || "Account"}</h1>
+          <h1 className="text-xl font-bold text-gray-900">
+            {account?.name || "Account"}
+          </h1>
           <p className="text-xs text-gray-400">Balance in your books</p>
-          <p className={`text-2xl font-bold ${account && account.balance < 0 ? "text-red-600" : "text-gray-900"}`}>
+          <p
+            className={`text-2xl font-bold ${account && account.balance < 0 ? "text-red-600" : "text-gray-900"}`}
+          >
             {formatRs(account?.balance ?? 0)}
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2 mb-4">
-          <button onClick={() => setTxnType("deposit")} className={`${btn} border-green-200 text-green-700 hover:bg-green-50`}>+ Deposit</button>
-          <button onClick={() => setTxnType("withdrawal")} className={`${btn} border-red-200 text-red-600 hover:bg-red-50`}>+ Withdrawal</button>
+          <button
+            onClick={() => setTxnType("deposit")}
+            className={`${btn} border-green-200 text-green-700 hover:bg-green-50`}
+          >
+            + Deposit
+          </button>
+          <button
+            onClick={() => setTxnType("withdrawal")}
+            className={`${btn} border-red-200 text-red-600 hover:bg-red-50`}
+          >
+            + Withdrawal
+          </button>
+          <button
+            onClick={() =>
+              go({ view: "banking", account: accountId, reconcile: 1 })
+            }
+            className={`${btn} border-blue-200 text-blue-700 hover:bg-blue-50`}
+          >
+            Reconcile
+          </button>
           {accounts.length >= 2 && (
-            <button onClick={() => setTxnType("transfer")} className={`${btn} border-gray-300 text-gray-700 hover:bg-gray-50`}>Transfer</button>
+            <button
+              onClick={() => setTxnType("transfer")}
+              className={`${btn} border-gray-300 text-gray-700 hover:bg-gray-50`}
+            >
+              Transfer
+            </button>
           )}
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-4 max-w-sm">
           <label className="text-xs text-gray-500">
             From
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" />
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1"
+            />
           </label>
           <label className="text-xs text-gray-500">
             To
-            <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" />
+            <input
+              type="date"
+              value={to}
+              min={from}
+              onChange={(e) => setTo(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1"
+            />
           </label>
         </div>
 
@@ -4473,15 +4539,32 @@ function BankRegister({ isAdmin, go, accountId }) {
         ) : error ? (
           <p className="text-red-500 text-center py-16">{error}</p>
         ) : rows.length === 0 ? (
-          <p className="text-gray-400 text-center py-16">No transactions {from || to ? "in this period" : "yet"}.</p>
+          <p className="text-gray-400 text-center py-16">
+            No transactions {from || to ? "in this period" : "yet"}.
+          </p>
         ) : (
           <div className="space-y-2">
             {rows.map((r) => (
-              <div key={r.line_id} className="bg-white border border-gray-200 rounded-xl p-3 flex items-center gap-3">
+              <div
+                key={r.line_id}
+                className="bg-white border border-gray-200 rounded-xl p-3 flex items-center gap-3"
+              >
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">
+                    {r.reconciled && (
+                      <Check
+                        size={13}
+                        className="inline text-green-600 mr-1"
+                        title="Reconciled"
+                      />
+                    )}
                     {r.kind}
-                    {r.other_accounts && <span className="text-gray-400 font-normal"> · {r.other_accounts}</span>}
+                    {r.other_accounts && (
+                      <span className="text-gray-400 font-normal">
+                        {" "}
+                        · {r.other_accounts}
+                      </span>
+                    )}
                   </p>
                   <p className="text-xs text-gray-400 truncate">
                     {formatJournalDate(r.date)} · {r.journal_number}
@@ -4490,13 +4573,22 @@ function BankRegister({ isAdmin, go, accountId }) {
                   </p>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className={`text-sm font-semibold ${r.money_in > 0 ? "text-green-700" : "text-red-600"}`}>
-                    {r.money_in > 0 ? "+" : "-"}{formatRs(r.money_in > 0 ? r.money_in : r.money_out)}
+                  <p
+                    className={`text-sm font-semibold ${r.money_in > 0 ? "text-green-700" : "text-red-600"}`}
+                  >
+                    {r.money_in > 0 ? "+" : "-"}
+                    {formatRs(r.money_in > 0 ? r.money_in : r.money_out)}
                   </p>
-                  <p className="text-xs text-gray-400">Bal. {formatRs(r.balance)}</p>
+                  <p className="text-xs text-gray-400">
+                    Bal. {formatRs(r.balance)}
+                  </p>
                 </div>
                 {r.can_delete ? (
-                  <button title="Delete" onClick={() => handleDelete(r)} className="shrink-0 p-1.5 text-gray-400 hover:text-red-600">
+                  <button
+                    title="Delete"
+                    onClick={() => handleDelete(r)}
+                    className="shrink-0 p-1.5 text-gray-400 hover:text-red-600"
+                  >
                     <Trash2 size={15} />
                   </button>
                 ) : (
@@ -4517,6 +4609,218 @@ function BankRegister({ isAdmin, go, accountId }) {
           onSaved={load}
         />
       )}
+    </div>
+  );
+}
+
+// ---------- Step 8B: Bank reconciliation - match your books to the bank statement ----------
+function BankReconcile({ isAdmin, go, accountId }) {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const [account, setAccount] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [stmtDate, setStmtDate] = useState(todayIso);
+  const [stmtBalance, setStmtBalance] = useState("");
+  const [session, setSession] = useState(null); // set once "Start reconciling" has loaded the lines
+  const [ticked, setTicked] = useState(new Set());
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [done, setDone] = useState(null);
+
+  const loadBase = async () => {
+    try {
+      const [accs, recs] = await Promise.all([getBankAccounts(), getReconciliations(accountId)]);
+      setAccount(accs.find((a) => a.id === accountId) || null);
+      setHistory(recs);
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadBase(); }, [accountId]);
+
+  const start = async () => {
+    if (stmtBalance === "" || isNaN(Number(stmtBalance))) { setError("Enter the ending balance shown on your bank statement"); return; }
+    setBusy(true);
+    setError(null);
+    setDone(null);
+    try {
+      setSession(await getReconcileLines(accountId, stmtDate));
+      setTicked(new Set());
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggle = (id) => setTicked((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  // work in whole cents so 0.1 + 0.2 style rounding never blocks "Finish"
+  const cents = (n) => Math.round(Number(n || 0) * 100);
+  const tickedRows = session ? session.lines.filter((l) => ticked.has(l.line_id)) : [];
+  const moneyInC = tickedRows.reduce((s, l) => s + cents(l.money_in), 0);
+  const moneyOutC = tickedRows.reduce((s, l) => s + cents(l.money_out), 0);
+  const openingC = session ? cents(session.opening_balance) : 0;
+  const clearedC = openingC + moneyInC - moneyOutC;
+  const differenceC = cents(stmtBalance) - clearedC;
+  const canFinish = session && tickedRows.length > 0 && differenceC === 0 && !busy;
+
+  const finish = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const rec = await finishReconciliation(accountId, {
+        statement_date: stmtDate,
+        statement_balance: Number(stmtBalance),
+        line_ids: tickedRows.map((l) => l.line_id),
+      });
+      setDone(rec);
+      setSession(null);
+      setTicked(new Set());
+      setStmtBalance("");
+      await loadBase();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const undo = async (rec) => {
+    if (!window.confirm(`Undo the reconciliation of ${formatJournalDate(rec.statement_date)}? Its ${rec.cleared_count} transactions become un-reconciled again.`)) return;
+    try {
+      await undoReconciliation(rec.id);
+      setDone(null);
+      await loadBase();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const allTicked = session && session.lines.length > 0 && ticked.size === session.lines.length;
+  const toggleAll = () => setTicked(allTicked ? new Set() : new Set(session.lines.map((l) => l.line_id)));
+  const inputCls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1";
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active="banking" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+
+      <main className="p-4 sm:p-6 max-w-3xl">
+        <button onClick={() => go({ view: "banking", account: accountId })} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3">
+          <ArrowLeft size={16} /> Back to {account?.name || "account"}
+        </button>
+        <h1 className="text-xl font-bold text-gray-900 mb-1">Reconcile {account?.name || ""}</h1>
+        <p className="text-xs text-gray-400 mb-4">Tick the transactions that appear on your bank statement. You can finish when the difference is 0.00.</p>
+
+        {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{error}</p>}
+        {done && (
+          <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-3">
+            Reconciled {done.cleared_count} transactions up to {formatJournalDate(done.statement_date)}.
+          </p>
+        )}
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : !session ? (
+          <>
+            <div className="bg-white border border-gray-200 rounded-xl p-4 mb-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="text-xs text-gray-500">
+                  Statement end date
+                  <input type="date" value={stmtDate} onChange={(e) => setStmtDate(e.target.value)} className={inputCls} />
+                </label>
+                <label className="text-xs text-gray-500">
+                  Ending balance on the statement (Rs.)
+                  <input type="number" step="0.01" value={stmtBalance} onChange={(e) => setStmtBalance(e.target.value)} className={inputCls} placeholder="0.00" />
+                </label>
+              </div>
+              {history[0] && (
+                <p className="text-xs text-gray-400 mt-3">Last reconciled up to {formatJournalDate(history[0].statement_date)} (statement balance {formatRs(history[0].statement_balance)}).</p>
+              )}
+              <button onClick={start} disabled={busy || !stmtDate} className="mt-4 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+                {busy ? "Loading..." : "Start reconciling"}
+              </button>
+            </div>
+
+            <h2 className="text-sm font-semibold text-gray-700 mb-2">Reconciliation history</h2>
+            {history.length === 0 ? (
+              <p className="text-sm text-gray-400">Nothing reconciled yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {history.map((h) => (
+                  <div key={h.id} className="bg-white border border-gray-200 rounded-xl p-3 flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900">Statement of {formatJournalDate(h.statement_date)}</p>
+                      <p className="text-xs text-gray-400">{h.cleared_count} transactions · ending balance {formatRs(h.statement_balance)}</p>
+                    </div>
+                    {h.can_undo && (
+                      <button onClick={() => undo(h)} className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-600 hover:bg-gray-50">Undo</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4 text-sm sticky top-0 z-10">
+              <div className="flex justify-between"><span className="text-gray-500">Statement ending balance ({formatJournalDate(stmtDate)})</span><span className="font-medium">{formatRs(Number(stmtBalance))}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Already reconciled balance</span><span>{formatRs(openingC / 100)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">+ Money in ticked</span><span className="text-green-700">{formatRs(moneyInC / 100)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">- Money out ticked</span><span className="text-red-600">{formatRs(moneyOutC / 100)}</span></div>
+              <div className="flex justify-between border-t border-gray-100 mt-2 pt-2"><span className="text-gray-500">Cleared balance</span><span className="font-medium">{formatRs(clearedC / 100)}</span></div>
+              <div className="flex justify-between"><span className="font-semibold">Difference</span>
+                <span className={`font-bold ${differenceC === 0 ? "text-green-700" : "text-red-600"}`}>{formatRs(differenceC / 100)}</span>
+              </div>
+              <div className="flex gap-2 mt-3">
+                <button onClick={finish} disabled={!canFinish} className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-40">
+                  {busy ? "Saving..." : "Finish reconciliation"}
+                </button>
+                <button onClick={() => { setSession(null); setTicked(new Set()); setError(null); }} className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+              </div>
+            </div>
+
+            {session.lines.length === 0 ? (
+              <p className="text-gray-400 text-center py-12">No un-reconciled transactions up to this date.</p>
+            ) : (
+              <>
+                <label className="flex items-center gap-2 text-sm text-gray-600 mb-2 cursor-pointer">
+                  <input type="checkbox" checked={allTicked} onChange={toggleAll} /> Select all ({session.lines.length})
+                </label>
+                <div className="space-y-2">
+                  {session.lines.map((l) => (
+                    <label key={l.line_id} className={`border rounded-xl p-3 flex items-center gap-3 cursor-pointer ${ticked.has(l.line_id) ? "bg-green-50 border-green-200" : "bg-white border-gray-200"}`}>
+                      <input type="checkbox" checked={ticked.has(l.line_id)} onChange={() => toggle(l.line_id)} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {l.kind}
+                          {l.other_accounts && <span className="text-gray-400 font-normal"> · {l.other_accounts}</span>}
+                        </p>
+                        <p className="text-xs text-gray-400 truncate">
+                          {formatJournalDate(l.date)} · {l.journal_number}
+                          {l.reference && ` · ${l.reference}`}
+                          {l.description && ` · ${l.description}`}
+                        </p>
+                      </div>
+                      <p className={`text-sm font-semibold shrink-0 ${l.money_in > 0 ? "text-green-700" : "text-red-600"}`}>
+                        {l.money_in > 0 ? "+" : "-"}{formatRs(l.money_in > 0 ? l.money_in : l.money_out)}
+                      </p>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </main>
     </div>
   );
 }
@@ -9161,6 +9465,7 @@ function AppShell() {
         isAdmin={isAdmin}
         go={setSearchParams}
         accountId={searchParams.get("account")}
+        reconcile={searchParams.get("reconcile")}
       />
     );
   } else if (searchParams.get("view") === "vendors" && isAdmin) {

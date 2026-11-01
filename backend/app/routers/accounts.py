@@ -85,6 +85,10 @@ def ledger_net(db: Session) -> dict:
     ).group_by(models.JournalLine.account_id).all()
     return {account_id: float(d) - float(c) for account_id, d, c in rows}
 
+def block_if_reconciled(journal) -> None:
+    """Step 8B: a journal with a line already ticked off in a bank reconciliation can't be deleted."""
+    if any(line.reconciliation_id is not None for line in journal.lines):
+        raise HTTPException(400, "This entry is already reconciled with a bank statement. Undo that reconciliation first (Banking > account > Reconcile).")
 
 def _ledger_balance(account_type: str, net: float) -> float:
     """Balance on the account's normal side (debit for assets/expenses, credit for the rest)."""

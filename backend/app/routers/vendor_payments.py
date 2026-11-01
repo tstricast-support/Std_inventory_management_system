@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, joinedload
 from .. import models, schemas
 from ..database import get_db
 from .purchase_bills import _payable_account
+from .accounts import block_if_reconciled
 
 router = APIRouter(prefix="/api/vendor-payments", tags=["vendor-payments"])
 
@@ -129,6 +130,7 @@ def delete_vendor_payment(payment_id: int, db: Session = Depends(get_db)):
     for journal in db.query(models.Journal).filter(
         models.Journal.source_type == "vendor_payment", models.Journal.source_id == payment.id
     ).all():
+        block_if_reconciled(journal)
         db.delete(journal)
 
     db.delete(payment)

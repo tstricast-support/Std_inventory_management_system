@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..account_types import ACCOUNT_CATEGORY
 from ..database import get_db
-from .accounts import ledger_net
+from .accounts import ledger_net,block_if_reconciled
 
 router = APIRouter(prefix="/api/journals", tags=["journals"])
 
@@ -77,6 +77,8 @@ def delete_journal(journal_id: int, db: Session = Depends(get_db)):
 
     if journal.source_type:
         raise HTTPException(400, "This entry was posted automatically by an invoice or a payment. Void the invoice or delete the payment instead.")
+
+    block_if_reconciled(journal)
     db.delete(journal)
     db.commit()
     return {"message": "Deleted"}
