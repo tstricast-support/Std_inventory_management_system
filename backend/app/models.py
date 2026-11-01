@@ -542,3 +542,19 @@ class CreditNoteApplication(Base):
     @property
     def invoice_number(self):
         return self.invoice.invoice_number if self.invoice else ""
+
+
+
+# ---------- Step 7: taxes ----------
+class Tax(Base):
+    """A tax rate you can put on invoice / bill lines (e.g. VAT 18%)."""
+    __tablename__ = "taxes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True)
+    rate = Column(Numeric(6, 3), nullable=False, default=0)          # percent, e.g. 18 means 18%
+    is_active = Column(Boolean, nullable=False, default=True, server_default="1")
+    is_default = Column(Boolean, nullable=False, default=False, server_default="0")   # pre-selected on new lines
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    

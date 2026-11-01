@@ -116,6 +116,66 @@ def create_document(payload: schemas.SalesDocumentCreate, db: Session = Depends(
     db.commit()
     return _load(db, doc.id)
 
+@router.put("/{doc_id}", response_model=schemas.SalesDocumentOut)
+def update_document(doc_id: int, payload: schemas.SalesDocumentUpdate, db: Session = Depends(get_db)):
+    """Edit a quote / sales order. Locked once it is invoiced or converted."""
+    doc = _load(db, doc_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    if doc.status in LOCKED_STATUSES:
+        raise HTTPException(400, f"This is already {doc.status}, so it can't be edited")
+    customer = db.query(models.Customer).get(payload.customer_id)
+    if not customer:
+        raise HTTPException(404, "Customer not found")
+    if not customer.is_active and customer.id != doc.customer_id:
+        raise HTTPException(400, "This customer is inactive")
+    if not payload.items:
+        raise HTTPException(400, "Add at least one item")
+    if payload.expiry_date and payload.expiry_date < payload.doc_date:
+        raise HTTPException(400, "That date can't be before the document date")
+
+    for line in payload.items:
+        if line.quantity <= 0:
+            raise HTTPException(400, "Every quantity must be greater than 0")
+        if line.rate < 0:
+            raise HTTPException(400, "A rate can't be negative")
+
+    ids = {line.product_id for line in payload.items}
+    products = {p.id: p for p in db.query(models.Product).filter(models.Product.id.in_(ids)).all()}
+    missing = [pid for pid in ids if pid not in products]
+    if missing:
+        raise HTTPException(404, f"Item(s) not found: {missing}")
+    for product in products.values():
+        if product.subitems:
+            raise HTTPException(400, f"{product.name} is a parent item. Pick one of its subitems.")
+
+    lines = []
+    total = Decimal("0")
+    for line in payload.items:
+        product = products[line.product_id]
+        rate = _money(line.rate)
+        amount = (rate * line.quantity).quantize(CENT, ROUND_HALF_UP)
+        total += amount
+        lines.append(models.SalesDocumentItem(
+            product_id=product.id,
+            item_name=product.name,
+            description=(line.description or "").strip() or None,
+            quantity=line.quantity,
+            rate=rate,
+            amount=amount,
+        ))
+    if total <= 0:
+        raise HTTPException(400, "The total must be greater than 0")
+
+    doc.customer_id = customer.id
+    doc.doc_date = payload.doc_date
+    doc.expiry_date = payload.expiry_date
+    doc.reference = (payload.reference or "").strip() or None
+    doc.notes = (payload.notes or "").strip() or None
+    doc.total = total
+    doc.items = lines          # the old lines are deleted automatically (delete-orphan)
+    db.commit()
+    return _load(db, doc_id)
 
 @router.put("/{doc_id}/status", response_model=schemas.SalesDocumentOut)
 def set_quote_status(doc_id: int, payload: schemas.SalesDocumentStatusUpdate, db: Session = Depends(get_db)):

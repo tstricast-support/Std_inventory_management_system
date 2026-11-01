@@ -32,6 +32,8 @@ import {
   FileSignature,
   ClipboardCheck,
   RotateCcw,
+  Download,
+  Percent
 } from "lucide-react";
 import "./index.css";
 
@@ -120,6 +122,24 @@ const updateCustomer = (id, payload) => customerRequest(String(id), "PUT", paylo
 const deleteCustomer = (id) => customerRequest(String(id), "DELETE", null, "Failed to delete customer");
 
 
+// ---------- Taxes ----------
+async function taxRequest(path, method, payload, failMsg) {
+  const res = await fetch(`${BASE_URL}/taxes/${path}`, {
+    method,
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : failMsg);
+  }
+  return res.json();
+}
+const getTaxes = () => taxRequest("", "GET", null, "Failed to fetch taxes");
+const createTax = (payload) => taxRequest("", "POST", payload, "Failed to save tax");
+const updateTax = (id, payload) => taxRequest(String(id), "PUT", payload, "Failed to update tax");
+const deleteTax = (id) => taxRequest(String(id), "DELETE", null, "Failed to delete tax");
+
 // ---------- Invoices ----------
 async function invoiceRequest(path, method, payload, failMsg) {
   const res = await fetch(`${BASE_URL}/invoices/${path}`, {
@@ -166,6 +186,7 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
   const [formOpen, setFormOpen] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [invoiceFor, setInvoiceFor] = useState(null); // the quote / sales order being turned into an invoice
+  const [editFor, setEditFor] = useState(null); // the quote / sales order being edited
 
   const load = async () => {
     try {
@@ -178,7 +199,9 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
     }
   };
 
-  useEffect(() => { load(); }, [docType]);
+  useEffect(() => {
+    load();
+  }, [docType]);
 
   const run = async (action) => {
     try {
@@ -201,19 +224,32 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
 
   const q = search.trim().toLowerCase();
   const shown = docs.filter(
-    (d) => !q || [d.doc_number, d.customer_name, d.reference].some((v) => (v || "").toLowerCase().includes(q))
+    (d) =>
+      !q ||
+      [d.doc_number, d.customer_name, d.reference].some((v) =>
+        (v || "").toLowerCase().includes(q),
+      ),
   );
 
-  const btn = "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium";
+  const btn =
+    "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium";
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active={info.tab} onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active={info.tab}
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
 
       <main className="p-4 sm:p-6 max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
-            <SearchBox value={search} onChange={setSearch} placeholder={`Search ${info.title.toLowerCase()}s...`} />
+            <SearchBox
+              value={search}
+              onChange={setSearch}
+              placeholder={`Search ${info.title.toLowerCase()}s...`}
+            />
           </div>
           <button
             onClick={() => setFormOpen(true)}
@@ -234,11 +270,19 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
             {shown.map((doc) => {
               const st = salesDocStatus(doc);
               const open = expandedId === doc.id;
-              const canInvoice = ["draft", "sent", "accepted", "open"].includes(doc.status);
-              const canConvert = doc.doc_type === "quote" && ["draft", "sent", "accepted"].includes(doc.status);
+              const canInvoice = ["draft", "sent", "accepted", "open"].includes(
+                doc.status,
+              );
+              const canConvert =
+                doc.doc_type === "quote" &&
+                ["draft", "sent", "accepted"].includes(doc.status);
               const canDelete = !["invoiced", "converted"].includes(doc.status);
+              const canEdit = !["invoiced", "converted"].includes(doc.status);
               return (
-                <div key={doc.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div
+                  key={doc.id}
+                  className="bg-white border border-gray-200 rounded-xl overflow-hidden"
+                >
                   <button
                     type="button"
                     onClick={() => setExpandedId(open ? null : doc.id)}
@@ -246,19 +290,33 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 truncate">
-                        {doc.doc_number} <span className="text-gray-400 font-normal">· {doc.customer_name}</span>
+                        {doc.doc_number}{" "}
+                        <span className="text-gray-400 font-normal">
+                          · {doc.customer_name}
+                        </span>
                       </p>
                       <p className="text-xs text-gray-400 truncate">
                         {formatJournalDate(doc.doc_date)}
-                        {doc.expiry_date && ` · ${info.endLabel} ${formatJournalDate(doc.expiry_date)}`}
+                        {doc.expiry_date &&
+                          ` · ${info.endLabel} ${formatJournalDate(doc.expiry_date)}`}
                         {doc.reference && ` · Ref ${doc.reference}`}
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="font-semibold text-gray-900">{formatRs(doc.total)}</p>
-                      <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                      <p className="font-semibold text-gray-900">
+                        {formatRs(doc.total)}
+                      </p>
+                      <span
+                        className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}
+                      >
+                        {st.label}
+                      </span>
                     </div>
-                    {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                    {open ? (
+                      <ChevronDown size={16} className="text-gray-400" />
+                    ) : (
+                      <ChevronRight size={16} className="text-gray-400" />
+                    )}
                   </button>
 
                   {open && (
@@ -267,19 +325,35 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
                         <div key={l.id} className="flex items-center gap-3">
                           <ItemThumb product={l.product} />
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm text-gray-900 truncate">{l.item_name}</p>
+                            <p className="text-sm text-gray-900 truncate">
+                              {l.item_name}
+                            </p>
                             <p className="text-xs text-gray-400 truncate">
                               {l.quantity} × {formatRs(l.rate)}
                               {l.description && ` · ${l.description}`}
                             </p>
                           </div>
-                          <span className="text-sm font-medium text-gray-900 shrink-0">{formatRs(l.amount)}</span>
+                          <span className="text-sm font-medium text-gray-900 shrink-0">
+                            {formatRs(l.amount)}
+                          </span>
                         </div>
                       ))}
 
-                      {doc.notes && <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">{doc.notes}</p>}
-                      {doc.source_id && <p className="text-xs text-gray-400">Created from a quote.</p>}
-                      {doc.invoice_number && <p className="text-xs text-gray-400">Invoiced as {doc.invoice_number}.</p>}
+                      {doc.notes && (
+                        <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">
+                          {doc.notes}
+                        </p>
+                      )}
+                      {doc.source_id && (
+                        <p className="text-xs text-gray-400">
+                          Created from a quote.
+                        </p>
+                      )}
+                      {doc.invoice_number && (
+                        <p className="text-xs text-gray-400">
+                          Invoiced as {doc.invoice_number}.
+                        </p>
+                      )}
 
                       <div className="border-t border-gray-100 pt-2 text-sm flex justify-between font-semibold">
                         <span>Total</span>
@@ -288,38 +362,76 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
 
                       <div className="flex flex-wrap gap-2">
                         {doc.doc_type === "quote" && doc.status === "draft" && (
-                          <button onClick={() => run(() => setSalesDocStatus(doc.id, "sent"))}
-                            className={`${btn} border border-gray-300 text-gray-700 hover:bg-gray-50`}>
+                          <button
+                            onClick={() =>
+                              run(() => setSalesDocStatus(doc.id, "sent"))
+                            }
+                            className={`${btn} border border-gray-300 text-gray-700 hover:bg-gray-50`}
+                          >
                             Mark as sent
                           </button>
                         )}
-                        {doc.doc_type === "quote" && ["draft", "sent"].includes(doc.status) && (
-                          <>
-                            <button onClick={() => run(() => setSalesDocStatus(doc.id, "accepted"))}
-                              className={`${btn} border border-green-200 text-green-700 hover:bg-green-50`}>
-                              <Check size={14} /> Accepted
-                            </button>
-                            <button onClick={() => run(() => setSalesDocStatus(doc.id, "declined"))}
-                              className={`${btn} border border-gray-300 text-gray-700 hover:bg-gray-50`}>
-                              Declined
-                            </button>
-                          </>
-                        )}
+                        {doc.doc_type === "quote" &&
+                          ["draft", "sent"].includes(doc.status) && (
+                            <>
+                              <button
+                                onClick={() =>
+                                  run(() =>
+                                    setSalesDocStatus(doc.id, "accepted"),
+                                  )
+                                }
+                                className={`${btn} border border-green-200 text-green-700 hover:bg-green-50`}
+                              >
+                                <Check size={14} /> Accepted
+                              </button>
+                              <button
+                                onClick={() =>
+                                  run(() =>
+                                    setSalesDocStatus(doc.id, "declined"),
+                                  )
+                                }
+                                className={`${btn} border border-gray-300 text-gray-700 hover:bg-gray-50`}
+                              >
+                                Declined
+                              </button>
+                            </>
+                          )}
                         {canConvert && (
-                          <button onClick={() => handleToSalesOrder(doc)}
-                            className={`${btn} border border-blue-200 text-blue-600 hover:bg-blue-50`}>
+                          <button
+                            onClick={() => handleToSalesOrder(doc)}
+                            className={`${btn} border border-blue-200 text-blue-600 hover:bg-blue-50`}
+                          >
                             Convert to sales order
                           </button>
                         )}
                         {canInvoice && (
-                          <button onClick={() => setInvoiceFor(doc)}
-                            className={`${btn} bg-green-600 text-white hover:bg-green-700`}>
+                          <button
+                            onClick={() => setInvoiceFor(doc)}
+                            className={`${btn} bg-green-600 text-white hover:bg-green-700`}
+                          >
                             <FileText size={14} /> Convert to invoice
                           </button>
                         )}
+                        {canEdit && (
+                          <button
+                            onClick={() => setEditFor(doc)}
+                            className={`${btn} border border-gray-300 text-gray-700 hover:bg-gray-50`}
+                          >
+                            <Pencil size={14} /> Edit
+                          </button>
+                        )}
+                        <button
+                          onClick={() => downloadPdf("salesdoc", doc)}
+                          className={`${btn} border border-gray-300 text-gray-700 hover:bg-gray-50`}
+                        >
+                          <Download size={14} /> PDF
+                        </button>
+
                         {canDelete && (
-                          <button onClick={() => handleDelete(doc)}
-                            className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}>
+                          <button
+                            onClick={() => handleDelete(doc)}
+                            className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}
+                          >
                             <Trash2 size={14} /> Delete
                           </button>
                         )}
@@ -333,45 +445,69 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
         )}
       </main>
 
-      {formOpen && <SalesDocumentForm docType={docType} onClose={() => setFormOpen(false)} onSaved={load} />}
+      {formOpen && (
+        <SalesDocumentForm
+          docType={docType}
+          onClose={() => setFormOpen(false)}
+          onSaved={load}
+        />
+      )}
 
-      {invoiceFor && <InvoiceForm fromDoc={invoiceFor} onClose={() => setInvoiceFor(null)} onSaved={load} />}
+      {editFor && (
+        <SalesDocumentForm
+          docType={docType}
+          editDoc={editFor}
+          onClose={() => setEditFor(null)}
+          onSaved={load}
+        />
+      )}
+
+      {invoiceFor && (
+        <InvoiceForm
+          fromDoc={invoiceFor}
+          onClose={() => setInvoiceFor(null)}
+          onSaved={load}
+        />
+      )}
     </div>
   );
 }
 
-function SalesDocumentForm({ docType, onClose, onSaved }) {
-  const fromDoc = null;
+function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
+  const fromDoc = editDoc;
   const info = SALES_DOC_INFO[docType];
   const [customers, setCustomers] = useState([]);
   const [items, setItems] = useState([]);
-      const [customerId, setCustomerId] = useState(
-        fromDoc ? fromDoc.customer_id : "",
-      );
-  const [date, setDate] = useState(toISODate(new Date()));
-  const [endDate, setEndDate] = useState("");
-  const [reference, setReference] = useState("");
+  const [customerId, setCustomerId] = useState(
+    fromDoc ? fromDoc.customer_id : "",
+  );
+  const [date, setDate] = useState(fromDoc?.doc_date || toISODate(new Date()));
+  const [endDate, setEndDate] = useState(fromDoc?.expiry_date || "");
+  const [reference, setReference] = useState(fromDoc?.reference || "");
   const [notes, setNotes] = useState(fromDoc?.notes || "");
   const [lines, setLines] = useState(
-        fromDoc && fromDoc.items.some((l) => l.product_id)
-          ? fromDoc.items
-              .filter((l) => l.product_id)
-              .map((l) => ({
-                product_id: l.product_id,
-                description: l.description || "",
-                quantity: String(l.quantity),
-                rate: String(l.rate),
-              }))
-          : [blankInvoiceLine()],
-      );
+    fromDoc && fromDoc.items.some((l) => l.product_id)
+      ? fromDoc.items
+          .filter((l) => l.product_id)
+          .map((l) => ({
+            product_id: l.product_id,
+            description: l.description || "",
+            quantity: String(l.quantity),
+            rate: String(l.rate),
+          }))
+      : [blankInvoiceLine()],
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   useEffect(() => {
     Promise.all([getCustomers(), getProducts()])
       .then(([c, p]) => {
-        setCustomers(c.filter((x) => x.is_active));
+        setCustomers(
+          c.filter((x) => x.is_active || x.id === fromDoc?.customer_id),
+        );
         setItems(flattenParents(p).filter((x) => !(x.subitems?.length > 0)));
       })
       .catch((err) => setError(err.message));
@@ -387,14 +523,24 @@ function SalesDocumentForm({ docType, onClose, onSaved }) {
   const itemOptions = items.map((p) => ({
     value: p.id,
     label: p.label,
-    hint: p.item_type === STOCK_TRACKED_TYPE ? `${p.quantity} in stock` : p.item_type,
+    hint:
+      p.item_type === STOCK_TRACKED_TYPE
+        ? `${p.quantity} in stock`
+        : p.item_type,
     search: `${p.label} ${p.sku || ""}`,
   }));
 
-  const setLine = (i, patch) => setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  const setLine = (i, patch) =>
+    setLines((prev) =>
+      prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
+    );
   const pickItem = (i, productId) => {
     const p = itemById[productId];
-    setLine(i, { product_id: productId, description: p?.description || "", rate: p ? String(p.price ?? 0) : "" });
+    setLine(i, {
+      product_id: productId,
+      description: p?.description || "",
+      rate: p ? String(p.price ?? 0) : "",
+    });
   };
 
   const filled = lines.filter((l) => l.product_id);
@@ -403,7 +549,12 @@ function SalesDocumentForm({ docType, onClose, onSaved }) {
   const canSave =
     Boolean(customerId) &&
     filled.length > 0 &&
-    filled.every((l) => Number.isInteger(Number(l.quantity)) && Number(l.quantity) > 0 && toCents(l.rate) >= 0) &&
+    filled.every(
+      (l) =>
+        Number.isInteger(Number(l.quantity)) &&
+        Number(l.quantity) > 0 &&
+        toCents(l.rate) >= 0,
+    ) &&
     totalCents > 0 &&
     (!endDate || endDate >= date);
 
@@ -412,8 +563,7 @@ function SalesDocumentForm({ docType, onClose, onSaved }) {
     setSubmitting(true);
     setError(null);
     try {
-      await createSalesDoc({
-        doc_type: docType,
+      const payload = {
         customer_id: customerId,
         doc_date: date,
         expiry_date: endDate || null,
@@ -425,7 +575,9 @@ function SalesDocumentForm({ docType, onClose, onSaved }) {
           quantity: Number(l.quantity),
           rate: Number(l.rate) || 0,
         })),
-      });
+      };
+      if (editDoc) await updateSalesDoc(editDoc.id, payload);
+      else await createSalesDoc({ doc_type: docType, ...payload });
       await onSaved();
       onClose();
     } catch (err) {
@@ -438,8 +590,14 @@ function SalesDocumentForm({ docType, onClose, onSaved }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">New {info.title}</h2>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <h2 className="text-lg font-semibold mb-4">
+          {editDoc ? `Edit ${editDoc.doc_number}` : `New ${info.title}`}
+        </h2>
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <FieldLabel>Customer</FieldLabel>
@@ -456,15 +614,31 @@ function SalesDocumentForm({ docType, onClose, onSaved }) {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="text-xs text-gray-500">
               {info.dateLabel}
-              <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1"} />
+              <input
+                required
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               {info.endLabel} (optional)
-              <input type="date" value={endDate} min={date} onChange={(e) => setEndDate(e.target.value)} className={cls + " mt-1"} />
+              <input
+                type="date"
+                value={endDate}
+                min={date}
+                onChange={(e) => setEndDate(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               Reference #
-              <input value={reference} onChange={(e) => setReference(e.target.value)} className={cls + " mt-1"} />
+              <input
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
           </div>
 
@@ -473,7 +647,10 @@ function SalesDocumentForm({ docType, onClose, onSaved }) {
             {lines.map((l, i) => {
               const p = itemById[l.product_id];
               return (
-                <div key={i} className="border border-gray-200 rounded-lg p-3 space-y-2">
+                <div
+                  key={i}
+                  className="border border-gray-200 rounded-lg p-3 space-y-2"
+                >
                   <div className="flex items-start gap-3">
                     <ItemThumb product={p} size={56} />
                     <div className="flex-1 min-w-0 space-y-2">
@@ -488,7 +665,9 @@ function SalesDocumentForm({ docType, onClose, onSaved }) {
                       <input
                         placeholder="Description (optional)"
                         value={l.description}
-                        onChange={(e) => setLine(i, { description: e.target.value })}
+                        onChange={(e) =>
+                          setLine(i, { description: e.target.value })
+                        }
                         className={cls}
                       />
                     </div>
@@ -496,7 +675,9 @@ function SalesDocumentForm({ docType, onClose, onSaved }) {
                       <button
                         type="button"
                         title="Remove line"
-                        onClick={() => setLines((prev) => prev.filter((_, idx) => idx !== i))}
+                        onClick={() =>
+                          setLines((prev) => prev.filter((_, idx) => idx !== i))
+                        }
                         className="shrink-0 border border-gray-300 rounded-lg p-2 text-gray-500 hover:bg-gray-50"
                       >
                         <Trash2 size={14} />
@@ -507,17 +688,33 @@ function SalesDocumentForm({ docType, onClose, onSaved }) {
                   <div className="grid grid-cols-3 gap-2">
                     <label className="text-xs text-gray-500">
                       Qty
-                      <input type="number" min="1" step="1" value={l.quantity}
-                        onChange={(e) => setLine(i, { quantity: e.target.value })} className={cls + " mt-1"} />
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={l.quantity}
+                        onChange={(e) =>
+                          setLine(i, { quantity: e.target.value })
+                        }
+                        className={cls + " mt-1"}
+                      />
                     </label>
                     <label className="text-xs text-gray-500">
                       Rate
-                      <input type="number" min="0" step="0.01" value={l.rate}
-                        onChange={(e) => setLine(i, { rate: e.target.value })} className={cls + " mt-1"} />
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={l.rate}
+                        onChange={(e) => setLine(i, { rate: e.target.value })}
+                        className={cls + " mt-1"}
+                      />
                     </label>
                     <div className="text-xs text-gray-500">
                       Amount
-                      <p className="mt-1 py-2 text-sm font-medium text-gray-900">{formatRs(lineCents(l) / 100)}</p>
+                      <p className="mt-1 py-2 text-sm font-medium text-gray-900">
+                        {formatRs(lineCents(l) / 100)}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -532,7 +729,13 @@ function SalesDocumentForm({ docType, onClose, onSaved }) {
             </button>
           </div>
 
-          <textarea rows={2} placeholder="Notes for the customer" value={notes} onChange={(e) => setNotes(e.target.value)} className={cls} />
+          <textarea
+            rows={2}
+            placeholder="Notes for the customer"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className={cls}
+          />
 
           <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
             <span>Total</span>
@@ -540,7 +743,11 @@ function SalesDocumentForm({ docType, onClose, onSaved }) {
           </div>
 
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
               Cancel
             </button>
             <button
@@ -548,7 +755,11 @@ function SalesDocumentForm({ docType, onClose, onSaved }) {
               disabled={!canSave || submitting}
               className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
-              {submitting ? "Saving..." : `Save ${info.title}`}
+              {submitting
+                ? "Saving..."
+                : editDoc
+                  ? "Save changes"
+                  : `Save ${info.title}`}
             </button>
           </div>
         </form>
@@ -624,9 +835,26 @@ async function salesDocRequest(path, method, payload, failMsg) {
 }
 const getSalesDocs = (docType) => salesDocRequest(`?doc_type=${docType}`, "GET", null, "Failed to fetch documents");
 const createSalesDoc = (payload) => salesDocRequest("", "POST", payload, "Failed to save document");
+const updateSalesDoc = (id, payload) =>
+  salesDocRequest(String(id), "PUT", payload, "Failed to update document");
 const setSalesDocStatus = (id, status) => salesDocRequest(`${id}/status`, "PUT", { status }, "Failed to change status");
 const quoteToSalesOrder = (id) => salesDocRequest(`${id}/to-sales-order`, "POST", null, "Failed to convert quote");
 const deleteSalesDoc = (id) => salesDocRequest(String(id), "DELETE", null, "Failed to delete");
+
+
+
+// builds + downloads a PDF (the PDF code is only loaded when a button is pressed)
+async function downloadPdf(kind, record) {
+  try {
+    const [pdf, customers] = await Promise.all([import("./pdf.js"), getCustomers().catch(() => [])]);
+    const customer = customers.find((c) => c.id === record.customer_id);
+    if (kind === "invoice") await pdf.downloadInvoicePdf(record, customer);
+    else if (kind === "credit") await pdf.downloadCreditNotePdf(record, customer);
+    else await pdf.downloadSalesDocPdf(record, customer);
+  } catch (err) {
+    alert(err.message || "Could not create the PDF");
+  }
+}
 
 // ---------- Credit notes ----------
 async function creditNoteRequest(path, method, payload, failMsg) {
@@ -2726,6 +2954,7 @@ function HomeTabs({ active, onChange, isAdmin }) {
       {isAdmin && tab("vendors", "Vendors", Truck)}
       {isAdmin && tab("purchases", "Purchases", ShoppingCart)}
       {isAdmin && tab("vendorpayments", "Payments Made", CreditCard)}
+      {isAdmin && tab("taxes", "Taxes", Percent)}
       {isAdmin && tab("bill", "Bill", Receipt)}
       {isAdmin && tab("issued", "Issued", ClipboardList)}
       {isAdmin && tab("manage", "Manage", Settings)}
@@ -3786,6 +4015,178 @@ function VendorForm({ initialData, onClose, onSubmit }) {
             </button>
             <button type="submit" disabled={submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
               {submitting ? "Saving..." : "Save Vendor"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Taxes (admin only) ----------
+const formatRate = (r) => `${Number(r || 0).toLocaleString(undefined, { maximumFractionDigits: 3 })}%`;
+
+function TaxesPage({ isAdmin, go }) {
+  const [taxes, setTaxes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  const load = async () => {
+    try {
+      setTaxes(await getTaxes());
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleDelete = async () => {
+    try {
+      await deleteTax(deleteTarget.id);
+      setDeleteTarget(null);
+      await load();
+    } catch (err) {
+      setDeleteTarget(null);
+      alert(err.message);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active="taxes" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+
+      <main className="p-4 sm:p-6 max-w-3xl">
+        <div className="mb-5 flex gap-3 items-center">
+          <p className="flex-1 text-sm text-gray-500">
+            Tax rates you can add to invoice and bill lines. The default one is pre-selected on new lines.
+          </p>
+          <button
+            onClick={() => { setEditing(null); setFormOpen(true); }}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
+          >
+            + New Tax
+          </button>
+        </div>
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : taxes.length === 0 ? (
+          <p className="text-gray-400 text-center py-16">No taxes yet. Add one, for example VAT 18%.</p>
+        ) : (
+          <div className="space-y-2">
+            {taxes.map((t) => (
+              <div key={t.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-gray-900 truncate">{t.name}</p>
+                  <div className="flex gap-1.5 mt-0.5">
+                    {t.is_default && (
+                      <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Default</span>
+                    )}
+                    {!t.is_active && (
+                      <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Inactive</span>
+                    )}
+                  </div>
+                </div>
+                <p className="font-semibold text-gray-900 shrink-0">{formatRate(t.rate)}</p>
+                <ItemActionsMenu
+                  onEdit={() => { setEditing(t); setFormOpen(true); }}
+                  onDelete={() => setDeleteTarget(t)}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {formOpen && (
+        <TaxForm
+          initialData={editing}
+          onClose={() => { setFormOpen(false); setEditing(null); }}
+          onSubmit={async (id, payload) => {
+            if (id) await updateTax(id, payload);
+            else await createTax(payload);
+            await load();
+          }}
+        />
+      )}
+
+      {deleteTarget && (
+        <TypedDeleteConfirm
+          label={deleteTarget.name}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
+        />
+      )}
+    </div>
+  );
+}
+
+function TaxForm({ initialData, onClose, onSubmit }) {
+  const isEditMode = Boolean(initialData);
+  const [form, setForm] = useState({
+    name: initialData?.name || "",
+    rate: initialData ? String(initialData.rate) : "",
+    is_active: initialData?.is_active ?? true,
+    is_default: initialData?.is_default ?? false,
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const rateOk = form.rate !== "" && Number(form.rate) >= 0 && Number(form.rate) <= 100;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSubmit(isEditMode ? initialData.id : null, {
+        name: form.name.trim(),
+        rate: Number(form.rate),
+        is_active: form.is_active,
+        is_default: form.is_active && form.is_default,
+      });
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+        <h2 className="text-lg font-semibold mb-4">{isEditMode ? "Edit Tax" : "New Tax"}</h2>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <input required placeholder="Tax name * (e.g. VAT)" value={form.name} onChange={(e) => set("name", e.target.value)} className={cls} />
+          <label className="text-xs text-gray-500 block">
+            Rate (%) *
+            <input required type="number" min="0" max="100" step="0.001" value={form.rate} onChange={(e) => set("rate", e.target.value)} className={cls + " mt-1"} />
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={form.is_active} onChange={(e) => set("is_active", e.target.checked)} />
+            Active
+          </label>
+          <label className={`flex items-center gap-2 text-sm ${form.is_active ? "" : "text-gray-400"}`}>
+            <input type="checkbox" disabled={!form.is_active} checked={form.is_active && form.is_default} onChange={(e) => set("is_default", e.target.checked)} />
+            Make this the default tax
+          </label>
+          <p className="text-xs text-gray-400">Changing a rate later never changes invoices that already used it.</p>
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={submitting || !form.name.trim() || !rateOk} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+              {submitting ? "Saving..." : "Save Tax"}
             </button>
           </div>
         </form>
@@ -4869,6 +5270,15 @@ function InvoicesPage({ isAdmin, go }) {
                         </div>
                       </div>
 
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => downloadPdf("invoice", inv)}
+                          className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
+                        >
+                          <Download size={14} /> Download PDF
+                        </button>
+                      </div>
+
                       {inv.status !== "void" && (
                         <div className="flex flex-wrap gap-2">
                           {inv.balance_due > 0.004 && (
@@ -4879,12 +5289,12 @@ function InvoicesPage({ isAdmin, go }) {
                               <Wallet size={14} /> Record payment
                             </button>
                           )}
-                            <button
-                              onClick={() => setCreditFor(inv)}
-                              className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
-                            >
-                              <RotateCcw size={14} /> Credit note
-                            </button>
+                          <button
+                            onClick={() => setCreditFor(inv)}
+                            className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
+                          >
+                            <RotateCcw size={14} /> Credit note
+                          </button>
 
                           <button
                             onClick={() => handleVoid(inv)}
@@ -5331,7 +5741,10 @@ function CreditNotesPage({ isAdmin, go }) {
               const st = creditNoteStatus(cn);
               const open = expandedId === cn.id;
               return (
-                <div key={cn.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div
+                  key={cn.id}
+                  className="bg-white border border-gray-200 rounded-xl overflow-hidden"
+                >
                   <button
                     type="button"
                     onClick={() => setExpandedId(open ? null : cn.id)}
@@ -5339,19 +5752,34 @@ function CreditNotesPage({ isAdmin, go }) {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 truncate">
-                        {cn.credit_number} <span className="text-gray-400 font-normal">· {cn.customer_name}</span>
+                        {cn.credit_number}{" "}
+                        <span className="text-gray-400 font-normal">
+                          · {cn.customer_name}
+                        </span>
                       </p>
                       <p className="text-xs text-gray-400 truncate">
                         {formatJournalDate(cn.credit_date)}
                         {cn.invoice_number && ` · For ${cn.invoice_number}`}
-                        {cn.restock ? " · Stock returned" : " · No stock returned"}
+                        {cn.restock
+                          ? " · Stock returned"
+                          : " · No stock returned"}
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="font-semibold text-gray-900">{formatRs(cn.total)}</p>
-                      <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                      <p className="font-semibold text-gray-900">
+                        {formatRs(cn.total)}
+                      </p>
+                      <span
+                        className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}
+                      >
+                        {st.label}
+                      </span>
                     </div>
-                    {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                    {open ? (
+                      <ChevronDown size={16} className="text-gray-400" />
+                    ) : (
+                      <ChevronRight size={16} className="text-gray-400" />
+                    )}
                   </button>
 
                   {open && (
@@ -5360,31 +5788,48 @@ function CreditNotesPage({ isAdmin, go }) {
                         <div key={l.id} className="flex items-center gap-3">
                           <ItemThumb product={l.product} />
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm text-gray-900 truncate">{l.item_name}</p>
+                            <p className="text-sm text-gray-900 truncate">
+                              {l.item_name}
+                            </p>
                             <p className="text-xs text-gray-400 truncate">
                               {l.quantity} × {formatRs(l.rate)}
                               {l.description && ` · ${l.description}`}
                             </p>
                           </div>
-                          <span className="text-sm font-medium text-gray-900 shrink-0">{formatRs(l.amount)}</span>
+                          <span className="text-sm font-medium text-gray-900 shrink-0">
+                            {formatRs(l.amount)}
+                          </span>
                         </div>
                       ))}
 
-                      {cn.reason && <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">{cn.reason}</p>}
+                      {cn.reason && (
+                        <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">
+                          {cn.reason}
+                        </p>
+                      )}
 
                       {cn.applications.length > 0 && (
                         <div className="space-y-1">
-                          <p className="text-xs font-medium text-gray-500">Applied to</p>
+                          <p className="text-xs font-medium text-gray-500">
+                            Applied to
+                          </p>
                           {cn.applications.map((a) => (
-                            <div key={a.id} className="flex items-center justify-between text-sm">
-                              <span className="text-gray-700">{a.invoice_number}</span>
+                            <div
+                              key={a.id}
+                              className="flex items-center justify-between text-sm"
+                            >
+                              <span className="text-gray-700">
+                                {a.invoice_number}
+                              </span>
                               <span className="flex items-center gap-2">
                                 {formatRs(a.amount)}
                                 {cn.status !== "void" && (
                                   <button
                                     type="button"
                                     title="Remove from invoice"
-                                    onClick={() => handleRemoveApplication(cn, a)}
+                                    onClick={() =>
+                                      handleRemoveApplication(cn, a)
+                                    }
                                     className="text-gray-400 hover:text-red-600"
                                   >
                                     <Trash2 size={14} />
@@ -5397,21 +5842,45 @@ function CreditNotesPage({ isAdmin, go }) {
                       )}
 
                       <div className="border-t border-gray-100 pt-2 text-sm space-y-1">
-                        <div className="flex justify-between"><span className="text-gray-500">Total</span><span>{formatRs(cn.total)}</span></div>
-                        <div className="flex justify-between"><span className="text-gray-500">Used on invoices</span><span>{formatRs(cn.amount_applied)}</span></div>
-                        <div className="flex justify-between font-semibold"><span>Credit left</span><span>{formatRs(cn.balance)}</span></div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Total</span>
+                          <span>{formatRs(cn.total)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">
+                            Used on invoices
+                          </span>
+                          <span>{formatRs(cn.amount_applied)}</span>
+                        </div>
+                        <div className="flex justify-between font-semibold">
+                          <span>Credit left</span>
+                          <span>{formatRs(cn.balance)}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => downloadPdf("credit", cn)}
+                          className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
+                        >
+                          <Download size={14} /> Download PDF
+                        </button>
                       </div>
 
                       {cn.status !== "void" && (
                         <div className="flex flex-wrap gap-2">
                           {cn.balance > 0.004 && (
-                            <button onClick={() => setApplyFor(cn)}
-                              className={`${btn} bg-green-600 text-white hover:bg-green-700`}>
+                            <button
+                              onClick={() => setApplyFor(cn)}
+                              className={`${btn} bg-green-600 text-white hover:bg-green-700`}
+                            >
                               <FileText size={14} /> Apply to invoice
                             </button>
                           )}
-                          <button onClick={() => handleVoid(cn)}
-                            className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}>
+                          <button
+                            onClick={() => handleVoid(cn)}
+                            className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}
+                          >
                             <Trash2 size={14} /> Void credit note
                           </button>
                         </div>
@@ -8234,7 +8703,6 @@ function AppShell() {
         docType="sales_order"
       />
     );
-
   } else if (searchParams.get("view") === "creditnotes" && isAdmin) {
     page = <CreditNotesPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "invoices" && isAdmin) {
@@ -8245,6 +8713,8 @@ function AppShell() {
     page = <PurchaseBillsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "vendorpayments" && isAdmin) {
     page = <VendorPaymentsPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "taxes" && isAdmin) {
+    page = <TaxesPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "vendors" && isAdmin) {
     page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "manage" && isAdmin) {

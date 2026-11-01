@@ -4,7 +4,7 @@ from sqlalchemy import inspect, text
 from app.departments import DEFAULT_DEPARTMENT
 from app.account_types import DEFAULT_ACCOUNTS
 from app.database import Base, engine
-from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments,sales_documents,credit_notes
+from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments,sales_documents,credit_notes,taxes
 Base.metadata.create_all(bind=engine) 
 
 def add_department_column():
@@ -83,6 +83,20 @@ def seed_default_accounts():
 
 seed_default_accounts()
 
+def seed_tax_accounts():
+    """Step 7: the two ledger accounts tax is posted to (added once, only if missing)."""
+    with engine.begin() as conn:
+        for name, account_type in [("Tax Payable", "current_liability"), ("Input Tax Credits", "other_current_asset")]:
+            exists = conn.execute(text("SELECT 1 FROM accounts WHERE name = :n"), {"n": name}).first()
+            if not exists:
+                conn.execute(
+                    text("INSERT INTO accounts (name, account_type) VALUES (:n, :t)"),
+                    {"n": name, "t": account_type},
+                )
+
+
+seed_tax_accounts()
+
 def merge_photobook_into_i_lab():
     """I Photobook was merged into I Lab: move any products still using the old department."""
     with engine.begin() as conn:
@@ -132,6 +146,7 @@ app.include_router(purchase_bills.router)
 app.include_router(vendor_payments.router)
 app.include_router(sales_documents.router)
 app.include_router(credit_notes.router)
+app.include_router(taxes.router)
 
 @app.get("/")
 def root():

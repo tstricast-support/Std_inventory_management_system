@@ -392,6 +392,15 @@ class SalesDocumentCreate(BaseModel):
 class SalesDocumentStatusUpdate(BaseModel):
     status: str
 
+
+class SalesDocumentUpdate(BaseModel):
+    customer_id: int
+    doc_date: date
+    expiry_date: Optional[date] = None
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    items: List[SalesDocumentItemCreate]
+
 class SalesDocumentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -494,7 +503,7 @@ class PurchaseBillOut(BaseModel):
     items: List[PurchaseBillItemOut] = []
 
 
-# ---------- Vendor payments / payments made (step 5) ----------
+# ---------- Vendor payments / payments made  ----------
 class VendorPaymentAllocationCreate(BaseModel):
     bill_id: int
     amount: float
@@ -533,7 +542,7 @@ class VendorPaymentOut(BaseModel):
 
 
 
-# ---------- Credit notes (step 6B) ----------
+# ---------- Credit notes  ----------
 class CreditNoteItemCreate(BaseModel):
     product_id: int
     description: Optional[str] = None
@@ -578,3 +587,20 @@ class CreditNoteOut(BaseModel):
     created_at: datetime
     items: List[InvoiceItemOut] = []
     applications: List[CreditNoteApplicationOut] = []
+
+
+
+# ----------  taxes ----------
+class TaxCreate(BaseModel):
+    name: str
+    rate: float
+    is_active: bool = True
+    is_default: bool = False
+
+class TaxOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    rate: float
+    is_active: bool
+    is_default: bool
