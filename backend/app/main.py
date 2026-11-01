@@ -4,7 +4,7 @@ from sqlalchemy import inspect, text
 from app.departments import DEFAULT_DEPARTMENT
 from app.account_types import DEFAULT_ACCOUNTS
 from app.database import Base, engine
-from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments
+from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments
 Base.metadata.create_all(bind=engine) 
 
 def add_department_column():
@@ -109,6 +109,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173",
                    "https://stdinventorymanagementsystem-production.up.railway.app",
+                   "http://localhost:8000",
 ],
 
     allow_credentials=True,
@@ -127,6 +128,8 @@ app.include_router(customers.router)
 app.include_router(journals.router)
 app.include_router(invoices.router)
 app.include_router(payments.router)
+app.include_router(purchase_bills.router)
+app.include_router(vendor_payments.router)
 
 @app.get("/")
 def root():

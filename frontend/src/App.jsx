@@ -1,6 +1,35 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
-import { Pencil, Trash2, PackagePlus, History, ChevronRight, ChevronDown, ArrowLeft, LayoutGrid, Tag, Search, Receipt, Plus, Star, Check, ClipboardList, Landmark, Truck, CornerDownRight,Bell,Menu, Settings, MoreVertical, Users, BookOpen,FileText,Wallet } from "lucide-react";
+import {
+  Pencil,
+  Trash2,
+  PackagePlus,
+  History,
+  ChevronRight,
+  ChevronDown,
+  ArrowLeft,
+  LayoutGrid,
+  Tag,
+  Search,
+  Receipt,
+  Plus,
+  Star,
+  Check,
+  ClipboardList,
+  Landmark,
+  Truck,
+  CornerDownRight,
+  Bell,
+  Menu,
+  Settings,
+  MoreVertical,
+  Users,
+  BookOpen,
+  FileText,
+  Wallet,
+  ShoppingCart,
+  CreditCard,
+} from "lucide-react";
 import "./index.css";
 
 
@@ -122,6 +151,40 @@ async function paymentRequest(path, method, payload, failMsg) {
 const getPayments = () => paymentRequest("", "GET", null, "Failed to fetch payments");
 const createPayment = (payload) => paymentRequest("", "POST", payload, "Failed to save payment");
 const deletePayment = (id) => paymentRequest(String(id), "DELETE", null, "Failed to delete payment");
+// ---------- Purchase bills (what you owe vendors) ----------
+async function purchaseBillRequest(path, method, payload, failMsg) {
+  const res = await fetch(`${BASE_URL}/purchase-bills/${path}`, {
+    method,
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : failMsg);
+  }
+  return res.json();
+}
+const getPurchaseBills = () => purchaseBillRequest("", "GET", null, "Failed to fetch bills");
+const createPurchaseBill = (payload) => purchaseBillRequest("", "POST", payload, "Failed to save bill");
+const voidPurchaseBill = (id) => purchaseBillRequest(`${id}/void`, "PUT", null, "Failed to void bill");
+
+
+// ---------- Vendor payments (payments made) ----------
+async function vendorPaymentRequest(path, method, payload, failMsg) {
+  const res = await fetch(`${BASE_URL}/vendor-payments/${path}`, {
+    method,
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : failMsg);
+  }
+  return res.json();
+}
+const getVendorPayments = () => vendorPaymentRequest("", "GET", null, "Failed to fetch vendor payments");
+const createVendorPayment = (payload) => vendorPaymentRequest("", "POST", payload, "Failed to save vendor payment");
+const deleteVendorPayment = (id) => vendorPaymentRequest(String(id), "DELETE", null, "Failed to delete vendor payment");
 
 // ---------- Accounts (chart of accounts) ----------
 async function getAccounts(accountType) {
@@ -2197,6 +2260,8 @@ function HomeTabs({ active, onChange, isAdmin }) {
       {isAdmin && tab("invoices", "Invoices", FileText)}
       {isAdmin && tab("payments", "Payments", Wallet)}
       {isAdmin && tab("vendors", "Vendors", Truck)}
+      {isAdmin && tab("purchases", "Purchases", ShoppingCart)}
+      {isAdmin && tab("vendorpayments", "Payments Made", CreditCard)}
       {isAdmin && tab("bill", "Bill", Receipt)}
       {isAdmin && tab("issued", "Issued", ClipboardList)}
       {isAdmin && tab("manage", "Manage", Settings)}
@@ -4832,6 +4897,703 @@ function PaymentForm({ initialCustomerId = "", initialInvoiceId = null, onClose,
     </div>
   );
 }
+// ---------- Purchase bills (step 5: what you owe vendors. Adds stock + posts to the ledger, admin only) ----------
+// Not the same as the "Bill" tab (BillPage below), which is only the quick "restock several items" batch.
+const BILL_EXPENSE_TYPES = ["expense", "other_expense", "cogs", "fixed_asset", "other_current_asset"]; // accounts a plain expense line can use
+const PAID_FROM_ACCOUNT_TYPES = ["cash", "bank", "credit_card", "other_current_asset"]; // where vendor payments can come from
+
+function PurchaseBillsPage({ isAdmin, go }) {
+  const [bills, setBills] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const [payFor, setPayFor] = useState(null); // the bill whose "Record payment" button was pressed
+
+  const load = async () => {
+    try {
+      setBills(await getPurchaseBills());
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleVoid = async (b) => {
+    if (!window.confirm(`Void ${b.bill_number}? The stock it added is taken back and its ledger entry is removed.`)) return;
+    try {
+      await voidPurchaseBill(b.id);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const q = search.trim().toLowerCase();
+  const shown = bills.filter(
+    (b) => !q || [b.bill_number, b.vendor_name, b.vendor_ref].some((v) => (v || "").toLowerCase().includes(q))
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active="purchases" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+
+      <main className="p-4 sm:p-6 max-w-3xl">
+        <div className="mb-5 flex gap-3 items-center">
+          <div className="flex-1">
+            <SearchBox value={search} onChange={setSearch} placeholder="Search bills..." />
+          </div>
+          <button
+            onClick={() => setFormOpen(true)}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
+          >
+            + New Bill
+          </button>
+        </div>
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : shown.length === 0 ? (
+          <p className="text-gray-400 text-center py-16">No bills yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {shown.map((b) => {
+              const st = invoiceStatus(b); // bills have the same status / balance_due / due_date fields as invoices
+              const open = expandedId === b.id;
+              return (
+                <div key={b.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(open ? null : b.id)}
+                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">
+                        {b.bill_number} <span className="text-gray-400 font-normal">· {b.vendor_name}</span>
+                      </p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {formatJournalDate(b.bill_date)} · Due {formatJournalDate(b.due_date)}
+                        {b.vendor_ref && ` · Ref ${b.vendor_ref}`}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-semibold text-gray-900">{formatRs(b.total)}</p>
+                      <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                    </div>
+                    {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                  </button>
+
+                  {open && (
+                    <div className="border-t border-gray-100 p-3 space-y-3">
+                      {b.items.map((l) => (
+                        <div key={l.id} className="flex items-center gap-3">
+                          {l.product ? (
+                            <ItemThumb product={l.product} />
+                          ) : (
+                            <div className="shrink-0 w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-300">
+                              <Receipt size={20} />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-gray-900 truncate">{l.item_name}</p>
+                            <p className="text-xs text-gray-400 truncate">
+                              {l.quantity} × {formatRs(l.rate)}
+                              {l.description && ` · ${l.description}`}
+                            </p>
+                          </div>
+                          <span className="text-sm font-medium text-gray-900 shrink-0">{formatRs(l.amount)}</span>
+                        </div>
+                      ))}
+
+                      {b.notes && <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">{b.notes}</p>}
+
+                      <div className="border-t border-gray-100 pt-2 text-sm space-y-1">
+                        <div className="flex justify-between"><span className="text-gray-500">Total</span><span>{formatRs(b.total)}</span></div>
+                        <div className="flex justify-between"><span className="text-gray-500">Paid</span><span>{formatRs(b.amount_paid)}</span></div>
+                        <div className="flex justify-between font-semibold"><span>Balance due</span><span>{formatRs(b.balance_due)}</span></div>
+                      </div>
+
+                      {b.status !== "void" && (
+                        <div className="flex flex-wrap gap-2">
+                          {b.balance_due > 0.004 && (
+                            <button
+                              onClick={() => setPayFor(b)}
+                              className="inline-flex items-center gap-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-green-700"
+                            >
+                              <CreditCard size={14} /> Record payment
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleVoid(b)}
+                            className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                          >
+                            <Trash2 size={14} /> Void bill
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      {formOpen && <PurchaseBillForm onClose={() => setFormOpen(false)} onSaved={load} />}
+
+      {payFor && (
+        <VendorPaymentForm
+          initialVendorId={payFor.vendor_id}
+          initialBillId={payFor.id}
+          onClose={() => setPayFor(null)}
+          onSaved={load}
+        />
+      )}
+    </div>
+  );
+}
+
+// a line is either an Item (stock goes up if it is an Inventory Part) or a plain Expense (e.g. electricity)
+const blankBillLine = () => ({ kind: "item", product_id: "", account_id: "", description: "", quantity: "1", rate: "" });
+
+function PurchaseBillForm({ onClose, onSaved }) {
+  const [vendors, setVendors] = useState([]);
+  const [items, setItems] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [vendorId, setVendorId] = useState("");
+  const [date, setDate] = useState(toISODate(new Date()));
+  const [terms, setTerms] = useState("Due on Receipt");
+  const [dueDate, setDueDate] = useState(""); // empty = follow the payment terms
+  const [vendorRef, setVendorRef] = useState("");
+  const [notes, setNotes] = useState("");
+  const [lines, setLines] = useState([blankBillLine()]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  useEffect(() => {
+    Promise.all([getVendors(), getProducts(), getAccounts()])
+      .then(([v, p, a]) => {
+        setVendors(v);
+        // only real items: a parent that has subitems can't be bought itself
+        setItems(flattenParents(p).filter((x) => !(x.subitems?.length > 0)));
+        setAccounts(a.filter((x) => BILL_EXPENSE_TYPES.includes(x.account_type)));
+      })
+      .catch((err) => setError(err.message));
+  }, []);
+
+  const autoDue = addDaysISO(date, INVOICE_TERM_DAYS[terms] ?? 0);
+  const effectiveDue = dueDate || autoDue;
+
+  const itemById = Object.fromEntries(items.map((p) => [p.id, p]));
+  const vendorOptions = vendors.map((v) => ({ value: v.id, label: v.name }));
+  const itemOptions = items.map((p) => ({
+    value: p.id,
+    label: p.label,
+    hint: p.item_type === STOCK_TRACKED_TYPE ? `${p.quantity} in stock` : p.item_type,
+    search: `${p.label} ${p.sku || ""}`,
+  }));
+  const accountOptions = accounts.map((a) => ({ value: a.id, label: a.name, hint: ACCOUNT_TYPE_NAMES[a.account_type] }));
+
+  const setLine = (i, patch) => setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  const pickItem = (i, productId) => {
+    const p = itemById[productId];
+    // the item's current cost is the starting rate; change it to what this bill actually charges
+    setLine(i, { product_id: productId, description: p?.purchase_description || "", rate: p && Number(p.cost) > 0 ? String(p.cost) : "" });
+  };
+
+  const isFilled = (l) => (l.kind === "item" ? Boolean(l.product_id) : Boolean(l.account_id));
+  const filled = lines.filter(isFilled);
+  const lineCents = (l) => (Number(l.quantity) || 0) * toCents(l.rate);
+  const totalCents = filled.reduce((s, l) => s + lineCents(l), 0);
+  const canSave =
+    Boolean(vendorId) &&
+    filled.length > 0 &&
+    filled.every((l) => Number.isInteger(Number(l.quantity)) && Number(l.quantity) > 0 && toCents(l.rate) >= 0) &&
+    totalCents > 0 &&
+    effectiveDue >= date;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createPurchaseBill({
+        vendor_id: vendorId,
+        bill_date: date,
+        due_date: effectiveDue,
+        vendor_ref: vendorRef.trim() || null,
+        notes: notes.trim() || null,
+        items: filled.map((l) => ({
+          ...(l.kind === "item" ? { product_id: l.product_id } : { account_id: l.account_id }),
+          description: l.description.trim() || null,
+          quantity: Number(l.quantity),
+          rate: Number(l.rate) || 0,
+        })),
+      });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-4">New Bill</h2>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <FieldLabel>Vendor</FieldLabel>
+            <SearchSelect
+              value={vendorId}
+              onChange={setVendorId}
+              options={vendorOptions}
+              placeholder="Select a vendor..."
+              searchPlaceholder="Search vendors..."
+              emptyText="No vendors found. Add one on the Vendors tab first."
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="text-xs text-gray-500">
+              Bill date
+              <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Vendor's invoice number
+              <input value={vendorRef} onChange={(e) => setVendorRef(e.target.value)} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Payment terms
+              <select value={terms} onChange={(e) => { setTerms(e.target.value); setDueDate(""); }} className={cls + " mt-1"}>
+                {Object.keys(INVOICE_TERM_DAYS).map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </label>
+            <label className="text-xs text-gray-500">
+              Due date
+              <input required type="date" value={effectiveDue} min={date} onChange={(e) => setDueDate(e.target.value)} className={cls + " mt-1"} />
+            </label>
+          </div>
+
+          <div className="space-y-3">
+            <FieldLabel>Lines</FieldLabel>
+            {lines.map((l, i) => {
+              const p = itemById[l.product_id];
+              return (
+                <div key={i} className="border border-gray-200 rounded-lg p-3 space-y-2">
+                  <div className="flex items-start gap-3">
+                    {l.kind === "item" ? (
+                      <ItemThumb product={p} size={56} />
+                    ) : (
+                      <div style={{ width: 56, height: 56 }} className="shrink-0 rounded-lg bg-gray-100 flex items-center justify-center text-gray-300">
+                        <Receipt size={28} />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs">
+                        {[["item", "Item"], ["expense", "Expense"]].map(([k, label]) => (
+                          <button
+                            key={k}
+                            type="button"
+                            onClick={() => l.kind !== k && setLine(i, { kind: k, product_id: "", account_id: "", description: "", rate: "" })}
+                            className={`px-3 py-1 ${l.kind === k ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      {l.kind === "item" ? (
+                        <SearchSelect
+                          value={l.product_id}
+                          onChange={(v) => pickItem(i, v)}
+                          options={itemOptions}
+                          placeholder="Select an item..."
+                          searchPlaceholder="Search items..."
+                          emptyText="No items found"
+                        />
+                      ) : (
+                        <SearchSelect
+                          value={l.account_id}
+                          onChange={(v) => setLine(i, { account_id: v })}
+                          options={accountOptions}
+                          placeholder="Select an expense account..."
+                          searchPlaceholder="Search accounts..."
+                          emptyText="No expense accounts found. Add one on the Acc. tab."
+                        />
+                      )}
+                      <input
+                        placeholder="Description (optional)"
+                        value={l.description}
+                        onChange={(e) => setLine(i, { description: e.target.value })}
+                        className={cls}
+                      />
+                    </div>
+                    {lines.length > 1 && (
+                      <button
+                        type="button"
+                        title="Remove line"
+                        onClick={() => setLines((prev) => prev.filter((_, idx) => idx !== i))}
+                        className="shrink-0 border border-gray-300 rounded-lg p-2 text-gray-500 hover:bg-gray-50"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <label className="text-xs text-gray-500">
+                      Qty
+                      <input type="number" min="1" step="1" value={l.quantity}
+                        onChange={(e) => setLine(i, { quantity: e.target.value })} className={cls + " mt-1"} />
+                    </label>
+                    <label className="text-xs text-gray-500">
+                      Rate
+                      <input type="number" min="0" step="0.01" value={l.rate}
+                        onChange={(e) => setLine(i, { rate: e.target.value })} className={cls + " mt-1"} />
+                    </label>
+                    <div className="text-xs text-gray-500">
+                      Amount
+                      <p className="mt-1 py-2 text-sm font-medium text-gray-900">{formatRs(lineCents(l) / 100)}</p>
+                    </div>
+                  </div>
+
+                  {p && p.item_type === STOCK_TRACKED_TYPE && Number(l.quantity) > 0 && (
+                    <p className="text-xs text-green-700">+{Number(l.quantity)} will be added to stock.</p>
+                  )}
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setLines((prev) => [...prev, blankBillLine()])}
+              className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+            >
+              <Plus size={14} /> Add another line
+            </button>
+          </div>
+
+          <textarea rows={2} placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} className={cls} />
+
+          <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
+            <span>Total</span>
+            <span>{formatRs(totalCents / 100)}</span>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!canSave || submitting}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {submitting ? "Saving..." : "Save Bill"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+
+// ---------- Vendor payments (step 5: money out. Pays off bills + posts to the ledger, admin only) ----------
+function VendorPaymentsPage({ isAdmin, go }) {
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+
+  const load = async () => {
+    try {
+      setPayments(await getVendorPayments());
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleDelete = async (p) => {
+    if (!window.confirm(`Delete ${p.payment_number}? Its bills will be owed again and the ledger entry is removed.`)) return;
+    try {
+      await deleteVendorPayment(p.id);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const q = search.trim().toLowerCase();
+  const shown = payments.filter(
+    (p) => !q || [p.payment_number, p.vendor_name, p.reference].some((v) => (v || "").toLowerCase().includes(q))
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active="vendorpayments" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+
+      <main className="p-4 sm:p-6 max-w-3xl">
+        <div className="mb-5 flex gap-3 items-center">
+          <div className="flex-1">
+            <SearchBox value={search} onChange={setSearch} placeholder="Search payments made..." />
+          </div>
+          <button
+            onClick={() => setFormOpen(true)}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
+          >
+            + Pay Vendor
+          </button>
+        </div>
+
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : shown.length === 0 ? (
+          <p className="text-gray-400 text-center py-16">No payments made yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {shown.map((p) => {
+              const open = expandedId === p.id;
+              return (
+                <div key={p.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(open ? null : p.id)}
+                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">
+                        {p.payment_number} <span className="text-gray-400 font-normal">· {p.vendor_name}</span>
+                      </p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {formatJournalDate(p.payment_date)} · {p.payment_mode} from {p.paid_from_account_name}
+                      </p>
+                    </div>
+                    <span className="shrink-0 font-semibold text-red-700">{formatRs(p.amount)}</span>
+                    {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                  </button>
+
+                  {open && (
+                    <div className="border-t border-gray-100 p-3 space-y-3">
+                      {p.reference && <p className="text-sm text-gray-600">Reference: {p.reference}</p>}
+                      {p.notes && <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">{p.notes}</p>}
+                      <div className="text-sm space-y-1">
+                        <p className="text-xs text-gray-400 uppercase">Applied to</p>
+                        {p.allocations.map((a) => (
+                          <div key={a.id} className="flex justify-between">
+                            <span className="text-gray-900">{a.bill_number}</span>
+                            <span>{formatRs(a.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => handleDelete(p)}
+                        className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                      >
+                        <Trash2 size={14} /> Delete payment
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      {formOpen && <VendorPaymentForm onClose={() => setFormOpen(false)} onSaved={load} />}
+    </div>
+  );
+}
+
+// initialVendorId / initialBillId: used by the "Record payment" button on a bill
+function VendorPaymentForm({ initialVendorId = "", initialBillId = null, onClose, onSaved }) {
+  const [vendors, setVendors] = useState([]);
+  const [bills, setBills] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [vendorId, setVendorId] = useState(initialVendorId);
+  const [date, setDate] = useState(toISODate(new Date()));
+  const [mode, setMode] = useState("Cash");
+  const [paidFromId, setPaidFromId] = useState("");
+  const [reference, setReference] = useState("");
+  const [notes, setNotes] = useState("");
+  const [applied, setApplied] = useState({}); // bill id -> amount typed
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  useEffect(() => {
+    Promise.all([getVendors(), getPurchaseBills(), getAccounts()])
+      .then(([v, b, acc]) => {
+        setVendors(v);
+        setBills(b);
+        const sources = acc.filter((a) => PAID_FROM_ACCOUNT_TYPES.includes(a.account_type));
+        setAccounts(sources);
+        const preferred = sources.find((a) => a.account_type === "cash" || a.account_type === "bank") || sources[0];
+        if (preferred) setPaidFromId(preferred.id);
+        const start = b.find((x) => x.id === initialBillId);
+        if (start) setApplied({ [start.id]: String(start.balance_due) });
+      })
+      .catch((err) => setError(err.message));
+  }, []);
+
+  const owed = bills
+    .filter((b) => b.vendor_id === vendorId && b.status === "open" && b.balance_due > 0.004)
+    .sort((a, b) => (a.due_date < b.due_date ? -1 : 1));
+  const vendorOptions = vendors.map((v) => ({ value: v.id, label: v.name }));
+
+  const pickVendor = (id) => { setVendorId(id); setApplied({}); };
+  const setAmount = (id, value) => setApplied((prev) => ({ ...prev, [id]: value }));
+
+  const rows = owed.filter((b) => toCents(applied[b.id]) > 0);
+  const totalCents = rows.reduce((s, b) => s + toCents(applied[b.id]), 0);
+  const tooMuch = (b) => toCents(applied[b.id]) > toCents(b.balance_due);
+  const canSave = Boolean(vendorId) && Boolean(paidFromId) && rows.length > 0 && !rows.some(tooMuch);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createVendorPayment({
+        vendor_id: vendorId,
+        payment_date: date,
+        payment_mode: mode,
+        paid_from_account_id: Number(paidFromId),
+        reference: reference.trim() || null,
+        notes: notes.trim() || null,
+        allocations: rows.map((b) => ({ bill_id: b.id, amount: Number(applied[b.id]) })),
+      });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 max-h-[92vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-4">Pay Vendor</h2>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <FieldLabel>Vendor</FieldLabel>
+            <SearchSelect
+              value={vendorId}
+              onChange={pickVendor}
+              options={vendorOptions}
+              placeholder="Select a vendor..."
+              searchPlaceholder="Search vendors..."
+              emptyText="No vendors found"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label className="text-xs text-gray-500">
+              Payment date
+              <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Payment mode
+              <select value={mode} onChange={(e) => setMode(e.target.value)} className={cls + " mt-1"}>
+                {PAYMENT_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </label>
+            <label className="text-xs text-gray-500">
+              Paid from
+              <select value={paidFromId} onChange={(e) => setPaidFromId(e.target.value)} className={cls + " mt-1"}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <div className="space-y-2">
+            <FieldLabel>Bills to pay</FieldLabel>
+            {!vendorId ? (
+              <p className="text-sm text-gray-400">Pick a vendor to see what you owe them.</p>
+            ) : owed.length === 0 ? (
+              <p className="text-sm text-gray-400">You have no unpaid bills from this vendor.</p>
+            ) : (
+              owed.map((b) => (
+                <div key={b.id} className="border border-gray-200 rounded-lg p-3 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">
+                      {b.bill_number}
+                      {b.vendor_ref && <span className="text-gray-400 font-normal"> · {b.vendor_ref}</span>}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      Due {formatJournalDate(b.due_date)} · Owed {formatRs(b.balance_due)}
+                    </p>
+                    {tooMuch(b) && <p className="text-xs text-red-600">More than is owed.</p>}
+                  </div>
+                  <input
+                    type="number" min="0" step="0.01" placeholder="0.00"
+                    value={applied[b.id] ?? ""}
+                    onChange={(e) => setAmount(b.id, e.target.value)}
+                    className={cls + " !w-28"}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setAmount(b.id, String(b.balance_due))}
+                    className="text-xs text-blue-600 font-medium whitespace-nowrap"
+                  >
+                    Pay in full
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <input placeholder="Reference (cheque no., transfer ID...)" value={reference} onChange={(e) => setReference(e.target.value)} className={cls} />
+            <input placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} className={cls} />
+          </div>
+
+          <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
+            <span>Amount paid</span>
+            <span>{formatRs(totalCents / 100)}</span>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!canSave || submitting}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {submitting ? "Saving..." : "Save Payment"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 // ---------- Bill (bulk stock entry, admin only) ----------
 // A "bill" is a batch of restocks saved together (see /api/bills on the backend).
@@ -6323,23 +7085,32 @@ function AppShell() {
     );
   } else if (searchParams.get("view") === "bill" && isAdmin) {
     page = <BillPage go={setSearchParams} autoCreateToken={quickBillToken} />;
-   } else if (searchParams.get("view") === "issued" && isAdmin) {
-    page = <IssuedPage go={setSearchParams} autoCreateToken={quickIssuedToken} />;
+  } else if (searchParams.get("view") === "issued" && isAdmin) {
+    page = (
+      <IssuedPage go={setSearchParams} autoCreateToken={quickIssuedToken} />
+    );
   } else if (searchParams.get("view") === "accounting" && isAdmin) {
-    page = searchParams.get("account")
-      ? <AccountDetail accountId={searchParams.get("account")} go={setSearchParams} fromParam={searchParams.get("from")} />
-      : <AccountingPage isAdmin={isAdmin} go={setSearchParams} />;
+    page = searchParams.get("account") ? (
+      <AccountDetail
+        accountId={searchParams.get("account")}
+        go={setSearchParams}
+        fromParam={searchParams.get("from")}
+      />
+    ) : (
+      <AccountingPage isAdmin={isAdmin} go={setSearchParams} />
+    );
   } else if (searchParams.get("view") === "journals" && isAdmin) {
     page = <JournalsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "customers" && isAdmin) {
     page = <CustomersPage isAdmin={isAdmin} go={setSearchParams} />;
-
   } else if (searchParams.get("view") === "invoices" && isAdmin) {
     page = <InvoicesPage isAdmin={isAdmin} go={setSearchParams} />;
-
   } else if (searchParams.get("view") === "payments" && isAdmin) {
     page = <PaymentsPage isAdmin={isAdmin} go={setSearchParams} />;
-
+  } else if (searchParams.get("view") === "purchases" && isAdmin) {
+    page = <PurchaseBillsPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "vendorpayments" && isAdmin) {
+    page = <VendorPaymentsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "vendors" && isAdmin) {
     page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "manage" && isAdmin) {
@@ -6363,7 +7134,7 @@ function AppShell() {
     );
   } else {
     page = (
-    <DepartmentHome
+      <DepartmentHome
         isAdmin={isAdmin}
         onSelect={(slug) => setSearchParams({ dept: slug })}
         refreshToken={refreshToken}

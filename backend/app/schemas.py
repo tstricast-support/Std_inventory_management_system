@@ -408,3 +408,86 @@ class PaymentOut(BaseModel):
     notes: Optional[str] = None
     created_at: datetime
     allocations: List[PaymentAllocationOut] = []
+
+# ---------- Purchase bills (step 5) ----------
+class PurchaseBillItemCreate(BaseModel):
+    product_id: Optional[int] = None     # an item (stock goes up for Inventory Parts) ...
+    account_id: Optional[int] = None     # ... OR an expense account. Exactly one of the two.
+    description: Optional[str] = None
+    quantity: int = 1
+    rate: float
+
+class PurchaseBillCreate(BaseModel):
+    vendor_id: int
+    bill_date: date
+    due_date: Optional[date] = None      # left empty -> due on the bill date
+    vendor_ref: Optional[str] = None
+    notes: Optional[str] = None
+    items: List[PurchaseBillItemCreate]
+
+class PurchaseBillItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    product_id: Optional[int] = None
+    account_id: Optional[int] = None
+    item_name: str
+    description: Optional[str] = None
+    quantity: int
+    rate: float
+    amount: float
+    product: Optional[InvoiceProductOut] = None
+
+class PurchaseBillOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    bill_number: str
+    vendor_id: int
+    vendor_name: str
+    vendor_ref: Optional[str] = None
+    bill_date: date
+    due_date: date
+    notes: Optional[str] = None
+    status: str
+    total: float
+    amount_paid: float
+    balance_due: float
+    created_at: datetime
+    items: List[PurchaseBillItemOut] = []
+
+
+# ---------- Vendor payments / payments made (step 5) ----------
+class VendorPaymentAllocationCreate(BaseModel):
+    bill_id: int
+    amount: float
+
+class VendorPaymentCreate(BaseModel):
+    vendor_id: int
+    payment_date: date
+    payment_mode: str = "Cash"
+    paid_from_account_id: int
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    allocations: List[VendorPaymentAllocationCreate]
+
+class VendorPaymentAllocationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    bill_id: int
+    bill_number: str
+    amount: float
+
+class VendorPaymentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    payment_number: str
+    vendor_id: int
+    vendor_name: str
+    payment_date: date
+    amount: float
+    payment_mode: str
+    paid_from_account_id: int
+    paid_from_account_name: str
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+    allocations: List[VendorPaymentAllocationOut] = []

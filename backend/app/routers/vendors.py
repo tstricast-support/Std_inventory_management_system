@@ -40,6 +40,12 @@ def delete_vendor(vendor_id: int, db: Session = Depends(get_db)):
     vendor = db.query(models.Vendor).get(vendor_id)
     if not vendor:
         raise HTTPException(404, "Vendor not found")
+
+    if (
+        db.query(models.PurchaseBill).filter(models.PurchaseBill.vendor_id == vendor_id).first()
+        or db.query(models.VendorPayment).filter(models.VendorPayment.vendor_id == vendor_id).first()
+    ):
+        raise HTTPException(400, "This vendor has bills or payments, so it can't be deleted")
     db.delete(vendor)
     db.commit()
     return {"message": "Deleted"}

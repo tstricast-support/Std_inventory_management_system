@@ -317,3 +317,102 @@ class PaymentAllocation(Base):
     @property
     def invoice_number(self):
         return self.invoice.invoice_number if self.invoice else ""
+
+
+# ---------- Step 5: purchase bills + vendor payments ----------
+class PurchaseBill(Base):
+    """A bill from a vendor. Saving it adds stock (Inventory Part lines) and posts a journal (see routers/purchase_bills.py).
+    Not the same as the old `Bill` above, which is only the quick "restock several items" batch."""
+    __tablename__ = "purchase_bills"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bill_number = Column(String(30), nullable=False, unique=True)   # PB-0001, PB-0002 ...
+    vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=False)
+    vendor_ref = Column(String(100))                                # the vendor's own invoice number
+    bill_date = Column(Date, nullable=False)
+    due_date = Column(Date, nullable=False)
+    notes = Column(Text)
+    status = Column(String(20), nullable=False, default="open", server_default="open")  # open / void
+    total = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    amount_paid = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")  # vendor payments fill this
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    vendor = relationship("Vendor")
+    items = relationship("PurchaseBillItem", back_populates="bill", cascade="all, delete-orphan",
+                         order_by="PurchaseBillItem.id")
+
+    @property
+    def vendor_name(self):
+        return self.vendor.name if self.vendor else ""
+
+    @property
+    def balance_due(self):
+        if self.status == "void":
+            return 0.0
+        return float(self.total or 0) - float(self.amount_paid or 0)
+
+
+class PurchaseBillItem(Base):
+    """One bill line: either an item (product_id) or a plain expense (account_id)."""
+    __tablename__ = "purchase_bill_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bill_id = Column(Integer, ForeignKey("purchase_bills.id", ondelete="CASCADE"), nullable=False)
+    # SET NULL: deleting an item or account later must never delete the purchase history
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True)
+    item_name = Column(String(200), nullable=False)    # item name (or account name) at the time of purchase
+    description = Column(Text)
+    quantity = Column(Integer, nullable=False)
+    rate = Column(Numeric(12, 2), nullable=False, default=0)
+    amount = Column(Numeric(12, 2), nullable=False, default=0)
+
+    bill = relationship("PurchaseBill", back_populates="items")
+    product = relationship("Product")
+    account = relationship("Account")
+
+
+class VendorPayment(Base):
+    """Money paid to a vendor, applied to one or more of their bills."""
+    __tablename__ = "vendor_payments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    payment_number = Column(String(30), nullable=False, unique=True)   # VPAY-0001, VPAY-0002 ...
+    vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=False)
+    payment_date = Column(Date, nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False)
+    payment_mode = Column(String(30), nullable=False, default="Cash", server_default="Cash")
+    paid_from_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)   # where the money came from
+    reference = Column(String(100))
+    notes = Column(Text)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    vendor = relationship("Vendor")
+    paid_from_account = relationship("Account")
+    allocations = relationship("VendorPaymentAllocation", back_populates="payment", cascade="all, delete-orphan",
+                               order_by="VendorPaymentAllocation.id")
+
+    @property
+    def vendor_name(self):
+        return self.vendor.name if self.vendor else ""
+
+    @property
+    def paid_from_account_name(self):
+        return self.paid_from_account.name if self.paid_from_account else ""
+
+
+class VendorPaymentAllocation(Base):
+    """How much of a vendor payment was applied to one bill."""
+    __tablename__ = "vendor_payment_allocations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    payment_id = Column(Integer, ForeignKey("vendor_payments.id", ondelete="CASCADE"), nullable=False)
+    bill_id = Column(Integer, ForeignKey("purchase_bills.id"), nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False)
+
+    payment = relationship("VendorPayment", back_populates="allocations")
+    bill = relationship("PurchaseBill")
+
+    @property
+    def bill_number(self):
+        return self.bill.bill_number if self.bill else ""
