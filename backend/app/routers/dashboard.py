@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..account_types import ACCOUNT_CATEGORY
 from ..database import get_db
-from .reports import _money, _nets
+from .reports import _money, _nets, _bucket
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -17,7 +17,7 @@ def _month_start(today: date, back: int) -> date:
 
 
 @router.get("")
-def dashboard(db: Session = Depends(get_db)):
+def dashboard(year: int | None = None, db: Session = Depends(get_db)):
     today = date.today()
     accounts = db.query(models.Account).order_by(models.Account.name).all()
     nets = _nets(db, None, today)
@@ -89,6 +89,52 @@ def dashboard(db: Session = Depends(get_db)):
         .all()
     )
 
+        # ---- Zoho-style: receivables / payables split by how overdue they are ----
+    def _aged(documents):
+        buckets = {b: Decimal("0") for b in ("current", "d1_15", "d16_30", "d31_45", "d45_plus")}
+        for doc in documents:
+            balance = _money(doc.total) - _money(doc.amount_paid)
+            if balance > 0:
+                buckets[_bucket((today - doc.due_date).days)] += balance
+        out = {k: float(v) for k, v in buckets.items()}
+        out["total"] = float(sum(buckets.values(), Decimal("0")))
+        return out
+
+    recv_ageing = _aged(db.query(models.Invoice).filter(models.Invoice.status == "open").all())
+    pay_ageing = _aged(db.query(models.PurchaseBill).filter(models.PurchaseBill.status == "open").all())
+
+    # ---- Zoho-style: Sales / Receipts / Expenses for each month of the fiscal year (Jan-Dec) ----
+    fy = year or today.year
+    fy_start, fy_end = date(fy, 1, 1), date(fy, 12, 31)
+    fy_months = {
+        m: {"month": date(fy, m, 1).strftime("%b"), "year": fy,
+            "sales": Decimal("0"), "receipts": Decimal("0"), "expenses": Decimal("0")}
+        for m in range(1, 13)
+    }
+    for inv in db.query(models.Invoice).filter(
+        models.Invoice.status == "open", models.Invoice.invoice_date >= fy_start, models.Invoice.invoice_date <= fy_end
+    ).all():
+        fy_months[inv.invoice_date.month]["sales"] += _money(inv.total)
+    for pay in db.query(models.Payment).filter(
+        models.Payment.payment_date >= fy_start, models.Payment.payment_date <= fy_end
+    ).all():
+        fy_months[pay.payment_date.month]["receipts"] += _money(pay.amount)
+    fy_expense_rows = (
+        db.query(models.Journal.journal_date, models.JournalLine.debit, models.JournalLine.credit, models.Account.account_type)
+        .join(models.Journal, models.JournalLine.journal_id == models.Journal.id)
+        .join(models.Account, models.JournalLine.account_id == models.Account.id)
+        .filter(models.Journal.journal_date >= fy_start, models.Journal.journal_date <= fy_end)
+        .all()
+    )
+    for jdate, debit, credit, account_type in fy_expense_rows:
+        if ACCOUNT_CATEGORY.get(account_type) == "Expense":
+            fy_months[jdate.month]["expenses"] += _money(debit) - _money(credit)
+    fy_chart = [
+        {"month": r["month"], "year": r["year"], "sales": float(r["sales"]),
+         "receipts": float(r["receipts"]), "expenses": float(r["expenses"])}
+        for r in fy_months.values()
+    ]
+
     return {
         "as_of": today,
         "cash_total": float(cash_total), "cash_accounts": cash,
@@ -100,4 +146,12 @@ def dashboard(db: Session = Depends(get_db)):
         "top_expenses": top[:5],
         "low_stock_count": len(low),
         "low_stock": [{"id": p.id, "name": p.name, "quantity": p.quantity, "reorder_min": p.reorder_min} for p in low[:8]],
+                # ---- Zoho-style dashboard ----
+        "fiscal_year": fy,
+        "receivables_ageing": recv_ageing,
+        "payables_ageing": pay_ageing,
+        "fy_chart": fy_chart,
+        "fy_sales": sum(r["sales"] for r in fy_chart),
+        "fy_receipts": sum(r["receipts"] for r in fy_chart),
+        "fy_expenses": sum(r["expenses"] for r in fy_chart),
     }

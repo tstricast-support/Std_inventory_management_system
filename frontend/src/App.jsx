@@ -37,6 +37,7 @@ import {
   Banknote,
   TrendingUp,
   LayoutDashboard,
+  Home,
 } from "lucide-react";
 import "./index.css";
 
@@ -189,8 +190,10 @@ const getProfitLoss = (from, to) => reportRequest(`profit-and-loss?date_from=${f
 const getBalanceSheet = (asOf) => reportRequest(`balance-sheet?as_of=${asOf}`, "Failed to load Balance Sheet");
 const getAgeing = (kind, asOf) => reportRequest(`${kind}-ageing?as_of=${asOf}`, "Failed to load the ageing report");
 
-const getDashboard = async () => {
-  const res = await fetch(`${BASE_URL}/dashboard`);
+const getDashboard = async (year) => {
+  const res = await fetch(
+    `${BASE_URL}/dashboard${year ? `?year=${year}` : ""}`,
+  );
   if (!res.ok) throw new Error("Failed to load the dashboard");
   return res.json();
 };
@@ -2900,20 +2903,32 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
   return (
     <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
       <div className="flex flex-nowrap gap-2 justify-between items-start">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-bold text-gray-900 truncate">Tricast Stock Manager</h1>
-          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isAdmin ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}>
-            {isAdmin ? "Admin" : "Employee (Read Only)"}
-          </span>
-        </div>
+        {!isAdmin && (
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl font-bold text-gray-900 truncate">
+              STD OPERATION
+            </h1>
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+              Employee (Read Only)
+            </span>
+          </div>
+        )}
 
-        <div className="flex items-center gap-2 shrink-0 relative">
+        <div className="flex items-center gap-2 shrink-0 relative ml-auto">
           <div className="relative hidden md:block w-56 lg:w-72">
-            <SearchBox value={query} onChange={setQuery} placeholder="Search items, vendors, accounts..." onFocus={loadSearchData} />
+            <SearchBox
+              value={query}
+              onChange={setQuery}
+              placeholder="Search items, vendors, accounts..."
+              onFocus={loadSearchData}
+            />
             {resultsPanel}
           </div>
           <button
-            onClick={() => { setSearchOpen((v) => !v); loadSearchData(); }}
+            onClick={() => {
+              setSearchOpen((v) => !v);
+              loadSearchData();
+            }}
             aria-label="Search"
             className="md:hidden p-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
           >
@@ -2926,7 +2941,10 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
               <LowStockBell />
               {actions && (
                 <>
-                  <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => setMenuOpen(false)}
+                  />
                   <div
                     className="absolute right-0 top-full mt-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-2 flex flex-col gap-2 min-w-[190px]"
                     onClick={() => setMenuOpen(false)}
@@ -2943,7 +2961,11 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
                   </div>
                 </>
               )}
-              <AddProductButton ref={addProductRef} onCreated={onProductAdded} hideTrigger={hideAddProduct} />
+              <AddProductButton
+                ref={addProductRef}
+                onCreated={onProductAdded}
+                hideTrigger={hideAddProduct}
+              />
             </>
           )}
         </div>
@@ -2951,15 +2973,26 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
 
       {searchOpen && (
         <div className="md:hidden relative mt-3">
-          <SearchBox value={query} onChange={setQuery} placeholder="Search items, vendors, accounts..." onFocus={loadSearchData} />
+          <SearchBox
+            value={query}
+            onChange={setQuery}
+            placeholder="Search items, vendors, accounts..."
+            onFocus={loadSearchData}
+          />
           {resultsPanel}
         </div>
       )}
 
-      <HomeTabs active={active} isAdmin={isAdmin} onChange={onTab} />
+      {!isAdmin && (
+        <HomeTabs active={active} isAdmin={isAdmin} onChange={onTab} />
+      )}
 
       {restockingProduct && (
-        <RestockModal product={restockingProduct} onSubmit={handleRestock} onClose={() => setRestockingProduct(null)} />
+        <RestockModal
+          product={restockingProduct}
+          onSubmit={handleRestock}
+          onClose={() => setRestockingProduct(null)}
+        />
       )}
     </header>
   );
@@ -9942,6 +9975,386 @@ function GlobalAdminShortcuts({ isAdmin, defaultDepartment, onProductCreated, on
   );
 }
 
+// ---------- Zoho-style shell + dashboard (admin) ----------
+// Sidebar sections, in order. A thin line is drawn between sections.
+const ZOHO_NAV = [
+  [
+    { id: "home", label: "Home", Icon: Home },
+    { id: "customers", label: "Customers", Icon: Users },
+    { id: "items", label: "Items", Icon: Tag, departments: true },
+  ],
+  [
+    { id: "quotes", label: "Quotes", Icon: FileSignature },
+    { id: "salesorders", label: "Sales Orders", Icon: ClipboardCheck },
+    { id: "invoices", label: "Invoices", Icon: FileText },
+    { id: "payments", label: "Payments Received", Icon: Wallet },
+    { id: "creditnotes", label: "Credit Notes", Icon: RotateCcw },
+  ],
+  [
+    { id: "vendors", label: "Vendors", Icon: Truck },
+    { id: "purchases", label: "Bills", Icon: ShoppingCart },
+    { id: "vendorpayments", label: "Payments Made", Icon: CreditCard },
+  ],
+  [
+    { id: "bill", label: "Stock Bill", Icon: Receipt },
+    { id: "issued", label: "Issued", Icon: ClipboardList },
+    { id: "manage", label: "Manage", Icon: Settings },
+  ],
+  [
+    { id: "accounting", label: "Chart of Accounts", Icon: Landmark },
+    { id: "journals", label: "Manual Journals", Icon: BookOpen },
+    { id: "banking", label: "Banking", Icon: Banknote },
+    { id: "taxes", label: "Taxes", Icon: Percent },
+    { id: "reports", label: "Reports", Icon: TrendingUp },
+  ],
+];
+
+function ZohoSidebar({ onNavigate }) {
+  const [params, setParams] = useSearchParams();
+  const [deptOpen, setDeptOpen] = useState(true);
+  const dept = params.get("dept");
+  const activeId = dept ? "items" : params.get("view") || "home";
+
+  const go = (id) => {
+    setParams(id === "home" ? {} : { view: id });
+    onNavigate?.();
+  };
+  const goDept = (slug) => {
+    setParams({ dept: slug });
+    onNavigate?.();
+  };
+
+  const rowCls = (active) =>
+    `w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-left transition ${
+      active ? "bg-blue-500 text-white" : "text-gray-300 hover:bg-white/10 hover:text-white"
+    }`;
+
+  return (
+    <div className="flex flex-col min-h-full">
+      <div className="flex items-center gap-2 px-4 h-14 bg-black/20 text-white shrink-0">
+        <LayoutGrid size={22} />
+        <span className="text-lg font-semibold">Tricast</span>
+      </div>
+
+      <nav className="flex-1 px-2 py-3">
+        {ZOHO_NAV.map((group, gi) => (
+          <div key={gi} className={gi > 0 ? "mt-2 pt-2 border-t border-white/10" : ""}>
+            {group.map(({ id, label, Icon, departments }) => (
+              <div key={id}>
+                <button onClick={() => go(id)} className={rowCls(activeId === id)}>
+                  <Icon size={16} className="shrink-0" />
+                  <span className="flex-1 truncate">{label}</span>
+                  {departments && (
+                    <span
+                      role="button"
+                      aria-label="Show departments"
+                      onClick={(e) => { e.stopPropagation(); setDeptOpen((v) => !v); }}
+                      className="p-0.5 rounded hover:bg-white/20"
+                    >
+                      <ChevronDown size={14} className={`transition ${deptOpen ? "" : "-rotate-90"}`} />
+                    </span>
+                  )}
+                </button>
+
+                {departments && deptOpen && (
+                  <div className="ml-4 mt-0.5 mb-1 pl-3 border-l border-white/10 space-y-0.5">
+                    {DEPARTMENTS.map((d) => (
+                      <button
+                        key={d.slug}
+                        onClick={() => goDept(d.slug)}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-left ${
+                          dept === d.slug ? "bg-blue-500/80 text-white" : "text-gray-400 hover:bg-white/10 hover:text-white"
+                        }`}
+                      >
+                        <span className="w-4 h-4 shrink-0 rounded bg-white flex items-center justify-center overflow-hidden">
+                          <img src={d.logo} alt="" className="max-w-full max-h-full object-contain" />
+                        </span>
+                        <span className="truncate">{d.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
+      </nav>
+    </div>
+  );
+}
+
+function ZohoLayout({ children }) {
+  const [drawer, setDrawer] = useState(false);
+  return (
+    <div className="flex min-h-screen bg-gray-50">
+      <aside className="hidden md:block w-56 shrink-0 bg-[#1f2640] sticky top-0 self-start h-screen overflow-y-auto">
+        <ZohoSidebar />
+      </aside>
+
+      {drawer && (
+        <div className="md:hidden fixed inset-0 z-40 flex">
+          <div className="w-64 max-w-[80%] bg-[#1f2640] h-full overflow-y-auto">
+            <ZohoSidebar onNavigate={() => setDrawer(false)} />
+          </div>
+          <div className="flex-1 bg-black/40" onClick={() => setDrawer(false)} />
+        </div>
+      )}
+
+      <div className="flex-1 min-w-0">
+        <div className="md:hidden flex items-center gap-3 bg-[#1f2640] text-white px-4 py-3">
+          <button onClick={() => setDrawer(true)} aria-label="Open menu" className="p-1 -ml-1 rounded hover:bg-white/10">
+            <Menu size={22} />
+          </button>
+          <span className="font-semibold">Tricast Stock Manager</span>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// colours taken from the Zoho dashboard: blue = not due yet, then yellow -> orange -> red the later it is
+const AGE_BUCKETS = [
+  ["current", "Current", "#2f80ed"],
+  ["d1_15", "1-15 Days", "#fdd47a"],
+  ["d16_30", "16-30 Days", "#fcb934"],
+  ["d31_45", "31-45 Days", "#fba91f"],
+  ["d45_plus", "Above 45 days", "#f4623a"],
+];
+
+function AgeingCard({ title, ageing, onNew, newLabel = "New" }) {
+  const total = ageing?.total || 0;
+  const amount = (key) => formatRs(ageing?.[key] || 0);
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg mb-5 overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200">
+        <h2 className="text-base sm:text-lg font-medium text-gray-800">{title}</h2>
+        {onNew && (
+          <button onClick={onNew} className="flex items-center gap-1.5 text-sm text-gray-700 hover:text-blue-600">
+            <span className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center"><Plus size={13} /></span>
+            {newLabel}
+          </button>
+        )}
+      </div>
+
+      <div className="px-5 pt-3 pb-4">
+        <p className="text-xs text-gray-600 mb-1.5">{title} {formatRs(total)}</p>
+        <div className="flex h-2.5 rounded-full overflow-hidden bg-gray-200">
+          {total > 0 &&
+            AGE_BUCKETS.map(([key, , color]) =>
+              ageing[key] > 0 ? <div key={key} style={{ width: `${(ageing[key] / total) * 100}%`, background: color }} /> : null
+            )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-y-4 px-5 py-4 border-t border-gray-200">
+        <div className="md:border-r md:border-gray-200 md:pr-4">
+          <p className="text-[11px] font-medium uppercase text-blue-500">Current</p>
+          <p className="text-lg sm:text-xl text-gray-900 mt-1">{amount("current")}</p>
+        </div>
+        <div className="col-span-2 md:col-span-4 md:pl-4">
+          <p className="text-[11px] font-medium uppercase text-orange-500">Overdue</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-y-3 gap-x-4 mt-1">
+            {AGE_BUCKETS.slice(1).map(([key, label]) => (
+              <div key={key}>
+                <p className="text-lg sm:text-xl text-gray-900">{amount(key)}</p>
+                <p className="text-xs text-gray-500">{label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// round the top of the chart up to a "nice" number and return evenly spaced grid lines
+function niceTicks(peak) {
+  const raw = Math.max(peak, 1) / 5;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
+  const count = Math.max(1, Math.ceil(peak / step));
+  return { ticks: Array.from({ length: count + 1 }, (_, i) => i * step), top: count * step };
+}
+const tickLabel = (n) => (n >= 1000 ? `${+(n / 1000).toFixed(1)} K` : String(n));
+
+function SalesExpensesChart({ rows }) {
+  const peak = Math.max(0, ...rows.flatMap((r) => [r.sales, r.receipts, r.expenses]));
+  const { ticks, top } = niceTicks(peak || 20000);
+  const H = 230;
+  const pct = (v) => (v > 0 ? `${Math.max(1, (v / top) * 100)}%` : "0%");
+  return (
+    <div className="flex">
+      <div className="relative w-12 shrink-0" style={{ height: H }}>
+        {ticks.map((t) => (
+          <span key={t} className="absolute right-2 text-[11px] text-gray-500 translate-y-1/2" style={{ bottom: `${(t / top) * 100}%` }}>
+            {tickLabel(t)}
+          </span>
+        ))}
+      </div>
+      <div className="flex-1 min-w-0 overflow-x-auto">
+        <div className="min-w-[560px]">
+          <div className="relative" style={{ height: H }}>
+            {ticks.map((t) => (
+              <div key={t} className="absolute left-0 right-0 border-t border-gray-100" style={{ bottom: `${(t / top) * 100}%` }} />
+            ))}
+            <div className="absolute inset-0 flex justify-around">
+              {rows.map((r) => (
+                <div key={r.month} className="flex items-end gap-0.5 h-full">
+                  <div className="w-2.5 rounded-t-sm bg-[#2f80ed]" style={{ height: pct(r.sales) }} title={`Sales ${formatRs(r.sales)}`} />
+                  <div className="w-2.5 rounded-t-sm bg-[#27ae60]" style={{ height: pct(r.receipts) }} title={`Receipts ${formatRs(r.receipts)}`} />
+                  {r.expenses > 0 && (
+                    <div className="w-2.5 rounded-t-sm bg-[#eb5757]" style={{ height: pct(r.expenses) }} title={`Expenses ${formatRs(r.expenses)}`} />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="flex justify-around mt-2">
+            {rows.map((r) => (
+              <div key={r.month} className="text-center w-8">
+                <p className="text-[11px] text-gray-600 leading-tight">{r.month}</p>
+                <p className="text-[9px] text-gray-400 leading-tight">{r.year}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ZohoDashboard({ isAdmin, go, onProductAdded }) {
+  const thisYear = new Date().getFullYear();
+  const [year, setYear] = useState(thisYear);
+  const [tab, setTab] = useState("dashboard");
+  const { data, loading, error } = useReport(() => getDashboard(year), [year]);
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <AppHeader isAdmin={isAdmin} active="home" onTab={() => {}} onProductAdded={onProductAdded} />
+
+      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 pt-5">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-lg border border-gray-200 flex items-center justify-center text-gray-400 shrink-0">
+            <Landmark size={22} />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-xl font-medium text-gray-900 truncate">Hello, Admin</h1>
+            <p className="text-sm text-gray-500 truncate">Tricast</p>
+          </div>
+        </div>
+        <div className="flex gap-6 mt-4 overflow-x-auto">
+          {[["dashboard", "Dashboard"], ["stock", "Stock Alerts"]].map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`pb-3 text-sm whitespace-nowrap border-b-2 ${
+                tab === id ? "border-blue-500 text-gray-900 font-medium" : "border-transparent text-gray-500 hover:text-gray-800"
+              }`}
+            >
+              {label}
+              {id === "stock" && data?.low_stock_count > 0 && (
+                <span className="ml-1.5 bg-red-500 text-white text-[10px] rounded-full px-1.5 py-0.5">{data.low_stock_count}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <main className="p-4 sm:p-6 max-w-6xl">
+        <ReportBody loading={loading} error={error} data={data}>
+          {data && tab === "dashboard" && (
+            <>
+              <AgeingCard title="Total Receivables" ageing={data.receivables_ageing} onNew={() => go({ view: "invoices" })} />
+              <AgeingCard title="Total Payables" ageing={data.payables_ageing} onNew={() => go({ view: "purchases" })} />
+
+              <div className="bg-white border border-gray-200 rounded-lg mb-5 overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200">
+                  <h2 className="text-base sm:text-lg font-medium text-gray-800">Sales and Expenses</h2>
+                  <select
+                    value={year}
+                    onChange={(e) => setYear(Number(e.target.value))}
+                    className="text-sm text-gray-700 bg-transparent focus:outline-none cursor-pointer"
+                  >
+                    <option value={thisYear}>This Fiscal Year</option>
+                    <option value={thisYear - 1}>Last Fiscal Year</option>
+                  </select>
+                </div>
+                <div className="flex flex-col md:flex-row">
+                  <div className="flex-1 min-w-0 p-5">
+                    <SalesExpensesChart rows={data.fy_chart} />
+                    <p className="text-xs text-gray-500 mt-5">* Sales value displayed is inclusive of tax.</p>
+                  </div>
+                  <div className="md:w-60 shrink-0 border-t md:border-t-0 md:border-l border-gray-200 p-5 space-y-6">
+                    <div>
+                      <p className="text-sm text-[#2f80ed]">Total Sales</p>
+                      <p className="text-xl sm:text-2xl text-gray-900 mt-1">{formatRs(data.fy_sales)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-[#27ae60]">Total Receipts</p>
+                      <p className="text-xl sm:text-2xl text-gray-900 mt-1">{formatRs(data.fy_receipts)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-[#eb5757]">Total Expenses</p>
+                      <p className="text-xl sm:text-2xl text-gray-900 mt-1">{formatRs(data.fy_expenses)}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="px-5 py-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+                    <h2 className="text-base font-medium text-gray-800">Cash & Bank</h2>
+                    <button onClick={() => go({ view: "banking" })} className="text-xs text-blue-600 hover:underline">View all</button>
+                  </div>
+                  <div className="px-5 py-2">
+                    {data.cash_accounts.length === 0 && <p className="text-xs text-gray-400 py-2">No cash or bank accounts yet</p>}
+                    {data.cash_accounts.map((a) => <ReportLine key={a.id} label={a.name} amount={a.balance} />)}
+                    {data.cash_accounts.length > 0 && <ReportLine label="Total" amount={data.cash_total} bold />}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="px-5 py-3 bg-gray-50 border-b border-gray-200">
+                    <h2 className="text-base font-medium text-gray-800">Top Expenses (this year)</h2>
+                  </div>
+                  <div className="px-5 py-2">
+                    {data.top_expenses.length === 0 && <p className="text-xs text-gray-400 py-2">No expenses yet</p>}
+                    {data.top_expenses.map((a) => <ReportLine key={a.id} label={a.name} amount={a.amount} />)}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {data && tab === "stock" && (
+            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden max-w-2xl">
+              <div className="px-5 py-3 bg-gray-50 border-b border-gray-200">
+                <h2 className="text-base font-medium text-gray-800">Low stock ({data.low_stock_count})</h2>
+              </div>
+              <div className="px-5 py-2">
+                {data.low_stock.length === 0 && <p className="text-xs text-gray-400 py-3">All items are above their reorder level</p>}
+                {data.low_stock.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => go({ view: "items", item: String(p.id), from: "home" })}
+                    className="w-full flex justify-between gap-3 py-2 text-sm text-left hover:bg-gray-50"
+                  >
+                    <span className="text-gray-700 truncate">{p.name}</span>
+                    <span className="shrink-0 text-red-600">{p.quantity} / min {p.reorder_min}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </ReportBody>
+      </main>
+    </div>
+  );
+}
+
 // ---------- Picks home / items / a department, using the URL query ----------
 //   /?dept=i-lab                 -> department stock
 //   /?view=items                 -> flat item list (subitems nested)
@@ -10031,7 +10444,13 @@ function AppShell() {
   } else if (searchParams.get("view") === "reports" && isAdmin) {
     page = <ReportsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "dashboard" && isAdmin) {
-    page = <DashboardPage isAdmin={isAdmin} go={setSearchParams} />;
+    page = (
+      <ZohoDashboard
+        isAdmin={isAdmin}
+        go={setSearchParams}
+        onProductAdded={refresh}
+      />
+    );
   } else if (searchParams.get("view") === "vendors" && isAdmin) {
     page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "manage" && isAdmin) {
@@ -10053,6 +10472,14 @@ function AppShell() {
         onProductAdded={refresh}
       />
     );
+  } else if (isAdmin) {
+    page = (
+      <ZohoDashboard
+        isAdmin={isAdmin}
+        go={setSearchParams}
+        onProductAdded={refresh}
+      />
+    );
   } else {
     page = (
       <DepartmentHome
@@ -10067,7 +10494,7 @@ function AppShell() {
 
   return (
     <>
-      {page}
+      {isAdmin ? <ZohoLayout>{page}</ZohoLayout> : page}
       <GlobalAdminShortcuts
         isAdmin={isAdmin}
         defaultDepartment={department ? department.slug : DEPARTMENTS[0].slug}
@@ -10101,4 +10528,5 @@ function NotFound() {
       </div>
     </div>
   );
+
 }
