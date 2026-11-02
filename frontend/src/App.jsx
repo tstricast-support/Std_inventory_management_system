@@ -10213,7 +10213,7 @@ function ZohoSidebar({ onNavigate }) {
     <div className="flex flex-col min-h-full">
       <div className="flex items-center gap-2 px-4 h-14 bg-black/20 text-white shrink-0">
         <LayoutGrid size={22} />
-        <span className="text-lg font-semibold">Tricast</span>
+        <span className="text-lg font-semibold">STD</span>
       </div>
 
       <nav className="flex-1 px-2 py-3">
@@ -10309,7 +10309,7 @@ function ZohoLayout({ children }) {
           <button onClick={() => setDrawer(true)} aria-label="Open menu" className="p-1 -ml-1 rounded hover:bg-white/10">
             <Menu size={22} />
           </button>
-          <span className="font-semibold">Tricast Stock Manager</span>
+          <span className="font-semibold">STD OPERATION</span>
         </div>
         {children}
       </div>
@@ -10445,7 +10445,7 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
           </div>
           <div className="min-w-0">
             <h1 className="text-xl font-medium text-gray-900 truncate">Hello, Admin</h1>
-            <p className="text-sm text-gray-500 truncate">Tricast</p>
+            <p className="text-sm text-gray-500 truncate">STD OPERATION</p>
           </div>
         </div>
         <div className="flex gap-6 mt-4 overflow-x-auto">
