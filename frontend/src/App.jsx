@@ -38,6 +38,7 @@ import {
   TrendingUp,
   LayoutDashboard,
   Home,
+  Palette,
 } from "lucide-react";
 import "./index.css";
 
@@ -62,7 +63,7 @@ const DEPARTMENTS = [
 async function getProducts(department) {
   const url = department
     ? `${BASE_URL}/products/?department=${department}`
-    : `${BASE_URL}/products/`;
+    : `${BASE_URL}/products/`; 
   const res = await fetch(url);
   if (!res.ok) throw new Error("Failed to fetch products");
   return res.json();
@@ -2761,6 +2762,157 @@ function LowStockBell() {
   );
 }
 
+// ---------- App appearance: theme / accent colour / text size (whole app, saved on this device) ----------
+// The colours themselves live in src/index.css (html[data-theme=...] rules); this only picks + remembers them.
+const APP_THEME_KEY = "app_theme_v1";
+const APP_THEMES = [
+  { id: "light", name: "Light", note: "Default look", swatch: ["#f9fafb", "#ffffff", "#1f2640"], accent: "blue" },
+  { id: "dark", name: "Dark", note: "Easy on the eyes", swatch: ["#0f172a", "#1e293b", "#0b1220"], accent: "blue" },
+  { id: "quickbooks", name: "QuickBooks", note: "Blue-grey with green accent", swatch: ["#dfe7ef", "#ffffff", "#0f3a5f"], accent: "green" },
+];
+const APP_ACCENTS = [
+  { id: "blue", name: "Blue", color: "#2563eb" },
+  { id: "green", name: "Green", color: "#16a34a" },
+  { id: "purple", name: "Purple", color: "#9333ea" },
+  { id: "orange", name: "Orange", color: "#ea580c" },
+  { id: "teal", name: "Teal", color: "#0d9488" },
+  { id: "rose", name: "Rose", color: "#e11d48" },
+];
+const APP_SIZES = [["small", "Small"], ["normal", "Normal"], ["large", "Large"]];
+const APP_THEME_DEFAULT = { theme: "light", accent: "blue", size: "normal" };
+
+function loadAppTheme() {
+  try {
+    const s = JSON.parse(localStorage.getItem(APP_THEME_KEY) || "null");
+    if (s && typeof s === "object") {
+      return {
+        theme: APP_THEMES.some((t) => t.id === s.theme) ? s.theme : APP_THEME_DEFAULT.theme,
+        accent: APP_ACCENTS.some((a) => a.id === s.accent) ? s.accent : APP_THEME_DEFAULT.accent,
+        size: APP_SIZES.some(([id]) => id === s.size) ? s.size : APP_THEME_DEFAULT.size,
+      };
+    }
+  } catch (e) { /* broken saved data: use defaults */ }
+  return APP_THEME_DEFAULT;
+}
+
+function applyAppTheme(s) {
+  const el = document.documentElement;
+  el.setAttribute("data-theme", s.theme);
+  el.setAttribute("data-accent", s.accent);
+  el.setAttribute("data-size", s.size);
+}
+applyAppTheme(loadAppTheme()); // runs once when the app loads, before the first screen is drawn
+
+// Slide-in panel. Open it from anywhere with: window.dispatchEvent(new Event("app:appearance"))
+function ThemePanel() {
+  const [open, setOpen] = useState(false);
+  const [s, setS] = useState(loadAppTheme);
+
+  useEffect(() => {
+    const show = () => setOpen(true);
+    window.addEventListener("app:appearance", show);
+    return () => window.removeEventListener("app:appearance", show);
+  }, []);
+
+  const change = (patch) => {
+    const next = { ...s, ...patch };
+    setS(next);
+    applyAppTheme(next);
+    try { localStorage.setItem(APP_THEME_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked */ }
+  };
+
+  if (!open) return null;
+
+  const label = "text-xs font-semibold text-gray-500 uppercase mb-2";
+  return (
+    <div className="fixed inset-0 z-[60] flex justify-end bg-black/40" onClick={() => setOpen(false)}>
+      <div
+        className="w-full max-w-sm h-full overflow-y-auto bg-white text-gray-900 p-5 space-y-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Appearance</h2>
+          <button type="button" onClick={() => setOpen(false)} className="text-gray-500 hover:text-gray-900 text-xl leading-none">✕</button>
+        </div>
+
+        <section>
+          <h3 className={label}>Theme</h3>
+          <div className="space-y-2">
+            {APP_THEMES.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => change({ theme: t.id, accent: t.accent })}
+                className={`w-full flex items-center gap-3 border rounded-lg px-3 py-2.5 text-left ${
+                  s.theme === t.id ? "border-blue-600 ring-1 ring-blue-600" : "border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                <span className="flex shrink-0">
+                  {t.swatch.map((c) => <span key={c} className="w-6 h-6 border border-gray-300" style={{ background: c }} />)}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm font-medium">{t.name}</span>
+                  <span className="block text-xs text-gray-500">{t.note}</span>
+                </span>
+                {s.theme === t.id && <span className="text-blue-600">✓</span>}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section>
+          <h3 className={label}>Accent colour</h3>
+          <div className="flex flex-wrap gap-3">
+            {APP_ACCENTS.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                title={a.name}
+                aria-label={a.name}
+                onClick={() => change({ accent: a.id })}
+                className={`w-9 h-9 rounded-full flex items-center justify-center text-white text-sm ${
+                  s.accent === a.id ? "ring-2 ring-offset-2 ring-gray-400" : ""
+                }`}
+                style={{ background: a.color }}
+              >
+                {s.accent === a.id ? "✓" : ""}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section>
+          <h3 className={label}>Text size</h3>
+          <div className="flex">
+            {APP_SIZES.map(([id, name]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => change({ size: id })}
+                className={`flex-1 px-3 py-1.5 text-sm border ${
+                  s.size === id ? "bg-blue-600 border-blue-600 text-white" : "border-gray-300 text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <div className="flex gap-2 pt-2">
+          <button type="button" onClick={() => change(APP_THEME_DEFAULT)} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+            Reset
+          </button>
+          <button type="button" onClick={() => setOpen(false)} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700">
+            Done
+          </button>
+        </div>
+        <p className="text-xs text-gray-400">Applies to every page. Saved automatically on this device.</p>
+      </div>
+    </div>
+  );
+}
+
 function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddProduct, inlineAction }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -2934,6 +3086,14 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
             className="md:hidden p-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
           >
             <Search size={18} />
+          </button>
+          <button
+            onClick={() => window.dispatchEvent(new Event("app:appearance"))}
+            aria-label="Appearance"
+            title="Appearance"
+            className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
+          >
+            <Palette size={18} />
           </button>
 
           {isAdmin && (
@@ -5939,12 +6099,116 @@ function AccountDetail({ accountId, go, fromParam }) {
     </div>
   );
 }
+// ---------- Accounting page: user-customisable layout (QuickBooks / Zoho style) ----------
+const ACCT_THEMES = {
+  quickbooks: {
+    name: "QuickBooks Blue",
+    swatch: ["#4b5b8c", "#8cc21f", "#e6eefb"],
+    page: "bg-[#dfe7ef]", panel: "bg-white border-gray-300", strip: "bg-[#f1f3f6] border-gray-200",
+    head: "bg-[#eef1f5] text-gray-500 border-gray-300", line: "border-gray-200",
+    rowA: "bg-white", rowB: "bg-[#e6eefb]", hover: "", sel: "bg-[#4e9a1e] text-white",
+    text: "text-gray-800", sub: "text-gray-500", selSub: "text-white/80", title: "text-gray-700",
+    input: "bg-white border-gray-300 text-gray-800", btn: "bg-green-600 hover:bg-green-700 text-white",
+    groupRow: "bg-[#d5e0f2] text-gray-700", boxText: "text-white",
+    box: { Asset: "bg-[#4b5b8c]", Liability: "bg-[#f0b83a]", Equity: "bg-[#7d9cc0]", Income: "bg-[#8cc21f]", Expense: "bg-[#e0452b]" },
+  },
+  zoho: {
+    name: "Zoho Light",
+    swatch: ["#2563eb", "#ffffff", "#f4f5f9"],
+    page: "bg-[#f4f5f9]", panel: "bg-white border-gray-200", strip: "bg-transparent border-transparent",
+    head: "bg-[#f9fafc] text-gray-500 border-gray-200", line: "border-gray-100",
+    rowA: "bg-white", rowB: "bg-white", hover: "hover:bg-[#f5f8ff]", sel: "bg-[#e7efff] text-[#1d4ed8]",
+    text: "text-gray-800", sub: "text-gray-500", selSub: "text-blue-500", title: "text-gray-800",
+    input: "bg-white border-gray-300 text-gray-800", btn: "bg-[#2563eb] hover:bg-blue-700 text-white",
+    groupRow: "bg-[#f3f4f8] text-gray-600", boxText: "text-gray-800",
+    box: { Asset: "bg-[#e0ebff]", Liability: "bg-[#fff0d6]", Equity: "bg-[#ece6ff]", Income: "bg-[#dcf5e4]", Expense: "bg-[#fde3e0]" },
+  },
+  dark: {
+    name: "Dark",
+    swatch: ["#0f172a", "#1e293b", "#2563eb"],
+    page: "bg-[#0f172a]", panel: "bg-[#1e293b] border-slate-700", strip: "bg-[#162033] border-slate-700",
+    head: "bg-[#273449] text-slate-300 border-slate-600", line: "border-slate-700",
+    rowA: "bg-[#1e293b]", rowB: "bg-[#223047]", hover: "hover:bg-[#2a3a55]", sel: "bg-[#2563eb] text-white",
+    text: "text-slate-100", sub: "text-slate-400", selSub: "text-white/80", title: "text-slate-100",
+    input: "bg-[#0f172a] border-slate-600 text-slate-100", btn: "bg-[#2563eb] hover:bg-blue-500 text-white",
+    groupRow: "bg-[#2d3b52] text-slate-200", boxText: "text-white",
+    box: { Asset: "bg-[#334a7a]", Liability: "bg-[#8a6a1c]", Equity: "bg-[#4a5d7a]", Income: "bg-[#2f6b3a]", Expense: "bg-[#8a2f25]" },
+  },
+};
+
+const ACCT_COLUMNS = [
+  { key: "code", label: "Number" },
+  { key: "name", label: "Account name" },
+  { key: "type", label: "Type" },
+  { key: "description", label: "Description" },
+  { key: "balance", label: "Balance", right: true },
+  { key: "items", label: "Items", right: true },
+];
+
+const ACCT_LAYOUT_KEY = "acct_layout_v1";
+const ACCT_LAYOUT_DEFAULT = {
+  theme: "quickbooks",
+  view: "table",            // "table" | "cards"
+  density: "compact",       // "compact" | "comfortable"
+  showSummary: true,
+  showFilters: true,
+  striped: true,
+  groupByType: false,
+  cols: [
+    { key: "code", visible: true },
+    { key: "name", visible: true },
+    { key: "type", visible: true },
+    { key: "description", visible: true },
+    { key: "balance", visible: true },
+    { key: "items", visible: false },
+  ],
+};
+
+// saved on this device (localStorage); survives refresh
+function useAccountLayout() {
+  const [layout, setLayout] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(ACCT_LAYOUT_KEY) || "null");
+      if (saved && typeof saved === "object") {
+        const known = ACCT_LAYOUT_DEFAULT.cols.map((c) => c.key);
+        const savedCols = (saved.cols || []).filter((c) => known.includes(c.key));
+        const missing = ACCT_LAYOUT_DEFAULT.cols.filter((c) => !savedCols.some((s) => s.key === c.key));
+        return {
+          ...ACCT_LAYOUT_DEFAULT,
+          ...saved,
+          theme: ACCT_THEMES[saved.theme] ? saved.theme : ACCT_LAYOUT_DEFAULT.theme,
+          cols: [...savedCols, ...missing],
+        };
+      }
+    } catch (e) { /* ignore broken saved data */ }
+    return ACCT_LAYOUT_DEFAULT;
+  });
+  const save = (next) => {
+    try { localStorage.setItem(ACCT_LAYOUT_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked */ }
+    return next;
+  };
+  const update = (patch) => setLayout((prev) => save({ ...prev, ...patch }));
+  const reset = () => setLayout(save(ACCT_LAYOUT_DEFAULT));
+  return [layout, update, reset];
+}
+
 function AccountingPage({ isAdmin, go }) {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
   useQuickNew(() => setFormOpen(true));
+
+  const [layout, updateLayout, resetLayout] = useAccountLayout();
+  const [panelOpen, setPanelOpen] = useState(false);
+  const t = ACCT_THEMES[layout.theme] || ACCT_THEMES.quickbooks;
+  const pad = layout.density === "compact" ? "py-1" : "py-2.5";
+
+  const [search, setSearch] = useState("");
+  const [groupFilter, setGroupFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [sort, setSort] = useState({ key: "name", dir: "asc" });
+  const [selectedId, setSelectedId] = useState(null);
 
   const load = async () => {
     try {
@@ -5959,66 +6223,362 @@ function AccountingPage({ isAdmin, go }) {
 
   useEffect(() => { load(); }, []);
 
+  const balanceOf = (a) => (ITEM_LINKED_TYPES.has(a.account_type) ? a.total_value : a.ledger_balance);
+  const openAccount = (a) => go({ view: "accounting", account: String(a.id) });
+
+  const groupTotals = ACCOUNT_GROUPS.map((g) => {
+    const list = accounts.filter((a) => ACCOUNT_GROUP_OF[a.account_type] === g);
+    return { g, count: list.length, total: list.reduce((s, a) => s + Number(balanceOf(a) || 0), 0) };
+  });
+
+  const sortVal = (key, a) => {
+    if (key === "balance") return Number(balanceOf(a) || 0);
+    if (key === "items") return Number(a.item_count || 0);
+    if (key === "type") return ACCOUNT_TYPE_NAMES[a.account_type] || "";
+    if (key === "code") return a.account_code || "";
+    if (key === "description") return a.description || "";
+    return a.name || "";
+  };
+
+  const q = search.trim().toLowerCase();
+  const rows = accounts
+    .filter((a) => groupFilter === "all" || ACCOUNT_GROUP_OF[a.account_type] === groupFilter)
+    .filter((a) => typeFilter === "all" || a.account_type === typeFilter)
+    .filter((a) => !q || a.name.toLowerCase().includes(q) || (a.account_code || "").toLowerCase().includes(q))
+    .sort((a, b) => {
+      const x = sortVal(sort.key, a);
+      const y = sortVal(sort.key, b);
+      const r = typeof x === "number" ? x - y : compareNames(x, y) || compareNames(a.name, b.name);
+      return sort.dir === "asc" ? r : -r;
+    });
+
+  const toggleSort = (key) =>
+    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+
+  const visCols = layout.cols.filter((c) => c.visible).map((c) => ACCT_COLUMNS.find((x) => x.key === c.key)).filter(Boolean);
+
+  const sections = layout.groupByType
+    ? ACCOUNT_TYPES.map((tp) => ({ key: tp.key, title: tp.label, list: rows.filter((a) => a.account_type === tp.key) })).filter((s) => s.list.length > 0)
+    : [{ key: "all", title: null, list: rows }];
+
+  const cell = (key, a, selected) => {
+    const sub = selected ? t.selSub : t.sub;
+    const linked = ITEM_LINKED_TYPES.has(a.account_type);
+    switch (key) {
+      case "code": return a.account_code || "";
+      case "name": return <span className="font-medium">{a.name}</span>;
+      case "type": return ACCOUNT_TYPE_NAMES[a.account_type] || a.account_type;
+      case "description": return <span className={sub}>{a.description || ""}</span>;
+      case "balance":
+        return (
+          <>
+            {formatRs(balanceOf(a))}
+            {linked && a.ledger_balance !== 0 && <span className={`block text-[10px] ${sub}`}>Ledger {formatRs(a.ledger_balance)}</span>}
+          </>
+        );
+      case "items": return linked ? a.item_count : "";
+      default: return "";
+    }
+  };
+
+  // ---- customize-panel helpers ----
+  const moveCol = (i, d) => {
+    const next = [...layout.cols];
+    const j = i + d;
+    if (j < 0 || j >= next.length) return;
+    [next[i], next[j]] = [next[j], next[i]];
+    updateLayout({ cols: next });
+  };
+  const toggleCol = (key) => {
+    const visibleCount = layout.cols.filter((c) => c.visible).length;
+    updateLayout({
+      cols: layout.cols.map((c) => (c.key === key ? { ...c, visible: c.visible && visibleCount <= 1 ? true : !c.visible } : c)),
+    });
+  };
+  const segBtn = (label, active, onClick) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex-1 px-3 py-1.5 text-sm border ${active ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+    >
+      {label}
+    </button>
+  );
+  const checkRow = (label, key) => (
+    <label className="flex items-center gap-2 text-sm text-gray-700 py-1">
+      <input type="checkbox" checked={layout[key]} onChange={(e) => updateLayout({ [key]: e.target.checked })} />
+      {label}
+    </label>
+  );
+
+  const inputCls = `border rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-blue-500 ${t.input}`;
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className={`min-h-screen ${t.page}`}>
       <AppHeader
         isAdmin={isAdmin}
         active="accounting"
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 max-w-3xl space-y-8">
-        <div className="flex justify-end">
-          <button onClick={() => setFormOpen(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
-            + Add Account
-          </button>
+      <main className="p-3 sm:p-4 space-y-3">
+        {/* ---- title row ---- */}
+        <div className="flex items-center justify-between gap-2">
+          <h1 className={`text-base font-semibold ${t.title}`}>Chart of Accounts</h1>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPanelOpen(true)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-sm border ${t.panel} ${t.text}`}
+            >
+              <Settings size={14} /> Customize
+            </button>
+            <button onClick={() => setFormOpen(true)} className={`${t.btn} px-4 py-1.5 rounded-sm text-sm font-medium`}>
+              + Add Account
+            </button>
+          </div>
         </div>
-        {loading ? (
-          <p className="text-gray-400 text-center py-16">Loading...</p>
-        ) : error ? (
-          <p className="text-red-500 text-center py-16">{error}</p>
-        ) : (
-          ACCOUNT_TYPES.map(({ key, label }) => {
-            const list = accounts
-              .filter((a) => a.account_type === key)
-              .sort((a, b) => compareNames(a.name, b.name));
-            if (list.length === 0) return null; // only show account types that have accounts
-            return (
-              <div key={key}>
-                <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
-                  {label} <span className="text-gray-400 font-normal">({list.length})</span>
-                </h2>
-                <div className="space-y-2">
-                  {list.map((a) => (
-                    <button
-                      key={a.id}
-                      type="button"
-                      onClick={() => go({ view: "accounting", account: String(a.id) })}
-                      className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors"
-                    >
-                      <div className="w-9 h-9 shrink-0 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
-                        <Landmark size={16} />
-                      </div>
-                      <p className="flex-1 min-w-0 font-medium text-gray-900 truncate">
-                        {a.account_code ? `${a.account_code} · ` : ""}{a.name}
-                      </p>
-                      <span className="shrink-0 text-right">
-                        <span className="block font-semibold text-gray-900">
-                          {formatRs(ITEM_LINKED_TYPES.has(a.account_type) ? a.total_value : a.ledger_balance)}
-                        </span>
-                        {ITEM_LINKED_TYPES.has(a.account_type) && a.ledger_balance !== 0 && (
-                          <span className="block text-xs text-gray-400">Ledger {formatRs(a.ledger_balance)}</span>
-                        )}
-                      </span>
-                      <ChevronRight size={16} className="shrink-0 text-gray-400" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            );
-          })
+
+        {/* ---- summary strip ---- */}
+        {layout.showSummary && (
+          <div className={`border p-3 ${t.strip}`}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1">
+              {groupTotals.map(({ g, count, total }) => (
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => { setGroupFilter(groupFilter === g ? "all" : g); setTypeFilter("all"); }}
+                  className={`${t.box[g]} ${t.boxText} text-left px-3 py-2 ${groupFilter === g ? "ring-2 ring-offset-1 ring-gray-700" : ""}`}
+                >
+                  <span className="block text-[10px] uppercase tracking-wide opacity-90">{g}</span>
+                  <span className="block text-lg font-semibold leading-tight">{formatRs(total)}</span>
+                  <span className="block text-[10px] uppercase opacity-90">{count} account{count === 1 ? "" : "s"}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         )}
+
+        {/* ---- list panel ---- */}
+        <div className={`border ${t.panel}`}>
+          {layout.showFilters && (
+            <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2 border-b ${t.line}`}>
+              <label className={`flex items-center gap-2 text-[11px] uppercase ${t.sub}`}>
+                Search
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name or code" className={`${inputCls} normal-case w-44`} />
+              </label>
+              <label className={`flex items-center gap-2 text-[11px] uppercase ${t.sub}`}>
+                Group
+                <select value={groupFilter} onChange={(e) => { setGroupFilter(e.target.value); setTypeFilter("all"); }} className={`${inputCls} normal-case`}>
+                  <option value="all">All</option>
+                  {ACCOUNT_GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
+                </select>
+              </label>
+              <label className={`flex items-center gap-2 text-[11px] uppercase ${t.sub}`}>
+                Type
+                <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className={`${inputCls} normal-case`}>
+                  <option value="all">All</option>
+                  {ACCOUNT_TYPES.filter((tp) => groupFilter === "all" || tp.group === groupFilter).map((tp) => (
+                    <option key={tp.key} value={tp.key}>{tp.name}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+
+          {loading ? (
+            <p className="text-gray-400 text-center py-16">Loading...</p>
+          ) : error ? (
+            <p className="text-red-500 text-center py-16">{error}</p>
+          ) : rows.length === 0 ? (
+            <p className={`text-center py-10 ${t.sub}`}>No accounts found.</p>
+          ) : layout.view === "cards" ? (
+            /* ---------- CARDS layout ---------- */
+            <div className="p-3 space-y-4">
+              {sections.map((s) => (
+                <div key={s.key}>
+                  {s.title && <h2 className={`text-xs font-semibold uppercase mb-2 ${t.sub}`}>{s.title} ({s.list.length})</h2>}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {s.list.map((a) => {
+                      const selected = a.id === selectedId;
+                      return (
+                        <button
+                          key={a.id}
+                          type="button"
+                          onClick={() => setSelectedId(a.id)}
+                          onDoubleClick={() => openAccount(a)}
+                          className={`text-left border rounded-md p-3 ${t.line} ${selected ? t.sel : `${t.rowA} ${t.text} ${t.hover}`}`}
+                        >
+                          <span className="flex items-start justify-between gap-2">
+                            <span className="font-medium truncate">{a.account_code ? `${a.account_code} · ` : ""}{a.name}</span>
+                            <span className="font-semibold shrink-0">{formatRs(balanceOf(a))}</span>
+                          </span>
+                          <span className={`block text-xs mt-0.5 ${selected ? t.selSub : t.sub}`}>{ACCOUNT_TYPE_NAMES[a.account_type] || a.account_type}</span>
+                          {a.description && <span className={`block text-xs mt-1 truncate ${selected ? t.selSub : t.sub}`}>{a.description}</span>}
+                          <span
+                            onClick={(e) => { e.stopPropagation(); openAccount(a); }}
+                            className={`inline-block mt-2 text-xs underline ${selected ? "text-white" : "text-blue-600"}`}
+                          >
+                            Open
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* ---------- TABLE layout ---------- */
+            <div className="overflow-x-auto max-h-[calc(100vh-330px)] overflow-y-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead className={`sticky top-0 z-10 border-b ${t.head}`}>
+                  <tr>
+                    {visCols.map((c) => (
+                      <th
+                        key={c.key}
+                        onClick={() => toggleSort(c.key)}
+                        className={`px-3 ${pad} text-[11px] font-semibold uppercase tracking-wide border-r ${t.line} cursor-pointer select-none whitespace-nowrap ${c.right ? "text-right" : "text-left"}`}
+                      >
+                        {c.label}
+                        {sort.key === c.key && <span className="ml-1 text-[9px]">{sort.dir === "asc" ? "▲" : "▼"}</span>}
+                      </th>
+                    ))}
+                    <th className={`px-3 ${pad} text-left text-[11px] font-semibold uppercase tracking-wide w-24`}>Action</th>
+                  </tr>
+                </thead>
+                {sections.map((s) => (
+                  <tbody key={s.key} className={t.text}>
+                    {s.title && (
+                      <tr className={t.groupRow}>
+                        <td colSpan={visCols.length + 1} className={`px-3 ${pad} text-xs font-semibold uppercase`}>
+                          <span className="flex justify-between">
+                            <span>{s.title} ({s.list.length})</span>
+                            <span>{formatRs(s.list.reduce((sum, a) => sum + Number(balanceOf(a) || 0), 0))}</span>
+                          </span>
+                        </td>
+                      </tr>
+                    )}
+                    {s.list.map((a, i) => {
+                      const selected = a.id === selectedId;
+                      const bg = selected ? t.sel : `${layout.striped && i % 2 ? t.rowB : t.rowA} ${t.hover}`;
+                      return (
+                        <tr key={a.id} onClick={() => setSelectedId(a.id)} onDoubleClick={() => openAccount(a)} className={`cursor-pointer ${bg}`}>
+                          {visCols.map((c) => (
+                            <td
+                              key={c.key}
+                              className={`px-3 ${pad} whitespace-nowrap ${c.right ? "text-right" : ""} ${c.key === "description" ? "max-w-[16rem] truncate" : ""}`}
+                            >
+                              {cell(c.key, a, selected)}
+                            </td>
+                          ))}
+                          <td className={`px-3 ${pad}`}>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); openAccount(a); }}
+                              className="px-2 py-0.5 text-xs border rounded-sm bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                            >
+                              Open
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                ))}
+              </table>
+            </div>
+          )}
+
+          <div className={`flex justify-end px-3 py-2 border-t text-xs ${t.line} ${t.sub}`}>
+            Showing {rows.length ? 1 : 0} - {rows.length} of {accounts.length}
+          </div>
+        </div>
       </main>
+
+      {/* ---------- Customize panel (slides in from the right) ---------- */}
+      {panelOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={() => setPanelOpen(false)}>
+          <div className="w-full max-w-sm bg-white h-full overflow-y-auto p-5 space-y-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Customize layout</h2>
+              <button type="button" onClick={() => setPanelOpen(false)} className="text-gray-500 hover:text-gray-800 text-xl leading-none">✕</button>
+            </div>
+
+            <section>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Theme</h3>
+              <div className="grid grid-cols-1 gap-2">
+                {Object.entries(ACCT_THEMES).map(([key, th]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => updateLayout({ theme: key })}
+                    className={`flex items-center gap-3 border rounded-md px-3 py-2 text-left text-sm ${layout.theme === key ? "border-blue-600 ring-1 ring-blue-600" : "border-gray-300 hover:bg-gray-50"}`}
+                  >
+                    <span className="flex">
+                      {th.swatch.map((c) => <span key={c} className="w-5 h-5 border border-gray-300" style={{ background: c }} />)}
+                    </span>
+                    <span className="text-gray-800">{th.name}</span>
+                    {layout.theme === key && <span className="ml-auto text-blue-600">✓</span>}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Layout</h3>
+              <div className="flex">
+                {segBtn("Table", layout.view === "table", () => updateLayout({ view: "table" }))}
+                {segBtn("Cards", layout.view === "cards", () => updateLayout({ view: "cards" }))}
+              </div>
+            </section>
+
+            <section>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Row density</h3>
+              <div className="flex">
+                {segBtn("Compact", layout.density === "compact", () => updateLayout({ density: "compact" }))}
+                {segBtn("Comfortable", layout.density === "comfortable", () => updateLayout({ density: "comfortable" }))}
+              </div>
+            </section>
+
+            <section>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-1">Show</h3>
+              {checkRow("Summary boxes (top strip)", "showSummary")}
+              {checkRow("Filter bar", "showFilters")}
+              {checkRow("Striped rows", "striped")}
+              {checkRow("Group by account type", "groupByType")}
+            </section>
+
+            <section>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Columns (table layout)</h3>
+              <div className="space-y-1">
+                {layout.cols.map((c, i) => {
+                  const def = ACCT_COLUMNS.find((x) => x.key === c.key);
+                  if (!def) return null;
+                  return (
+                    <div key={c.key} className="flex items-center gap-2 border border-gray-200 rounded-md px-2 py-1">
+                      <input type="checkbox" checked={c.visible} onChange={() => toggleCol(c.key)} />
+                      <span className="flex-1 text-sm text-gray-800">{def.label}</span>
+                      <button type="button" disabled={i === 0} onClick={() => moveCol(i, -1)} className="px-1 text-gray-500 disabled:opacity-30">▲</button>
+                      <button type="button" disabled={i === layout.cols.length - 1} onClick={() => moveCol(i, 1)} className="px-1 text-gray-500 disabled:opacity-30">▼</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={resetLayout} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                Reset to default
+              </button>
+              <button type="button" onClick={() => setPanelOpen(false)} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700">
+                Done
+              </button>
+            </div>
+            <p className="text-xs text-gray-400">Your layout is saved automatically on this device.</p>
+          </div>
+        </div>
+      )}
 
       {formOpen && (
         <AccountForm
@@ -10428,11 +10988,145 @@ function SalesExpensesChart({ rows }) {
   );
 }
 
+// ---------- Dashboard layout: which widgets, their order and size (saved on this device) ----------
+const DASH_LAYOUT_KEY = "dash_layout_v1";
+const DASH_WIDGET_NAMES = {
+  receivables: "Total Receivables",
+  payables: "Total Payables",
+  sales: "Sales and Expenses chart",
+  cash: "Cash & Bank",
+  expenses: "Top Expenses",
+};
+const DASH_LAYOUT_DEFAULT = {
+  fullWidth: false,
+  showStockTab: true,
+  widgets: [
+    { id: "receivables", visible: true, size: "full" },
+    { id: "payables", visible: true, size: "full" },
+    { id: "sales", visible: true, size: "full" },
+    { id: "cash", visible: true, size: "half" },
+    { id: "expenses", visible: true, size: "half" },
+  ],
+};
+
+function useDashboardLayout() {
+  const [layout, setLayout] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(DASH_LAYOUT_KEY) || "null");
+      if (saved && typeof saved === "object") {
+        const savedW = (saved.widgets || []).filter((w) => DASH_WIDGET_NAMES[w.id]);
+        const missing = DASH_LAYOUT_DEFAULT.widgets.filter((w) => !savedW.some((s) => s.id === w.id));
+        return { ...DASH_LAYOUT_DEFAULT, ...saved, widgets: [...savedW, ...missing] };
+      }
+    } catch (e) { /* ignore broken saved data */ }
+    return DASH_LAYOUT_DEFAULT;
+  });
+  const save = (next) => {
+    try { localStorage.setItem(DASH_LAYOUT_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked */ }
+    return next;
+  };
+  const update = (patch) => setLayout((prev) => save({ ...prev, ...patch }));
+  const reset = () => setLayout(save(DASH_LAYOUT_DEFAULT));
+  return [layout, update, reset];
+}
+
 function ZohoDashboard({ isAdmin, go, onProductAdded }) {
   const thisYear = new Date().getFullYear();
   const [year, setYear] = useState(thisYear);
   const [tab, setTab] = useState("dashboard");
   const { data, loading, error } = useReport(() => getDashboard(year), [year]);
+  const [layout, updateLayout, resetLayout] = useDashboardLayout();
+  const [panelOpen, setPanelOpen] = useState(false);
+
+  const tabs = [["dashboard", "Dashboard"], ...(layout.showStockTab ? [["stock", "Stock Alerts"]] : [])];
+  const activeTab = tabs.some(([id]) => id === tab) ? tab : "dashboard";
+
+  // ---- customize-panel helpers ----
+  const moveWidget = (i, d) => {
+    const next = [...layout.widgets];
+    const j = i + d;
+    if (j < 0 || j >= next.length) return;
+    [next[i], next[j]] = [next[j], next[i]];
+    updateLayout({ widgets: next });
+  };
+  const patchWidget = (id, patch) =>
+    updateLayout({ widgets: layout.widgets.map((w) => (w.id === id ? { ...w, ...patch } : w)) });
+
+  // each widget = one card; the card root carries its own bottom spacing
+  const renderWidget = (id) => {
+    switch (id) {
+      case "receivables":
+        return <AgeingCard title="Total Receivables" ageing={data.receivables_ageing} onNew={() => go({ view: "invoices" })} />;
+      case "payables":
+        return <AgeingCard title="Total Payables" ageing={data.payables_ageing} onNew={() => go({ view: "purchases" })} />;
+      case "sales":
+        return (
+          <div className="bg-white border border-gray-200 rounded-lg mb-5 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200">
+              <h2 className="text-base sm:text-lg font-medium text-gray-800">Sales and Expenses</h2>
+              <select
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+                className="text-sm text-gray-700 bg-transparent focus:outline-none cursor-pointer"
+              >
+                <option value={thisYear}>This Fiscal Year</option>
+                <option value={thisYear - 1}>Last Fiscal Year</option>
+              </select>
+            </div>
+            <div className="flex flex-col md:flex-row">
+              <div className="flex-1 min-w-0 p-5">
+                <SalesExpensesChart rows={data.fy_chart} />
+                <p className="text-xs text-gray-500 mt-5">* Sales value displayed is inclusive of tax.</p>
+              </div>
+              <div className="md:w-60 shrink-0 border-t md:border-t-0 md:border-l border-gray-200 p-5 space-y-6">
+                <div>
+                  <p className="text-sm text-[#2f80ed]">Total Sales</p>
+                  <p className="text-xl sm:text-2xl text-gray-900 mt-1">{formatRs(data.fy_sales)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-[#27ae60]">Total Receipts</p>
+                  <p className="text-xl sm:text-2xl text-gray-900 mt-1">{formatRs(data.fy_receipts)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-[#eb5757]">Total Expenses</p>
+                  <p className="text-xl sm:text-2xl text-gray-900 mt-1">{formatRs(data.fy_expenses)}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      case "cash":
+        return (
+          <div className="bg-white border border-gray-200 rounded-lg mb-5 overflow-hidden">
+            <div className="px-5 py-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+              <h2 className="text-base font-medium text-gray-800">Cash & Bank</h2>
+              <button onClick={() => go({ view: "banking" })} className="text-xs text-blue-600 hover:underline">View all</button>
+            </div>
+            <div className="px-5 py-2">
+              {data.cash_accounts.length === 0 && <p className="text-xs text-gray-400 py-2">No cash or bank accounts yet</p>}
+              {data.cash_accounts.map((a) => <ReportLine key={a.id} label={a.name} amount={a.balance} />)}
+              {data.cash_accounts.length > 0 && <ReportLine label="Total" amount={data.cash_total} bold />}
+            </div>
+          </div>
+        );
+      case "expenses":
+        return (
+          <div className="bg-white border border-gray-200 rounded-lg mb-5 overflow-hidden">
+            <div className="px-5 py-3 bg-gray-50 border-b border-gray-200">
+              <h2 className="text-base font-medium text-gray-800">Top Expenses (this year)</h2>
+            </div>
+            <div className="px-5 py-2">
+              {data.top_expenses.length === 0 && <p className="text-xs text-gray-400 py-2">No expenses yet</p>}
+              {data.top_expenses.map((a) => <ReportLine key={a.id} label={a.name} amount={a.amount} />)}
+            </div>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const shown = layout.widgets.filter((w) => w.visible);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -10447,14 +11141,21 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
             <h1 className="text-xl font-medium text-gray-900 truncate">Hello, Admin</h1>
             <p className="text-sm text-gray-500 truncate">STD OPERATION</p>
           </div>
+          <button
+            type="button"
+            onClick={() => setPanelOpen(true)}
+            className="ml-auto shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <Settings size={14} /> Customize
+          </button>
         </div>
         <div className="flex gap-6 mt-4 overflow-x-auto">
-          {[["dashboard", "Dashboard"], ["stock", "Stock Alerts"]].map(([id, label]) => (
+          {tabs.map(([id, label]) => (
             <button
               key={id}
               onClick={() => setTab(id)}
               className={`pb-3 text-sm whitespace-nowrap border-b-2 ${
-                tab === id ? "border-blue-500 text-gray-900 font-medium" : "border-transparent text-gray-500 hover:text-gray-800"
+                activeTab === id ? "border-blue-500 text-gray-900 font-medium" : "border-transparent text-gray-500 hover:text-gray-800"
               }`}
             >
               {label}
@@ -10466,74 +11167,23 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
         </div>
       </div>
 
-      <main className="p-4 sm:p-6 max-w-6xl">
+      <main className={`p-4 sm:p-6 ${layout.fullWidth ? "" : "max-w-6xl"}`}>
         <ReportBody loading={loading} error={error} data={data}>
-          {data && tab === "dashboard" && (
-            <>
-              <AgeingCard title="Total Receivables" ageing={data.receivables_ageing} onNew={() => go({ view: "invoices" })} />
-              <AgeingCard title="Total Payables" ageing={data.payables_ageing} onNew={() => go({ view: "purchases" })} />
-
-              <div className="bg-white border border-gray-200 rounded-lg mb-5 overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200">
-                  <h2 className="text-base sm:text-lg font-medium text-gray-800">Sales and Expenses</h2>
-                  <select
-                    value={year}
-                    onChange={(e) => setYear(Number(e.target.value))}
-                    className="text-sm text-gray-700 bg-transparent focus:outline-none cursor-pointer"
-                  >
-                    <option value={thisYear}>This Fiscal Year</option>
-                    <option value={thisYear - 1}>Last Fiscal Year</option>
-                  </select>
-                </div>
-                <div className="flex flex-col md:flex-row">
-                  <div className="flex-1 min-w-0 p-5">
-                    <SalesExpensesChart rows={data.fy_chart} />
-                    <p className="text-xs text-gray-500 mt-5">* Sales value displayed is inclusive of tax.</p>
+          {data && activeTab === "dashboard" && (
+            shown.length === 0 ? (
+              <p className="text-center text-gray-400 py-16">All widgets are hidden. Use “Customize” to show them again.</p>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-5">
+                {shown.map((w) => (
+                  <div key={w.id} className={`min-w-0 ${w.size === "full" ? "lg:col-span-2" : ""}`}>
+                    {renderWidget(w.id)}
                   </div>
-                  <div className="md:w-60 shrink-0 border-t md:border-t-0 md:border-l border-gray-200 p-5 space-y-6">
-                    <div>
-                      <p className="text-sm text-[#2f80ed]">Total Sales</p>
-                      <p className="text-xl sm:text-2xl text-gray-900 mt-1">{formatRs(data.fy_sales)}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-[#27ae60]">Total Receipts</p>
-                      <p className="text-xl sm:text-2xl text-gray-900 mt-1">{formatRs(data.fy_receipts)}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-[#eb5757]">Total Expenses</p>
-                      <p className="text-xl sm:text-2xl text-gray-900 mt-1">{formatRs(data.fy_expenses)}</p>
-                    </div>
-                  </div>
-                </div>
+                ))}
               </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                  <div className="px-5 py-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
-                    <h2 className="text-base font-medium text-gray-800">Cash & Bank</h2>
-                    <button onClick={() => go({ view: "banking" })} className="text-xs text-blue-600 hover:underline">View all</button>
-                  </div>
-                  <div className="px-5 py-2">
-                    {data.cash_accounts.length === 0 && <p className="text-xs text-gray-400 py-2">No cash or bank accounts yet</p>}
-                    {data.cash_accounts.map((a) => <ReportLine key={a.id} label={a.name} amount={a.balance} />)}
-                    {data.cash_accounts.length > 0 && <ReportLine label="Total" amount={data.cash_total} bold />}
-                  </div>
-                </div>
-
-                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                  <div className="px-5 py-3 bg-gray-50 border-b border-gray-200">
-                    <h2 className="text-base font-medium text-gray-800">Top Expenses (this year)</h2>
-                  </div>
-                  <div className="px-5 py-2">
-                    {data.top_expenses.length === 0 && <p className="text-xs text-gray-400 py-2">No expenses yet</p>}
-                    {data.top_expenses.map((a) => <ReportLine key={a.id} label={a.name} amount={a.amount} />)}
-                  </div>
-                </div>
-              </div>
-            </>
+            )
           )}
 
-          {data && tab === "stock" && (
+          {data && activeTab === "stock" && (
             <div className="bg-white border border-gray-200 rounded-lg overflow-hidden max-w-2xl">
               <div className="px-5 py-3 bg-gray-50 border-b border-gray-200">
                 <h2 className="text-base font-medium text-gray-800">Low stock ({data.low_stock_count})</h2>
@@ -10555,6 +11205,80 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
           )}
         </ReportBody>
       </main>
+
+      {/* ---------- Customize dashboard panel ---------- */}
+      {panelOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={() => setPanelOpen(false)}>
+          <div className="w-full max-w-sm h-full overflow-y-auto bg-white text-gray-900 p-5 space-y-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Customize dashboard</h2>
+              <button type="button" onClick={() => setPanelOpen(false)} className="text-gray-500 hover:text-gray-900 text-xl leading-none">✕</button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => { setPanelOpen(false); window.dispatchEvent(new Event("app:appearance")); }}
+              className="w-full border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              App theme &amp; colours…
+            </button>
+
+            <section>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Page width</h3>
+              <div className="flex">
+                {[[false, "Contained"], [true, "Full width"]].map(([val, name]) => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => updateLayout({ fullWidth: val })}
+                    className={`flex-1 px-3 py-1.5 text-sm border ${
+                      layout.fullWidth === val ? "bg-blue-600 border-blue-600 text-white" : "border-gray-300 text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700 mt-3">
+                <input type="checkbox" checked={layout.showStockTab} onChange={(e) => updateLayout({ showStockTab: e.target.checked })} />
+                Show “Stock Alerts” tab
+              </label>
+            </section>
+
+            <section>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Widgets (show, size, order)</h3>
+              <div className="space-y-1.5">
+                {layout.widgets.map((w, i) => (
+                  <div key={w.id} className="flex items-center gap-2 border border-gray-200 rounded-lg px-2 py-1.5">
+                    <input type="checkbox" checked={w.visible} onChange={(e) => patchWidget(w.id, { visible: e.target.checked })} />
+                    <span className="flex-1 min-w-0 text-sm truncate">{DASH_WIDGET_NAMES[w.id]}</span>
+                    <button
+                      type="button"
+                      onClick={() => patchWidget(w.id, { size: w.size === "full" ? "half" : "full" })}
+                      className="text-xs border border-gray-300 rounded px-2 py-0.5 text-gray-700 hover:bg-gray-50"
+                      title="Full row or half row (half only applies on wide screens)"
+                    >
+                      {w.size === "full" ? "Full" : "Half"}
+                    </button>
+                    <button type="button" disabled={i === 0} onClick={() => moveWidget(i, -1)} className="px-1 text-gray-500 disabled:opacity-30">▲</button>
+                    <button type="button" disabled={i === layout.widgets.length - 1} onClick={() => moveWidget(i, 1)} className="px-1 text-gray-500 disabled:opacity-30">▼</button>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={resetLayout} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                Reset to default
+              </button>
+              <button type="button" onClick={() => setPanelOpen(false)} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700">
+                Done
+              </button>
+            </div>
+            <p className="text-xs text-gray-400">Saved automatically on this device.</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -10706,6 +11430,7 @@ function AppShell() {
         onNewBill={goNewBill}
         onNewIssued={goNewIssued}
       />
+      <ThemePanel />
     </>
   );
 }

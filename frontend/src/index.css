@@ -11,3 +11,150 @@ body {
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 }
+
+/* =====================================================================
+   APP THEMES  (switched from the Appearance panel in App.jsx)
+   <html data-theme="light|dark|quickbooks" data-accent="blue|green|purple|orange|teal|rose" data-size="small|normal|large">
+   Tailwind v4 colours are CSS variables, so overriding them here re-colours every page.
+   ===================================================================== */
+
+/* ---------- text size (the app uses rem, so this scales everything) ---------- */
+html[data-size="small"] {
+  font-size: 14px;
+}
+
+html[data-size="large"] {
+  font-size: 18px;
+}
+
+/* ---------- accent colour: replaces Tailwind's blue (buttons, links, tabs, focus rings) ---------- */
+html[data-accent="green"] {
+  --color-blue-50: #f0fdf4;
+  --color-blue-100: #dcfce7;
+  --color-blue-200: #bbf7d0;
+  --color-blue-300: #86efac;
+  --color-blue-400: #4ade80;
+  --color-blue-500: #22c55e;
+  --color-blue-600: #16a34a;
+  --color-blue-700: #15803d;
+  --color-blue-800: #166534;
+}
+
+html[data-accent="purple"] {
+  --color-blue-50: #faf5ff;
+  --color-blue-100: #f3e8ff;
+  --color-blue-200: #e9d5ff;
+  --color-blue-300: #d8b4fe;
+  --color-blue-400: #c084fc;
+  --color-blue-500: #a855f7;
+  --color-blue-600: #9333ea;
+  --color-blue-700: #7e22ce;
+  --color-blue-800: #6b21a8;
+}
+
+html[data-accent="orange"] {
+  --color-blue-50: #fff7ed;
+  --color-blue-100: #ffedd5;
+  --color-blue-200: #fed7aa;
+  --color-blue-300: #fdba74;
+  --color-blue-400: #fb923c;
+  --color-blue-500: #f97316;
+  --color-blue-600: #ea580c;
+  --color-blue-700: #c2410c;
+  --color-blue-800: #9a3412;
+}
+
+html[data-accent="teal"] {
+  --color-blue-50: #f0fdfa;
+  --color-blue-100: #ccfbf1;
+  --color-blue-200: #99f6e4;
+  --color-blue-300: #5eead4;
+  --color-blue-400: #2dd4bf;
+  --color-blue-500: #14b8a6;
+  --color-blue-600: #0d9488;
+  --color-blue-700: #0f766e;
+  --color-blue-800: #115e59;
+}
+
+html[data-accent="rose"] {
+  --color-blue-50: #fff1f2;
+  --color-blue-100: #ffe4e6;
+  --color-blue-200: #fecdd3;
+  --color-blue-300: #fda4af;
+  --color-blue-400: #fb7185;
+  --color-blue-500: #f43f5e;
+  --color-blue-600: #e11d48;
+  --color-blue-700: #be123c;
+  --color-blue-800: #9f1239;
+}
+
+/* ---------- DARK theme ---------- */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --color-gray-50: #0f172a;
+  /* page background */
+  --color-gray-100: #162033;
+  --color-gray-200: #2a3649;
+  /* borders */
+  --color-gray-300: #3b4a61;
+  --color-gray-400: #7f8ea3;
+  --color-gray-500: #9aa8bb;
+  --color-gray-600: #b4c0d0;
+  --color-gray-700: #cbd5e1;
+  --color-gray-800: #e2e8f0;
+  --color-gray-900: #f1f5f9;
+  /* soft tints (alerts, badges) become dark tints */
+  --color-red-50: #3b1519;
+  --color-red-100: #4a1a1f;
+  --color-green-50: #10301f;
+  --color-green-100: #143d27;
+  --color-yellow-50: #3a2f0f;
+  --color-yellow-100: #47390f;
+  --color-amber-50: #3a2c0f;
+  --color-amber-100: #47350f;
+  --color-orange-50: #3d2210;
+  --color-orange-100: #4a2a12;
+  --color-blue-50: color-mix(in srgb, var(--color-blue-500) 16%, #0f172a);
+  --color-blue-100: color-mix(in srgb, var(--color-blue-500) 24%, #0f172a);
+}
+
+html[data-theme="dark"] body {
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+html[data-theme="dark"] .bg-white {
+  background-color: #1e293b;
+}
+
+html[data-theme="dark"] [class*="1f2640"] {
+  background-color: #0b1220;
+}
+
+/* ---------- QUICKBOOKS theme: blue-grey page, navy sidebar ---------- */
+html[data-theme="quickbooks"] {
+  --color-gray-50: #dfe7ef;
+  /* page background */
+  --color-gray-100: #e8eef5;
+  --color-gray-200: #c9d4e0;
+  /* borders */
+  --color-gray-300: #b3c1d1;
+}
+
+html[data-theme="quickbooks"] body {
+  background: #dfe7ef;
+}
+
+html[data-theme="quickbooks"] [class*="1f2640"] {
+  background-color: #0f3a5f;
+}
+
+/* ---------- the navy sidebar keeps light text + white logo tiles in every theme ---------- */
+html[data-theme] [class*="1f2640"] {
+  --color-gray-300: #d1d5db;
+  --color-gray-400: #9ca3af;
+}
+
+html[data-theme] [class*="1f2640"] .bg-white {
+  background-color: #fff;
+}
