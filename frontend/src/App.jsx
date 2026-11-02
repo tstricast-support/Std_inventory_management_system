@@ -242,6 +242,7 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
   const [invoiceFor, setInvoiceFor] = useState(null); // the quote / sales order being turned into an invoice
   const [editFor, setEditFor] = useState(null); // the quote / sales order being edited
@@ -3979,6 +3980,7 @@ function VendorsPage({ isAdmin, go }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
+  useQuickNew(() => setFormOpen(true));
 
   const load = async () => {
     try {
@@ -4123,6 +4125,7 @@ function TaxesPage({ isAdmin, go }) {
   const [error, setError] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  useQuickNew(() => { setEditing(null); setFormOpen(true); });
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const load = async () => {
@@ -4841,6 +4844,7 @@ function BankAccountsList({ isAdmin, go }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
+  useQuickNew(() => setAddOpen(true));
   const [transferOpen, setTransferOpen] = useState(false);
 
   const load = async () => {
@@ -5542,6 +5546,10 @@ function CustomersPage({ isAdmin, go }) {
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+    useQuickNew(() => {
+      setEditing(null);
+      setFormOpen(true);
+    });
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const load = async () => {
@@ -5936,6 +5944,7 @@ function AccountingPage({ isAdmin, go }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
+  useQuickNew(() => setFormOpen(true));
 
   const load = async () => {
     try {
@@ -6106,6 +6115,7 @@ function JournalsPage({ isAdmin, go }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
+  useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
@@ -6448,6 +6458,7 @@ function InvoicesPage({ isAdmin, go }) {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
 
   const load = async () => {
@@ -7007,6 +7018,7 @@ function CreditNotesPage({ isAdmin, go }) {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
   const [applyFor, setApplyFor] = useState(null); // the credit note whose "Apply to invoice" button was pressed
 
@@ -7542,6 +7554,7 @@ function PaymentsPage({ isAdmin, go }) {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
 
   const load = async () => {
@@ -7827,6 +7840,7 @@ function PurchaseBillsPage({ isAdmin, go }) {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
   const [payFor, setPayFor] = useState(null); // the bill whose "Record payment" button was pressed
 
@@ -8236,6 +8250,7 @@ function VendorPaymentsPage({ isAdmin, go }) {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
 
   const load = async () => {
@@ -9090,6 +9105,7 @@ function NewBillForm({ onBack, onSaved }) {
 // ---------- Bill page: list of submitted bills (newest first) ----------
 function BillPage({ go, autoCreateToken }) {
   const [creating, setCreating] = useState(false);
+  useQuickNew(() => setCreating(true));
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -9730,6 +9746,7 @@ function NewIssuedForm({ onBack, onSaved }) {
 // ---------- Issued page: lists grouped by the selected date (newest first) ----------
 function IssuedPage({ go, autoCreateToken }) {
   const [creating, setCreating] = useState(false);
+  useQuickNew(() => setCreating(true));
   const [lists, setLists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -9937,41 +9954,204 @@ function IssuedPage({ go, autoCreateToken }) {
 }
 
 // ---------- Ctrl+N / Ctrl+B / Ctrl+I admin shortcuts, anywhere in the app ----------
-function GlobalAdminShortcuts({ isAdmin, defaultDepartment, onProductCreated, onNewBill, onNewIssued }) {
+// ---------- Keyboard shortcuts (QuickBooks style) ----------
+// A page calls useQuickNew(openItsNewForm). Ctrl+N then opens that page's "New" form.
+// pendingNew covers "go to another page AND open its New form" (e.g. Ctrl+I from anywhere).
+let pendingNew = false;
+function useQuickNew(open) {
+  const ref = useRef(open);
+  ref.current = open;
+  useEffect(() => {
+    if (pendingNew) { pendingNew = false; ref.current(); }
+    const onNew = (e) => { e.detail.handled = true; ref.current(); };
+    window.addEventListener("app:new", onNew);
+    return () => window.removeEventListener("app:new", onNew);
+  }, []);
+}
+
+const SHORTCUT_HELP = [
+  ["Create", [
+    ["Ctrl + N", "New - customer, invoice, bill... whatever page you are on (otherwise a new item)"],
+    ["Alt + A", "Same as Ctrl + N (works in a normal browser tab too)"],
+    ["Ctrl + I", "Create invoice"],
+    ["Ctrl + W", "Pay a vendor (new payment made)"],
+    ["Ctrl + B", "New stock bill"],
+  ]],
+  ["Go to", [
+    ["Ctrl + A", "Chart of accounts"],
+    ["Ctrl + J", "Customers"],
+    ["Ctrl + L", "Items"],
+    ["Ctrl + R", "Banking"],
+    ["Ctrl + Y", "Manual journals"],
+    ["Ctrl + Q", "Reports"],
+    ["Alt + H", "Home / dashboard"],
+    ["Alt + C", "Customers"],
+    ["Alt + V", "Vendors"],
+    ["Alt + Q", "Quotes"],
+    ["Alt + S", "Sales orders"],
+    ["Alt + I", "Invoices"],
+    ["Alt + P", "Payments received"],
+    ["Alt + N", "Credit notes"],
+    ["Alt + B", "Bills"],
+    ["Alt + M", "Payments made"],
+    ["Alt + X", "Taxes"],
+    ["Alt + U", "Issued"],
+    ["Alt + G", "Manage items"],
+  ]],
+  ["Anywhere", [
+    ["Ctrl + F  or  /", "Find (search)"],
+    ["Ctrl + Enter", "Save the open form"],
+    ["Esc", "Close the open form"],
+    ["F1  or  ?", "Show this list"],
+  ]],
+];
+
+const CTRL_GO = { a: "accounting", j: "customers", l: "items", r: "banking", y: "journals", q: "reports" };
+const ALT_GO = {
+  KeyH: "", KeyC: "customers", KeyV: "vendors", KeyQ: "quotes", KeyS: "salesorders", KeyI: "invoices",
+  KeyP: "payments", KeyN: "creditnotes", KeyB: "purchases", KeyM: "vendorpayments", KeyX: "taxes",
+  KeyU: "issued", KeyG: "manage",
+};
+
+function GlobalAdminShortcuts({ isAdmin, defaultDepartment, onProductCreated, onNewBill }) {
   const [open, setOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
     if (!isAdmin) return;
+    const typing = () => {
+      const el = document.activeElement;
+      return !!el && (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || el.isContentEditable);
+    };
+    // a form / dialog is open: don't navigate away from half-typed work
+    const formOpen = () =>
+      [...document.querySelectorAll(".fixed.inset-0")].some((el) => el.querySelector("form, input, select, textarea"));
+    const go = (view) => setSearchParams(view ? { view } : {});
+    const openNew = (view) => {
+      if (searchParams.get("view") === view) {
+        window.dispatchEvent(new CustomEvent("app:new", { detail: { handled: false } }));
+      } else {
+        pendingNew = true;
+        setSearchParams({ view });
+      }
+    };
+    const overlayButton = (pattern) =>
+      [...document.querySelectorAll(".fixed.inset-0 button")].reverse().find((b) => pattern.test(b.textContent.trim()));
+
     const onKeyDown = (e) => {
-      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+      const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
 
+      // ---- keys that work everywhere ----
+      if (e.key === "F1" || (e.key === "?" && !typing() && !mod)) {
+        e.preventDefault();
+        setHelpOpen((v) => !v);
+        return;
+      }
+      if (e.key === "Escape") {
+        if (helpOpen) { setHelpOpen(false); return; }
+        overlayButton(/^(cancel|close)$/i)?.click();
+        return;
+      }
+      if (mod && e.key === "Enter") {
+        e.preventDefault();
+        const form = [...document.querySelectorAll(".fixed.inset-0 form")].pop();
+        if (form) form.requestSubmit();
+        else overlayButton(/^(save|create|record|submit|post|add)\b/i)?.click();
+        return;
+      }
+      if (e.key === "/" && !mod && !e.altKey && !typing()) {
+        e.preventDefault();
+        [...document.querySelectorAll('input[placeholder^="Search"]')].find((i) => i.offsetParent !== null)?.focus();
+        return;
+      }
+
+      if (formOpen() || helpOpen) return; // everything below would leave an open form
+
+      // ---- Alt + letter: go to a list ----
+      if (e.altKey && !mod && !e.shiftKey) {
+        if (e.code === "KeyA") { e.preventDefault(); e.stopPropagation(); window.dispatchEvent(new CustomEvent("app:new", { detail: { handled: false } })); return; }
+        if (e.code in ALT_GO) { e.preventDefault(); go(ALT_GO[e.code]); }
+        return;
+      }
+
+      // ---- Ctrl + letter ----
+      if (!mod || e.shiftKey || e.altKey) return;
+
       if (key === "n") {
-        e.preventDefault(); // stop the browser's own "new window"
-        setOpen(true);
+        e.preventDefault(); // stop the browser's own "new window" (only possible in the installed app window)
+        const detail = { handled: false };
+        window.dispatchEvent(new CustomEvent("app:new", { detail }));
+        if (!detail.handled) setOpen(true); // no "New" on this page -> new item
+      } else if (key === "i") {
+        e.preventDefault();
+        openNew("invoices");
+      } else if (key === "w") {
+        e.preventDefault();
+        openNew("vendorpayments");
       } else if (key === "b") {
         e.preventDefault(); // stop Chrome's "toggle bookmarks bar"
         onNewBill();
-      } else if (key === "i") {
+      } else if (key === "f") {
         e.preventDefault();
-        onNewIssued();
+        [...document.querySelectorAll('input[placeholder^="Search"]')].find((i) => i.offsetParent !== null)?.focus();
+      } else if (key === "a" && typing()) {
+        return; // let Ctrl+A select the text inside a field
+      } else if (key in CTRL_GO) {
+        e.preventDefault();
+        go(CTRL_GO[key]);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isAdmin, onNewBill, onNewIssued]);
+  }, [isAdmin, onNewBill, searchParams, helpOpen]);
 
-  if (!open) return null;
+  // the "Keyboard shortcuts" link in the sidebar
+  useEffect(() => {
+    const show = () => setHelpOpen(true);
+    window.addEventListener("app:help", show);
+    return () => window.removeEventListener("app:help", show);
+  }, []);
 
   return (
-    <ProductForm
-      defaultDepartment={defaultDepartment}
-      onSubmit={async (values, imageFiles) => {
-        await createProduct(values, imageFiles);
-        onProductCreated?.();
-      }}
-      onClose={() => setOpen(false)}
-    />
+    <>
+      {open && (
+        <ProductForm
+          defaultDepartment={defaultDepartment}
+          onSubmit={async (values, imageFiles) => {
+            await createProduct(values, imageFiles);
+            onProductCreated?.();
+          }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+
+      {isAdmin && helpOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setHelpOpen(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold text-gray-900">Keyboard shortcuts</h2>
+              <button type="button" onClick={() => setHelpOpen(false)} className="text-sm text-gray-500 hover:text-gray-800">Close</button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+              {SHORTCUT_HELP.map(([group, rows]) => (
+                <div key={group}>
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1.5">{group}</h3>
+                  {rows.map(([keys, label]) => (
+                    <div key={keys} className="flex items-start justify-between gap-3 py-1 text-sm">
+                      <span className="text-gray-600">{label}</span>
+                      <kbd className="shrink-0 text-xs bg-gray-100 border border-gray-300 rounded px-1.5 py-0.5 text-gray-700 whitespace-nowrap">{keys}</kbd>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-4">On Mac, use Cmd instead of Ctrl and Option instead of Alt.</p>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -10038,20 +10218,32 @@ function ZohoSidebar({ onNavigate }) {
 
       <nav className="flex-1 px-2 py-3">
         {ZOHO_NAV.map((group, gi) => (
-          <div key={gi} className={gi > 0 ? "mt-2 pt-2 border-t border-white/10" : ""}>
+          <div
+            key={gi}
+            className={gi > 0 ? "mt-2 pt-2 border-t border-white/10" : ""}
+          >
             {group.map(({ id, label, Icon, departments }) => (
               <div key={id}>
-                <button onClick={() => go(id)} className={rowCls(activeId === id)}>
+                <button
+                  onClick={() => go(id)}
+                  className={rowCls(activeId === id)}
+                >
                   <Icon size={16} className="shrink-0" />
                   <span className="flex-1 truncate">{label}</span>
                   {departments && (
                     <span
                       role="button"
                       aria-label="Show departments"
-                      onClick={(e) => { e.stopPropagation(); setDeptOpen((v) => !v); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeptOpen((v) => !v);
+                      }}
                       className="p-0.5 rounded hover:bg-white/20"
                     >
-                      <ChevronDown size={14} className={`transition ${deptOpen ? "" : "-rotate-90"}`} />
+                      <ChevronDown
+                        size={14}
+                        className={`transition ${deptOpen ? "" : "-rotate-90"}`}
+                      />
                     </span>
                   )}
                 </button>
@@ -10063,11 +10255,17 @@ function ZohoSidebar({ onNavigate }) {
                         key={d.slug}
                         onClick={() => goDept(d.slug)}
                         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-left ${
-                          dept === d.slug ? "bg-blue-500/80 text-white" : "text-gray-400 hover:bg-white/10 hover:text-white"
+                          dept === d.slug
+                            ? "bg-blue-500/80 text-white"
+                            : "text-gray-400 hover:bg-white/10 hover:text-white"
                         }`}
                       >
                         <span className="w-4 h-4 shrink-0 rounded bg-white flex items-center justify-center overflow-hidden">
-                          <img src={d.logo} alt="" className="max-w-full max-h-full object-contain" />
+                          <img
+                            src={d.logo}
+                            alt=""
+                            className="max-w-full max-h-full object-contain"
+                          />
                         </span>
                         <span className="truncate">{d.name}</span>
                       </button>
@@ -10079,6 +10277,12 @@ function ZohoSidebar({ onNavigate }) {
           </div>
         ))}
       </nav>
+      <button
+        onClick={() => window.dispatchEvent(new Event("app:help"))}
+        className="m-2 px-3 py-2 rounded-md text-xs text-left text-gray-400 hover:bg-white/10 hover:text-white"
+      >
+        Keyboard shortcuts (?)
+      </button>
     </div>
   );
 }
