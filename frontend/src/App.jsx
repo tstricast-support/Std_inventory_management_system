@@ -209,6 +209,8 @@ const updateInvoice = (id, payload) =>
   invoiceRequest(String(id), "PUT", payload, "Failed to update invoice");
 const voidInvoice = (id) => invoiceRequest(`${id}/void`, "PUT", null, "Failed to void invoice");
 
+const deleteInvoice = (id) =>
+  invoiceRequest(String(id), "DELETE", null, "Failed to delete invoice");
 // ---------- Quotes + Sales orders (step 6: no stock or ledger effect until they become an invoice) ----------
 const SALES_DOC_INFO = {
   quote: { title: "Quote", tab: "quotes", dateLabel: "Quote date", endLabel: "Expiry date", empty: "No quotes yet." },
@@ -329,7 +331,7 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
               const canConvert =
                 doc.doc_type === "quote" &&
                 ["draft", "sent", "accepted"].includes(doc.status);
-              const canDelete = !["invoiced", "converted"].includes(doc.status);
+              const canDelete = true;
               const canEdit = !["invoiced", "converted"].includes(doc.status);
               return (
                 <div
@@ -927,6 +929,8 @@ const createCreditNote = (payload) => creditNoteRequest("", "POST", payload, "Fa
 const applyCreditNote = (id, payload) => creditNoteRequest(`${id}/apply`, "POST", payload, "Failed to apply credit");
 const removeCreditApplication = (id, appId) => creditNoteRequest(`${id}/applications/${appId}`, "DELETE", null, "Failed to remove credit");
 const voidCreditNote = (id) => creditNoteRequest(`${id}/void`, "PUT", null, "Failed to void credit note");
+const deleteCreditNote = (id) =>
+  creditNoteRequest(String(id), "DELETE", null, "Failed to delete credit note");
 
 // ---------- Accounts (chart of accounts) ----------
 async function getAccounts(accountType) {
@@ -7252,6 +7256,21 @@ function InvoicesPage({ isAdmin, go }) {
     }
   };
 
+    const handleDelete = async (inv) => {
+      if (
+        !window.confirm(
+          `Permanently delete ${inv.invoice_number}? This can't be undone.`,
+        )
+      )
+        return;
+      try {
+        await deleteInvoice(inv.id);
+        await load();
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+
   const q = search.trim().toLowerCase();
   const shown = invoices.filter(
     (inv) =>
@@ -7417,6 +7436,16 @@ function InvoicesPage({ isAdmin, go }) {
                             className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
                           >
                             <Trash2 size={14} /> Void invoice
+                          </button>
+                        </div>
+                      )}
+                      {inv.status === "void" && (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => handleDelete(inv)}
+                            className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                          >
+                            <Trash2 size={14} /> Delete invoice
                           </button>
                         </div>
                       )}
@@ -7933,6 +7962,11 @@ function CreditNotesPage({ isAdmin, go }) {
     run(() => voidCreditNote(cn.id));
   };
 
+  const handleDelete = (cn) => {
+    if (!window.confirm(`Permanently delete ${cn.credit_number}? This can't be undone.`)) return;
+    run(() => deleteCreditNote(cn.id));
+  };
+
   const handleRemoveApplication = (cn, app) => {
     if (!window.confirm(`Take ${formatRs(app.amount)} off ${app.invoice_number}? That invoice will owe it again.`)) return;
     run(() => removeCreditApplication(cn.id, app.id));
@@ -8115,6 +8149,16 @@ function CreditNotesPage({ isAdmin, go }) {
                             className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}
                           >
                             <Trash2 size={14} /> Void credit note
+                          </button>
+                        </div>
+                      )}
+                      {cn.status === "void" && (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => handleDelete(cn)}
+                            className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}
+                          >
+                            <Trash2 size={14} /> Delete credit note
                           </button>
                         </div>
                       )}

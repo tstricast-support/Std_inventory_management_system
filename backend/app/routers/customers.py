@@ -60,6 +60,9 @@ def delete_customer(customer_id: int, db: Session = Depends(get_db)):
     if db.query(models.Invoice).filter(models.Invoice.customer_id == customer_id).first():
         raise HTTPException(400, "This customer has invoices, so it can't be deleted. Mark it inactive instead.")
 
+    if db.query(models.Payment).filter(models.Payment.customer_id == customer_id).first():
+        raise HTTPException(400, "This customer has payments. Delete those payments first.")
+
     if db.query(models.SalesDocument).filter(models.SalesDocument.customer_id == customer_id).first():
         raise HTTPException(400, "This customer has quotes / sales orders, so it can't be deleted. Mark it inactive instead.")
     if db.query(models.CreditNote).filter(models.CreditNote.customer_id == customer_id).first():

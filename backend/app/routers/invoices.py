@@ -362,3 +362,34 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
     invoice.status = "void"
     db.commit()
     return db.query(models.Invoice).options(*_options()).filter(models.Invoice.id == invoice_id).one()
+
+    
+
+@router.delete("/{invoice_id}")
+def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
+    """Permanently deletes a VOID invoice (stock and ledger were already reversed when it was voided)."""
+    invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).with_for_update().first()
+    if not invoice:
+        raise HTTPException(404, "Invoice not found")
+    if invoice.status != "void":
+        raise HTTPException(400, "Only a void invoice can be deleted. Void it first.")
+    if db.query(models.PaymentAllocation).filter(models.PaymentAllocation.invoice_id == invoice.id).first():
+        raise HTTPException(400, "This invoice still has payments linked to it. Remove the payments first.")
+    if db.query(models.CreditNoteApplication).filter(models.CreditNoteApplication.invoice_id == invoice.id).first():
+        raise HTTPException(400, "This invoice still has credit notes applied to it. Remove those first.")
+
+    # un-link (not delete) anything that only points at this invoice
+    for doc in db.query(models.SalesDocument).filter(models.SalesDocument.invoice_id == invoice.id).all():
+        doc.invoice_id = None
+    for note in db.query(models.CreditNote).filter(models.CreditNote.invoice_id == invoice.id).all():
+        note.invoice_id = None
+
+    # leftover ledger entries from this invoice (normally already removed by void)
+    for journal in db.query(models.Journal).filter(
+        models.Journal.source_type == "invoice", models.Journal.source_id == invoice.id
+    ).all():
+        db.delete(journal)
+
+    db.delete(invoice)   # its lines go with it
+    db.commit()
+    return {"message": "Deleted"}

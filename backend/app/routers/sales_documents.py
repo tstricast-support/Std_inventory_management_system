@@ -235,10 +235,10 @@ def delete_document(doc_id: int, db: Session = Depends(get_db)):
     doc = _load(db, doc_id)
     if not doc:
         raise HTTPException(404, "Document not found")
-    if doc.status == "invoiced":
-        raise HTTPException(400, "This was invoiced. Void the invoice first.")
-    if doc.status == "converted":
-        raise HTTPException(400, "This quote became a sales order. Delete the sales order first.")
+    if doc.status == "invoiced" and doc.invoice and doc.invoice.status != "void":
+        raise HTTPException(400, f"This was invoiced ({doc.invoice.invoice_number}). Void that invoice first.")
+    # a "converted" quote can now be deleted; the sales order made from it stays as it is
+    doc.invoice_id = None
 
     if doc.doc_type == "sales_order" and doc.source_id:
         quote = db.query(models.SalesDocument).get(doc.source_id)

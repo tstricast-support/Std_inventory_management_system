@@ -257,3 +257,25 @@ def void_credit_note(credit_id: int, db: Session = Depends(get_db)):
     db.commit()
     return _load(db, credit_id)
     
+
+
+@router.delete("/{credit_id}")
+def delete_credit_note(credit_id: int, db: Session = Depends(get_db)):
+    """Permanently deletes a VOID credit note (stock and ledger were already reversed when it was voided)."""
+    credit = _load(db, credit_id)
+    if not credit:
+        raise HTTPException(404, "Credit note not found")
+    if credit.status != "void":
+        raise HTTPException(400, "Only a void credit note can be deleted. Void it first.")
+    if credit.applications or float(credit.amount_applied or 0) > 0:
+        raise HTTPException(400, "This credit was used on invoices. Remove those first.")
+
+    # leftover ledger entries (normally already removed by void)
+    for journal in db.query(models.Journal).filter(
+        models.Journal.source_type == "credit_note", models.Journal.source_id == credit.id
+    ).all():
+        db.delete(journal)
+
+    db.delete(credit)   # its lines go with it
+    db.commit()
+    return {"message": "Deleted"}
