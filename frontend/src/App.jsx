@@ -2913,7 +2913,15 @@ function ThemePanel() {
   );
 }
 
-function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddProduct, inlineAction }) {
+function AppHeader({
+  isAdmin,
+  active,
+  onTab,
+  onProductAdded,
+  actions,
+  hideAddProduct,
+  inlineAction,
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -2923,6 +2931,20 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
   const [restockingProduct, setRestockingProduct] = useState(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const addProductRef = useRef(null);
+
+  // "+ New Invoice": go to the Invoices page and open its New Invoice form
+  // (same behaviour as Ctrl+I; if already on Invoices, just open the form)
+  const openNewInvoice = () => {
+    if (searchParams.get("view") === "invoices") {
+      window.dispatchEvent(
+        new CustomEvent("app:new", { detail: { handled: false } }),
+      );
+    } else {
+      pendingNew = true;
+      setSearchParams({ view: "invoices" });
+    }
+  };
+
   const longPressTimer = useRef(null);
   const longPressTriggered = useRef(false);
 
@@ -2951,11 +2973,22 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
         .filter((p) => p.label.toLowerCase().includes(q)) // matches the item's own name OR any parent/parent-subitem's name
         .sort((a, b) => compareNames(a.name, b.name))
     : [];
-  const matchedVendors = q ? vendors.filter((v) => v.name.toLowerCase().includes(q)).sort((a, b) => compareNames(a.name, b.name)) : [];
-  const matchedAccounts = q ? accounts.filter((a) => a.name.toLowerCase().includes(q)).sort((a, b) => compareNames(a.name, b.name)) : [];
-  const hasResults = matchedItems.length > 0 || matchedVendors.length > 0 || matchedAccounts.length > 0;
+  const matchedVendors = q
+    ? vendors
+        .filter((v) => v.name.toLowerCase().includes(q))
+        .sort((a, b) => compareNames(a.name, b.name))
+    : [];
+  const matchedAccounts = q
+    ? accounts
+        .filter((a) => a.name.toLowerCase().includes(q))
+        .sort((a, b) => compareNames(a.name, b.name))
+    : [];
+  const hasResults =
+    matchedItems.length > 0 ||
+    matchedVendors.length > 0 ||
+    matchedAccounts.length > 0;
 
-    const startLongPress = (item) => {
+  const startLongPress = (item) => {
     if (!isAdmin) return; // can't restock a parent - it has no real stock of its own
     longPressTriggered.current = false;
     longPressTimer.current = setTimeout(() => {
@@ -2964,17 +2997,40 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
     }, 550);
   };
   const cancelLongPress = () => {
-    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
   };
-  const closeSearch = () => { setQuery(""); setSearchOpen(false); };
-    const currentAsFrom = () => searchParams.toString() || "home";
+  const closeSearch = () => {
+    setQuery("");
+    setSearchOpen(false);
+  };
+  const currentAsFrom = () => searchParams.toString() || "home";
   const handleItemClick = (item) => {
-    if (longPressTriggered.current) { longPressTriggered.current = false; return; }
+    if (longPressTriggered.current) {
+      longPressTriggered.current = false;
+      return;
+    }
     closeSearch();
-    setSearchParams({ view: "items", item: String(item.id), from: currentAsFrom() });
+    setSearchParams({
+      view: "items",
+      item: String(item.id),
+      from: currentAsFrom(),
+    });
   };
-  const handleVendorClick = () => { closeSearch(); setSearchParams({ view: "vendors" }); };
-  const handleAccountClick = (a) => { closeSearch(); setSearchParams({ view: "accounting", account: String(a.id), from: currentAsFrom() }); };
+  const handleVendorClick = () => {
+    closeSearch();
+    setSearchParams({ view: "vendors" });
+  };
+  const handleAccountClick = (a) => {
+    closeSearch();
+    setSearchParams({
+      view: "accounting",
+      account: String(a.id),
+      from: currentAsFrom(),
+    });
+  };
   const handleRestock = async (id, quantity, note) => {
     await restockProduct(id, quantity, note);
     setProducts(await getProducts());
@@ -2983,13 +3039,20 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
   const resultsPanel = q && (
     <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-gray-200 rounded-xl shadow-lg max-h-96 overflow-y-auto p-3 space-y-4">
       {!hasResults ? (
-        <p className="text-sm text-gray-400 text-center py-6">Nothing matches "{query.trim()}".</p>
+        <p className="text-sm text-gray-400 text-center py-6">
+          Nothing matches "{query.trim()}".
+        </p>
       ) : (
         <>
           {matchedItems.length > 0 && (
             <div>
               <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
-                Items {isAdmin && <span className="text-gray-400 font-normal normal-case">· hold an item to add stock</span>}
+                Items{" "}
+                {isAdmin && (
+                  <span className="text-gray-400 font-normal normal-case">
+                    · hold an item to add stock
+                  </span>
+                )}
               </h3>
               <div className="space-y-1.5">
                 {matchedItems.map((p) => (
@@ -3002,13 +3065,22 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
                     onPointerLeave={cancelLongPress}
                     onPointerCancel={cancelLongPress}
                     onContextMenu={(e) => e.preventDefault()}
-                    style={{ touchAction: "manipulation", WebkitUserSelect: "none", userSelect: "none" }}
+                    style={{
+                      touchAction: "manipulation",
+                      WebkitUserSelect: "none",
+                      userSelect: "none",
+                    }}
                     className="w-full flex items-center justify-between gap-3 rounded-lg p-2 text-left hover:bg-gray-50 transition"
                   >
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{p.label}</p>
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {p.label}
+                      </p>
                     </div>
-                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                    <ChevronRight
+                      size={16}
+                      className="text-gray-400 shrink-0"
+                    />
                   </button>
                 ))}
               </div>
@@ -3017,13 +3089,24 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
 
           {matchedVendors.length > 0 && (
             <div>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Vendors</h3>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                Vendors
+              </h3>
               <div className="space-y-1.5">
                 {matchedVendors.map((v) => (
-                  <button key={`vendor-${v.id}`} type="button" onClick={handleVendorClick}
-                    className="w-full flex items-center justify-between gap-3 rounded-lg p-2 text-left hover:bg-gray-50 transition">
-                    <p className="text-sm font-medium text-gray-900 truncate">{v.name}</p>
-                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                  <button
+                    key={`vendor-${v.id}`}
+                    type="button"
+                    onClick={handleVendorClick}
+                    className="w-full flex items-center justify-between gap-3 rounded-lg p-2 text-left hover:bg-gray-50 transition"
+                  >
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {v.name}
+                    </p>
+                    <ChevronRight
+                      size={16}
+                      className="text-gray-400 shrink-0"
+                    />
                   </button>
                 ))}
               </div>
@@ -3032,16 +3115,29 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
 
           {matchedAccounts.length > 0 && (
             <div>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Accounts</h3>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                Accounts
+              </h3>
               <div className="space-y-1.5">
                 {matchedAccounts.map((a) => (
-                  <button key={`account-${a.id}`} type="button" onClick={() => handleAccountClick(a)}
-                    className="w-full flex items-center justify-between gap-3 rounded-lg p-2 text-left hover:bg-gray-50 transition">
+                  <button
+                    key={`account-${a.id}`}
+                    type="button"
+                    onClick={() => handleAccountClick(a)}
+                    className="w-full flex items-center justify-between gap-3 rounded-lg p-2 text-left hover:bg-gray-50 transition"
+                  >
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{a.name}</p>
-                      <p className="text-xs text-gray-400">{ACCOUNT_TYPE_NAMES[a.account_type] || a.account_type}</p>
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {a.name}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        {ACCOUNT_TYPE_NAMES[a.account_type] || a.account_type}
+                      </p>
                     </div>
-                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                    <ChevronRight
+                      size={16}
+                      className="text-gray-400 shrink-0"
+                    />
                   </button>
                 ))}
               </div>
@@ -3121,10 +3217,16 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
                   </div>
                 </>
               )}
+              <button
+                onClick={openNewInvoice}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
+              >
+                + New Invoice
+              </button>
               <AddProductButton
                 ref={addProductRef}
                 onCreated={onProductAdded}
-                hideTrigger={hideAddProduct}
+                hideTrigger={hideAddProduct || active !== "items"}
               />
             </>
           )}
@@ -3260,7 +3362,14 @@ function StockBadge({ quantity, lowStock }) {
       : lowStock
       ? "bg-amber-100 text-amber-700"
       : "bg-green-100 text-green-700";
-  const label = quantity <= 0 ? "Out of stock" : lowStock ? `${quantity} · Low stock` : `${quantity} in stock`;
+  const label =
+    quantity < 0
+      ? `Out of stock (${quantity})`
+      : quantity === 0
+        ? "Out of stock"
+        : lowStock
+          ? `${quantity} · Low stock`
+          : `${quantity} in stock`;
   return <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${colorClass}`}>{label}</span>;
 }
 
@@ -7368,6 +7477,8 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [showCustomerForm, setShowCustomerForm] = useState(false);
+  const [showItemForm, setShowItemForm] = useState(false);
   const cls =
     "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 
@@ -7426,6 +7537,32 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     });
   };
 
+  // "Create Customer" button: save, add to the dropdown, and select it
+  const handleCreateCustomer = async (_id, payload) => {
+    const created = await createCustomer(payload);
+    setCustomers((prev) => [...prev, created]);
+    setCustomerId(created.id);
+  };
+
+  // "Create Item" button: save, reload the item list, and put the new item on the first empty line
+  const handleCreateItem = async (values, imageFiles) => {
+    const created = await createProduct(values, imageFiles);
+    const tree = await getProducts();
+    setItems(flattenParents(tree).filter((x) => !(x.subitems?.length > 0)));
+    const newLine = {
+      ...blankInvoiceLine(),
+      product_id: created.id,
+      description: created.description || "",
+      rate: String(created.price ?? 0),
+    };
+    setLines((prev) => {
+      const i = prev.findIndex((l) => !l.product_id);
+      return i === -1
+        ? [...prev, newLine]
+        : prev.map((l, idx) => (idx === i ? newLine : l));
+    });
+  };
+
   // the same item can be on two lines, so stock is checked against the combined quantity
   const used = {};
   lines.forEach((l) => {
@@ -7454,7 +7591,7 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
         Number(l.quantity) > 0 &&
         toCents(l.rate) >= 0,
     ) &&
-    !filled.some(overStock) &&
+
     totalCents > 0 &&
     effectiveDue >= date;
 
@@ -7501,7 +7638,17 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <FieldLabel>Customer</FieldLabel>
+            <FieldLabel
+              action={
+                !editInvoice && (
+                  <FieldButton onClick={() => setShowCustomerForm(true)}>
+                    Create Customer
+                  </FieldButton>
+                )
+              }
+            >
+              Customer
+            </FieldLabel>
             {editInvoice ? (
               <p className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-700">
                 {editInvoice.customer_name}
@@ -7556,7 +7703,15 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
           </div>
 
           <div className="space-y-3">
-            <FieldLabel>Items</FieldLabel>
+            <FieldLabel
+              action={
+                <FieldButton onClick={() => setShowItemForm(true)}>
+                  Create Item
+                </FieldButton>
+              }
+            >
+              Items
+            </FieldLabel>
             {lines.map((l, i) => {
               const p = itemById[l.product_id];
               return (
@@ -7632,8 +7787,13 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
                   </div>
 
                   {overStock(l) && (
-                    <p className="text-xs text-red-600">
+                    <p className="text-xs text-amber-600">
                       Only {p.quantity + (oldQty[l.product_id] || 0)} in stock.
+                      You can still sell it, but stock will go to{" "}
+                      {p.quantity +
+                        (oldQty[l.product_id] || 0) -
+                        used[l.product_id]}
+                      .
                     </p>
                   )}
                 </div>
@@ -7682,6 +7842,20 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
             </button>
           </div>
         </form>
+
+        {/* Rendered outside the <form> so their submit doesn't reach the invoice form */}
+        {showCustomerForm && (
+          <CustomerForm
+            onSubmit={handleCreateCustomer}
+            onClose={() => setShowCustomerForm(false)}
+          />
+        )}
+        {showItemForm && (
+          <ProductForm
+            onSubmit={handleCreateItem}
+            onClose={() => setShowItemForm(false)}
+          />
+        )}
       </div>
     </div>
   );

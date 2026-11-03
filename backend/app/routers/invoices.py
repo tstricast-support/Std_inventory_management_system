@@ -114,14 +114,7 @@ def create_invoice(payload: schemas.InvoiceCreate, db: Session = Depends(get_db)
         if products[pid].subitems:
             raise HTTPException(400, f"{products[pid].name} is a parent item. Pick one of its subitems.")
 
-    short = [
-        f"{products[pid].name} (need {qty}, only {products[pid].quantity} in stock)"
-        for pid, qty in wanted.items()
-        if products[pid].item_type == STOCK_TRACKED_TYPE and products[pid].quantity < qty
-    ]
-    if short:
-        raise HTTPException(400, "Not enough stock: " + "; ".join(short))
-
+    
     # ---- build the invoice lines and work out what to post to the ledger ----
     number = _next_number(db)
     invoice_lines = []
@@ -257,15 +250,7 @@ def update_invoice(invoice_id: int, payload: schemas.InvoiceCreate, db: Session 
         if products[pid].subitems:
             raise HTTPException(400, f"{products[pid].name} is a parent item. Pick one of its subitems.")
 
-    # stock available = what is on the shelf now + what this invoice already took
-    short = [
-        f"{products[pid].name} (need {qty}, only {products[pid].quantity + old_qty.get(pid, 0)} available)"
-        for pid, qty in wanted.items()
-        if products[pid].item_type == STOCK_TRACKED_TYPE and products[pid].quantity + old_qty.get(pid, 0) < qty
-    ]
-    if short:
-        raise HTTPException(400, "Not enough stock: " + "; ".join(short))
-
+    
     # ---- build the new lines and the new ledger entry ----
     number = invoice.invoice_number
     invoice_lines = []
