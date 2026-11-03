@@ -90,7 +90,12 @@ async function updateVendor(id, payload) {
 
 async function deleteVendor(id) {
   const res = await fetch(`${BASE_URL}/vendors/${id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Failed to delete vendor");
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(
+      typeof err?.detail === "string" ? err.detail : "Failed to delete vendor",
+    );
+  }
   return res.json();
 }
 
@@ -200,6 +205,8 @@ async function invoiceRequest(path, method, payload, failMsg) {
 }
 const getInvoices = () => invoiceRequest("", "GET", null, "Failed to fetch invoices");
 const createInvoice = (payload) => invoiceRequest("", "POST", payload, "Failed to save invoice");
+const updateInvoice = (id, payload) =>
+  invoiceRequest(String(id), "PUT", payload, "Failed to update invoice");
 const voidInvoice = (id) => invoiceRequest(`${id}/void`, "PUT", null, "Failed to void invoice");
 
 // ---------- Quotes + Sales orders (step 6: no stock or ledger effect until they become an invoice) ----------
@@ -7093,6 +7100,7 @@ function InvoicesPage({ isAdmin, go }) {
   }, []);
   const [payFor, setPayFor] = useState(null); // the invoice whose "Record payment" button was pressed
   const [creditFor, setCreditFor] = useState(null); // the invoice whose "Credit note" button was pressed
+  const [editFor, setEditFor] = useState(null); // the invoice whose "Edit invoice" button was pressed
   const handleVoid = async (inv) => {
     if (
       !window.confirm(
@@ -7245,6 +7253,14 @@ function InvoicesPage({ isAdmin, go }) {
 
                       {inv.status !== "void" && (
                         <div className="flex flex-wrap gap-2">
+                          {inv.amount_paid <= 0.004 && (
+                            <button
+                              onClick={() => setEditFor(inv)}
+                              className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
+                            >
+                              <Pencil size={14} /> Edit invoice
+                            </button>
+                          )}
                           {inv.balance_due > 0.004 && (
                             <button
                               onClick={() => setPayFor(inv)}
@@ -7280,10 +7296,22 @@ function InvoicesPage({ isAdmin, go }) {
       {formOpen && (
         <InvoiceForm onClose={() => setFormOpen(false)} onSaved={load} />
       )}
-      
+
+      {editFor && (
+        <InvoiceForm
+          editInvoice={editFor}
+          onClose={() => setEditFor(null)}
+          onSaved={load}
+        />
+      )}
+
       {creditFor && (
-          <CreditNoteForm fromInvoice={creditFor} onClose={() => setCreditFor(null)} onSaved={load} />
-        )}
+        <CreditNoteForm
+          fromInvoice={creditFor}
+          onClose={() => setCreditFor(null)}
+          onSaved={load}
+        />
+      )}
 
       {payFor && (
         <PaymentForm
@@ -7299,19 +7327,27 @@ function InvoicesPage({ isAdmin, go }) {
 
 const blankInvoiceLine = () => ({ product_id: "", description: "", quantity: "1", rate: "" });
 
-function InvoiceForm({ fromDoc = null, onClose, onSaved }) {
+function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
   const [customers, setCustomers] = useState([]);
   const [items, setItems] = useState([]);
   const [customerId, setCustomerId] = useState(
-    fromDoc ? fromDoc.customer_id : "",
+    editInvoice ? editInvoice.customer_id : fromDoc ? fromDoc.customer_id : "",
   );
-  const [date, setDate] = useState(toISODate(new Date()));
-  const [dueDate, setDueDate] = useState(""); // empty = follow the customer's payment terms
-  const [orderNumber, setOrderNumber] = useState(fromDoc?.reference || "");
-  const [notes, setNotes] = useState(fromDoc?.notes || "");
+  const [date, setDate] = useState(
+    editInvoice ? editInvoice.invoice_date : toISODate(new Date()),
+  );
+  const [dueDate, setDueDate] = useState(
+    editInvoice ? editInvoice.due_date : "",
+  ); // empty = follow the customer's payment terms
+  const [orderNumber, setOrderNumber] = useState(
+    editInvoice?.order_number || fromDoc?.reference || "",
+  );
+  const [notes, setNotes] = useState(
+    editInvoice?.notes || fromDoc?.notes || "",
+  );
   const [lines, setLines] = useState(
-    fromDoc && fromDoc.items.some((l) => l.product_id)
-      ? fromDoc.items
+    editInvoice && editInvoice.items.some((l) => l.product_id)
+      ? editInvoice.items
           .filter((l) => l.product_id)
           .map((l) => ({
             product_id: l.product_id,
@@ -7319,7 +7355,16 @@ function InvoiceForm({ fromDoc = null, onClose, onSaved }) {
             quantity: String(l.quantity),
             rate: String(l.rate),
           }))
-      : [blankInvoiceLine()],
+      : fromDoc && fromDoc.items.some((l) => l.product_id)
+        ? fromDoc.items
+            .filter((l) => l.product_id)
+            .map((l) => ({
+              product_id: l.product_id,
+              description: l.description || "",
+              quantity: String(l.quantity),
+              rate: String(l.rate),
+            }))
+        : [blankInvoiceLine()],
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -7329,7 +7374,9 @@ function InvoiceForm({ fromDoc = null, onClose, onSaved }) {
   useEffect(() => {
     Promise.all([getCustomers(), getProducts()])
       .then(([c, p]) => {
-        setCustomers(c.filter((x) => x.is_active));
+        setCustomers(
+          c.filter((x) => x.is_active || x.id === editInvoice?.customer_id),
+        );
         // only real, sellable items: a parent that has subitems can't be sold itself
         setItems(flattenParents(p).filter((x) => !(x.subitems?.length > 0)));
       })
@@ -7350,12 +7397,18 @@ function InvoiceForm({ fromDoc = null, onClose, onSaved }) {
     hint: c.payment_terms,
     search: `${c.display_name} ${c.company_name || ""}`,
   }));
+  // when editing, the quantities this invoice already took out of stock count as available again
+  const oldQty = {};
+  (editInvoice?.items || []).forEach((l) => {
+    if (l.product_id)
+      oldQty[l.product_id] = (oldQty[l.product_id] || 0) + l.quantity;
+  });
   const itemOptions = items.map((p) => ({
     value: p.id,
     label: p.label,
     hint:
       p.item_type === STOCK_TRACKED_TYPE
-        ? `${p.quantity} in stock`
+        ? `${p.quantity + (oldQty[p.id] || 0)} in stock`
         : p.item_type,
     search: `${p.label} ${p.sku || ""}`,
   }));
@@ -7385,7 +7438,7 @@ function InvoiceForm({ fromDoc = null, onClose, onSaved }) {
     return (
       Boolean(p) &&
       p.item_type === STOCK_TRACKED_TYPE &&
-      used[l.product_id] > p.quantity
+      used[l.product_id] > p.quantity + (oldQty[l.product_id] || 0)
     );
   };
 
@@ -7410,7 +7463,7 @@ function InvoiceForm({ fromDoc = null, onClose, onSaved }) {
     setSubmitting(true);
     setError(null);
     try {
-      await createInvoice({
+      const invoicePayload = {
         customer_id: customerId,
         sales_document_id: fromDoc ? fromDoc.id : null,
         invoice_date: date,
@@ -7423,7 +7476,9 @@ function InvoiceForm({ fromDoc = null, onClose, onSaved }) {
           quantity: Number(l.quantity),
           rate: Number(l.rate) || 0,
         })),
-      });
+      };
+      if (editInvoice) await updateInvoice(editInvoice.id, invoicePayload);
+      else await createInvoice(invoicePayload);
       await onSaved();
       onClose();
     } catch (err) {
@@ -7436,7 +7491,9 @@ function InvoiceForm({ fromDoc = null, onClose, onSaved }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">New Invoice</h2>
+        <h2 className="text-lg font-semibold mb-4">
+          {editInvoice ? `Edit ${editInvoice.invoice_number}` : "New Invoice"}
+        </h2>
         {error && (
           <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
             {error}
@@ -7445,14 +7502,20 @@ function InvoiceForm({ fromDoc = null, onClose, onSaved }) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <FieldLabel>Customer</FieldLabel>
-            <SearchSelect
-              value={customerId}
-              onChange={setCustomerId}
-              options={customerOptions}
-              placeholder="Select a customer..."
-              searchPlaceholder="Search customers..."
-              emptyText="No customers found"
-            />
+            {editInvoice ? (
+              <p className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-700">
+                {editInvoice.customer_name}
+              </p>
+            ) : (
+              <SearchSelect
+                value={customerId}
+                onChange={setCustomerId}
+                options={customerOptions}
+                placeholder="Select a customer..."
+                searchPlaceholder="Search customers..."
+                emptyText="No customers found"
+              />
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -7570,7 +7633,7 @@ function InvoiceForm({ fromDoc = null, onClose, onSaved }) {
 
                   {overStock(l) && (
                     <p className="text-xs text-red-600">
-                      Only {p.quantity} in stock.
+                      Only {p.quantity + (oldQty[l.product_id] || 0)} in stock.
                     </p>
                   )}
                 </div>
@@ -7611,7 +7674,11 @@ function InvoiceForm({ fromDoc = null, onClose, onSaved }) {
               disabled={!canSave || submitting}
               className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
-              {submitting ? "Saving..." : "Save Invoice"}
+              {submitting
+                ? "Saving..."
+                : editInvoice
+                  ? "Save Changes"
+                  : "Save Invoice"}
             </button>
           </div>
         </form>

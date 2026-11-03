@@ -207,6 +207,146 @@ def create_invoice(payload: schemas.InvoiceCreate, db: Session = Depends(get_db)
     db.commit()
     return db.query(models.Invoice).options(*_options()).filter(models.Invoice.id == invoice.id).one()
 
+@router.put("/{invoice_id}", response_model=schemas.InvoiceOut)
+def update_invoice(invoice_id: int, payload: schemas.InvoiceCreate, db: Session = Depends(get_db)):
+    """Edits an invoice in place (it keeps its number): the old stock and ledger entry are reversed, then the new ones are posted."""
+    invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).with_for_update().first()
+    if not invoice:
+        raise HTTPException(404, "Invoice not found")
+    if invoice.status == "void":
+        raise HTTPException(400, "A void invoice can't be edited")
+    if float(invoice.amount_paid or 0) > 0:
+        raise HTTPException(400, "This invoice has payments or credits applied. Remove them first.")
+    if payload.customer_id != invoice.customer_id:
+        raise HTTPException(400, "The customer can't be changed. Void this invoice and create a new one.")
+    if db.query(models.CreditNote).filter(
+        models.CreditNote.invoice_id == invoice.id, models.CreditNote.status != "void"
+    ).first():
+        raise HTTPException(400, "This invoice has a credit note. Void the credit note first.")
+    if not payload.items:
+        raise HTTPException(400, "Add at least one item")
+
+    customer = invoice.customer
+    due_date = payload.due_date or payload.invoice_date + timedelta(days=TERM_DAYS.get(customer.payment_terms, 0))
+    if due_date < payload.invoice_date:
+        raise HTTPException(400, "Due date can't be before the invoice date")
+
+    # what the invoice took out of stock before, per item
+    old_qty: dict[int, int] = {}
+    for item in invoice.items:
+        if item.product_id:
+            old_qty[item.product_id] = old_qty.get(item.product_id, 0) + item.quantity
+
+    wanted: dict[int, int] = {}
+    for line in payload.items:
+        if line.quantity <= 0:
+            raise HTTPException(400, "Every quantity must be greater than 0")
+        if line.rate < 0:
+            raise HTTPException(400, "A rate can't be negative")
+        wanted[line.product_id] = wanted.get(line.product_id, 0) + line.quantity
+
+    ids = set(wanted) | set(old_qty)
+    products = {
+        p.id: p
+        for p in db.query(models.Product).filter(models.Product.id.in_(ids)).with_for_update().all()
+    }
+    missing = [pid for pid in wanted if pid not in products]
+    if missing:
+        raise HTTPException(404, f"Item(s) not found: {missing}")
+    for pid in wanted:
+        if products[pid].subitems:
+            raise HTTPException(400, f"{products[pid].name} is a parent item. Pick one of its subitems.")
+
+    # stock available = what is on the shelf now + what this invoice already took
+    short = [
+        f"{products[pid].name} (need {qty}, only {products[pid].quantity + old_qty.get(pid, 0)} available)"
+        for pid, qty in wanted.items()
+        if products[pid].item_type == STOCK_TRACKED_TYPE and products[pid].quantity + old_qty.get(pid, 0) < qty
+    ]
+    if short:
+        raise HTTPException(400, "Not enough stock: " + "; ".join(short))
+
+    # ---- build the new lines and the new ledger entry ----
+    number = invoice.invoice_number
+    invoice_lines = []
+    total = Decimal("0")
+    income: dict[int, Decimal] = {}
+    cogs: dict[int, Decimal] = {}
+    stock: dict[int, Decimal] = {}
+
+    for line in payload.items:
+        product = products[line.product_id]
+        rate = _money(line.rate)
+        amount = (rate * line.quantity).quantize(CENT, ROUND_HALF_UP)
+        unit_cost = _money(product.cost)
+        total += amount
+
+        invoice_lines.append(models.InvoiceItem(
+            product_id=product.id,
+            item_name=product.name,
+            description=(line.description or "").strip() or None,
+            quantity=line.quantity,
+            rate=rate,
+            unit_cost=unit_cost,
+            amount=amount,
+        ))
+
+        income_id = product.income_account_id or _get_or_create_account(db, "Sales", "income").id
+        income[income_id] = income.get(income_id, Decimal("0")) + amount
+
+        if product.item_type == STOCK_TRACKED_TYPE and unit_cost > 0:
+            cost = (unit_cost * line.quantity).quantize(CENT, ROUND_HALF_UP)
+            cogs_id = product.cogs_account_id or _get_or_create_account(db, "Cost of Goods Sold", "cogs").id
+            asset_id = product.asset_account_id or _get_or_create_account(db, "Inventory Asset", "asset").id
+            cogs[cogs_id] = cogs.get(cogs_id, Decimal("0")) + cost
+            stock[asset_id] = stock.get(asset_id, Decimal("0")) + cost
+
+    if total <= 0:
+        raise HTTPException(400, "The invoice total must be greater than 0")
+
+    # ---- one transaction: put the old stock back, remove the old ledger entry, post the new ones ----
+    for pid, qty in old_qty.items():
+        if pid in products and products[pid].item_type == STOCK_TRACKED_TYPE:
+            products[pid].quantity += qty
+    for pid, qty in wanted.items():
+        if products[pid].item_type == STOCK_TRACKED_TYPE:
+            products[pid].quantity -= qty
+
+    for journal in db.query(models.Journal).filter(
+        models.Journal.source_type == "invoice", models.Journal.source_id == invoice.id
+    ).all():
+        db.delete(journal)
+    db.flush()   # the old journal must be gone before the new one reuses its number
+
+    invoice.items = invoice_lines
+    invoice.invoice_date = payload.invoice_date
+    invoice.due_date = due_date
+    invoice.order_number = (payload.order_number or "").strip() or None
+    invoice.notes = (payload.notes or "").strip() or None
+    invoice.total = total
+
+    journal_lines = [models.JournalLine(
+        account_id=_receivable_account(db).id, debit=total, credit=0,
+        description=f"Invoice {number} - {customer.display_name}",
+    )]
+    for account_id, amount in income.items():
+        journal_lines.append(models.JournalLine(account_id=account_id, debit=0, credit=amount, description=f"Sales {number}"))
+    for account_id, amount in cogs.items():
+        journal_lines.append(models.JournalLine(account_id=account_id, debit=amount, credit=0, description=f"Cost of sales {number}"))
+    for account_id, amount in stock.items():
+        journal_lines.append(models.JournalLine(account_id=account_id, debit=0, credit=amount, description=f"Stock sold {number}"))
+
+    db.add(models.Journal(
+        journal_number=number,
+        journal_date=payload.invoice_date,
+        reference=customer.display_name,
+        notes=f"Invoice {number}",
+        source_type="invoice",
+        source_id=invoice.id,
+        lines=journal_lines,
+    ))
+    db.commit()
+    return db.query(models.Invoice).options(*_options()).filter(models.Invoice.id == invoice.id).one()
 
 @router.put("/{invoice_id}/void", response_model=schemas.InvoiceOut)
 def void_invoice(invoice_id: int, db: Session = Depends(get_db)):

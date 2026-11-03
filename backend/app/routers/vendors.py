@@ -41,11 +41,17 @@ def delete_vendor(vendor_id: int, db: Session = Depends(get_db)):
     if not vendor:
         raise HTTPException(404, "Vendor not found")
 
-    if (
-        db.query(models.PurchaseBill).filter(models.PurchaseBill.vendor_id == vendor_id).first()
-        or db.query(models.VendorPayment).filter(models.VendorPayment.vendor_id == vendor_id).first()
-    ):
-        raise HTTPException(400, "This vendor has bills or payments, so it can't be deleted")
+    if db.query(models.VendorPayment).filter(models.VendorPayment.vendor_id == vendor_id).first():
+        raise HTTPException(400, "This vendor has payments, so it can't be deleted. Delete those payments first.")
+
+    bills = db.query(models.PurchaseBill).filter(models.PurchaseBill.vendor_id == vendor_id).all()
+    live = [b.bill_number for b in bills if b.status != "void"]
+    if live:
+        raise HTTPException(400, "This vendor has active bills (" + ", ".join(live) + "). Void them first.")
+
+    # only void bills are left: they have no stock or ledger effect any more, so they go with the vendor
+    for bill in bills:
+        db.delete(bill)
     db.delete(vendor)
     db.commit()
     return {"message": "Deleted"}
