@@ -1198,6 +1198,33 @@ async function createBill(adderName, items) {
   return res.json();
 }
 
+
+async function updateBill(id, adderName, items) {
+  const res = await fetch(`${BASE_URL}/bills/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ adder_name: adderName, items }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(
+      typeof err?.detail === "string" ? err.detail : "Failed to update bill",
+    );
+  }
+  return res.json();
+}
+
+async function deleteBill(id) {
+  const res = await fetch(`${BASE_URL}/bills/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(
+      typeof err?.detail === "string" ? err.detail : "Failed to delete bill",
+    );
+  }
+  return res.json();
+}
+
 // ---------- Date helpers ----------
 function formatDateTime(iso) {
   const d = new Date(iso);
@@ -9640,8 +9667,8 @@ function CreateItemPanel({ existingNames, parentOptions = [], onCreate, onCancel
 }
 
 // Asks for the stock adder's name, then saves the whole bill
-function SubmitBillModal({ lines, onSubmit, onClose }) {
-  const [name, setName] = useState("");
+function SubmitBillModal({ lines, onSubmit, onClose, initialName = "" }) {
+  const [name, setName] = useState(initialName);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const totalUnits = lines.reduce((sum, l) => sum + l.quantity, 0);
@@ -9667,21 +9694,44 @@ function SubmitBillModal({ lines, onSubmit, onClose }) {
           <h2 className="text-lg font-semibold">Submit Bill</h2>
         </div>
         <p className="text-sm text-gray-500 mb-4">
-          {lines.length} {lines.length === 1 ? "item" : "items"} · {totalUnits} units will be added to stock
+          {lines.length} {lines.length === 1 ? "item" : "items"} · {totalUnits}{" "}
+          units will be added to stock
         </p>
 
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Stock adder name *</label>
-            <input autoFocus required value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" className={inputCls} />
+            <label className="block text-xs text-gray-500 mb-1">
+              Stock adder name *
+            </label>
+            <input
+              autoFocus
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Your name"
+              className={inputCls}
+            />
           </div>
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} disabled={submitting} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+            >
               Cancel
             </button>
-            <button type="submit" disabled={submitting} className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700 disabled:opacity-50">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+            >
               {submitting ? "Saving..." : "Confirm"}
             </button>
           </div>
@@ -9691,7 +9741,7 @@ function SubmitBillModal({ lines, onSubmit, onClose }) {
   );
 }
 // ---------- New bill form ----------
-function NewBillForm({ onBack, onSaved }) {
+function NewBillForm({ onBack, onSaved, editBill = null }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -9704,12 +9754,34 @@ function NewBillForm({ onBack, onSaved }) {
   const [showCreateItem, setShowCreateItem] = useState(false);
   const [showSubmit, setShowSubmit] = useState(false);
 
-  useEffect(() => {
-    getProducts()
-      .then(setProducts)
-      .catch((err) => setLoadError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
+    useEffect(() => {
+      getProducts()
+        .then((p) => {
+          setProducts(p);
+          if (editBill) {
+            // start from the bill's current lines; show stock as it was BEFORE this bill
+            const flat = flattenParents(p);
+            setLines(
+              editBill.items
+                .map((it) => {
+                  const prod = flat.find((x) => x.id === it.product_id);
+                  return prod
+                    ? {
+                        product: {
+                          ...prod,
+                          quantity: prod.quantity - it.quantity,
+                        },
+                        quantity: it.quantity,
+                      }
+                    : null;
+                })
+                .filter(Boolean),
+            );
+          }
+        })
+        .catch((err) => setLoadError(err.message))
+        .finally(() => setLoading(false));
+    }, []);
 
   const allItems = flattenParents(products);
   const billableItems = allItems
@@ -9720,7 +9792,11 @@ function NewBillForm({ onBack, onSaved }) {
   const qtyNumber = Number(quantity);
   const qtyValid = Number.isInteger(qtyNumber) && qtyNumber > 0;
 
-  const itemOptions = billableItems.map((p) => ({ value: String(p.id), label: p.label, hint: `${p.quantity} in stock` }));
+  const itemOptions = billableItems.map((p) => ({
+    value: String(p.id),
+    label: p.label,
+    hint: `${p.quantity} in stock`,
+  }));
   const handleCreateItem = async (values, imageFiles) => {
     const created = await createProduct(values, imageFiles);
     setProducts((prev) => [...prev, created]);
@@ -9736,7 +9812,11 @@ function NewBillForm({ onBack, onSaved }) {
     setLines((prev) => {
       const existing = prev.find((l) => l.product.id === selectedItem.id);
       if (existing) {
-        return prev.map((l) => (l.product.id === selectedItem.id ? { ...l, quantity: l.quantity + qtyNumber } : l));
+        return prev.map((l) =>
+          l.product.id === selectedItem.id
+            ? { ...l, quantity: l.quantity + qtyNumber }
+            : l,
+        );
       }
       return [...prev, { product: selectedItem, quantity: qtyNumber }];
     });
@@ -9744,26 +9824,42 @@ function NewBillForm({ onBack, onSaved }) {
     setQuantity("");
   };
 
-  const stepQuantity = (delta) => setQuantity(String(Math.max(1, (Number(quantity) || 0) + delta)));
+  const stepQuantity = (delta) =>
+    setQuantity(String(Math.max(1, (Number(quantity) || 0) + delta)));
 
   const handleLineQty = (productId, value) => {
     const qty = Math.max(1, Math.floor(Number(value)) || 1);
-    setLines((prev) => prev.map((l) => (l.product.id === productId ? { ...l, quantity: qty } : l)));
-  };
-
-  const handleRemoveLine = (productId) => setLines((prev) => prev.filter((l) => l.product.id !== productId));
-
-  const handleSubmitBill = async (adderName) => {
-    await createBill(
-      adderName,
-      lines.map((l) => ({ product_id: l.product.id, quantity: l.quantity }))
+    setLines((prev) =>
+      prev.map((l) =>
+        l.product.id === productId ? { ...l, quantity: qty } : l,
+      ),
     );
-    onSaved();
   };
+
+  const handleRemoveLine = (productId) =>
+    setLines((prev) => prev.filter((l) => l.product.id !== productId));
+
+    const handleSubmitBill = async (adderName) => {
+      const items = lines.map((l) => ({
+        product_id: l.product.id,
+        quantity: l.quantity,
+      }));
+      if (editBill) await updateBill(editBill.id, adderName, items);
+      else await createBill(adderName, items);
+      onSaved();
+    };
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <SubHeader title="New Bill" subtitle="Add stock for many items at once" onBack={onBack} />
+      <SubHeader
+        title={editBill ? "Edit Bill" : "New Bill"}
+        subtitle={
+          editBill
+            ? "Change the items or quantities of this bill"
+            : "Add stock for many items at once"
+        }
+        onBack={onBack}
+      />
 
       <main className="p-4 sm:p-6 max-w-2xl space-y-4">
         {loading ? (
@@ -9773,15 +9869,17 @@ function NewBillForm({ onBack, onSaved }) {
         ) : (
           <>
             <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 space-y-5">
-              {formError && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2">{formError}</div>}
+              {formError && (
+                <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2">
+                  {formError}
+                </div>
+              )}
 
               {/* Item */}
               <div>
                 <FieldLabel
                   action={
-                    <FieldButton
-                      onClick={() => setShowCreateItem((v) => !v)}
-                    >
+                    <FieldButton onClick={() => setShowCreateItem((v) => !v)}>
                       Create Item
                     </FieldButton>
                   }
@@ -9802,9 +9900,15 @@ function NewBillForm({ onBack, onSaved }) {
                   value={itemId}
                   onChange={setItemId}
                   options={itemOptions}
-                  placeholder={billableItems.length ? "Search or select item" : "No items yet"}
+                  placeholder={
+                    billableItems.length
+                      ? "Search or select item"
+                      : "No items yet"
+                  }
                   searchPlaceholder="Search items..."
-                  emptyText={billableItems.length ? "No item found" : "No items yet"}
+                  emptyText={
+                    billableItems.length ? "No item found" : "No items yet"
+                  }
                 />
                 {billableItems.length === 0 && !showCreateItem && (
                   <p className="text-xs text-gray-400 mt-1.5">
@@ -9813,20 +9917,35 @@ function NewBillForm({ onBack, onSaved }) {
                 )}
 
                 {/* Quantity + add to list, right under the item select */}
-                <div className={`mt-4 rounded-xl border p-3 sm:p-4 transition ${selectedItem ? "border-gray-200 bg-gray-50" : "border-gray-100 bg-gray-50/60"}`}>
+                <div
+                  className={`mt-4 rounded-xl border p-3 sm:p-4 transition ${selectedItem ? "border-gray-200 bg-gray-50" : "border-gray-100 bg-gray-50/60"}`}
+                >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Quantity</span>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Quantity
+                    </span>
                     {selectedItem && (
                       <span className="text-xs text-gray-500">
-                        In stock: <span className="font-medium text-gray-700">{selectedItem.quantity}</span>
+                        In stock:{" "}
+                        <span className="font-medium text-gray-700">
+                          {selectedItem.quantity}
+                        </span>
                         {qtyValid && (
-                          <> → <span className="font-medium text-green-600">{selectedItem.quantity + qtyNumber}</span></>
+                          <>
+                            {" "}
+                            →{" "}
+                            <span className="font-medium text-green-600">
+                              {selectedItem.quantity + qtyNumber}
+                            </span>
+                          </>
                         )}
                       </span>
                     )}
                   </div>
                   <div className="flex flex-col sm:flex-row gap-2">
-                    <div className={`flex items-stretch rounded-lg border border-gray-300 bg-white overflow-hidden sm:w-44 ${!selectedItem ? "opacity-50" : ""}`}>
+                    <div
+                      className={`flex items-stretch rounded-lg border border-gray-300 bg-white overflow-hidden sm:w-44 ${!selectedItem ? "opacity-50" : ""}`}
+                    >
                       <button
                         type="button"
                         onClick={() => stepQuantity(-1)}
@@ -9844,7 +9963,10 @@ function NewBillForm({ onBack, onSaved }) {
                         value={quantity}
                         disabled={!selectedItem}
                         onChange={(e) => setQuantity(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddToList())}
+                        onKeyDown={(e) =>
+                          e.key === "Enter" &&
+                          (e.preventDefault(), handleAddToList())
+                        }
                         aria-label="Quantity"
                         className="flex-1 min-w-0 text-center text-sm font-medium border-x border-gray-200 py-2.5 focus:outline-none focus:bg-blue-50 disabled:bg-transparent [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       />
@@ -9875,30 +9997,51 @@ function NewBillForm({ onBack, onSaved }) {
             {/* Bill item list */}
             <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5">
               <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
-                Bill items <span className="text-gray-400 font-normal">({lines.length} · {totalUnits} units)</span>
+                Bill items{" "}
+                <span className="text-gray-400 font-normal">
+                  ({lines.length} · {totalUnits} units)
+                </span>
               </h2>
               {lines.length === 0 ? (
-                <p className="text-sm text-gray-400">No items added yet. Pick an item and quantity above, then “Add to list”.</p>
+                <p className="text-sm text-gray-400">
+                  No items added yet. Pick an item and quantity above, then “Add
+                  to list”.
+                </p>
               ) : (
                 <div className="space-y-2">
                   {lines.map((l) => {
                     return (
-                      <div key={l.product.id} className="flex items-center gap-3 border border-gray-200 rounded-lg p-3">
+                      <div
+                        key={l.product.id}
+                        className="flex items-center gap-3 border border-gray-200 rounded-lg p-3"
+                      >
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-gray-900 truncate">{l.product.name}</p>
+                          <p className="font-medium text-gray-900 truncate">
+                            {l.product.name}
+                          </p>
                           <p className="text-xs text-gray-500 mt-0.5">
-                            {l.product.quantity} → <span className="font-medium text-green-600">{l.product.quantity + l.quantity}</span>
+                            {l.product.quantity} →{" "}
+                            <span className="font-medium text-green-600">
+                              {l.product.quantity + l.quantity}
+                            </span>
                           </p>
                         </div>
                         <input
                           type="number"
                           min="1"
                           value={l.quantity}
-                          onChange={(e) => handleLineQty(l.product.id, e.target.value)}
+                          onChange={(e) =>
+                            handleLineQty(l.product.id, e.target.value)
+                          }
                           aria-label={`Quantity for ${l.product.name}`}
                           className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
-                        <button type="button" onClick={() => handleRemoveLine(l.product.id)} aria-label="Remove" className="p-1.5 rounded-full text-red-500 hover:bg-red-50">
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveLine(l.product.id)}
+                          aria-label="Remove"
+                          className="p-1.5 rounded-full text-red-500 hover:bg-red-50"
+                        >
                           <Trash2 size={16} />
                         </button>
                       </div>
@@ -9914,14 +10057,19 @@ function NewBillForm({ onBack, onSaved }) {
               disabled={lines.length === 0}
               className="w-full bg-green-600 text-white rounded-xl py-3 text-sm font-semibold hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              Submit Bill
+              {editBill ? "Save Changes" : "Submit Bill"}
             </button>
           </>
         )}
       </main>
 
       {showSubmit && (
-        <SubmitBillModal lines={lines} onSubmit={handleSubmitBill} onClose={() => setShowSubmit(false)} />
+        <SubmitBillModal
+          lines={lines}
+          initialName={editBill?.adder_name || ""}
+          onSubmit={handleSubmitBill}
+          onClose={() => setShowSubmit(false)}
+        />
       )}
     </div>
   );
@@ -9929,9 +10077,10 @@ function NewBillForm({ onBack, onSaved }) {
 
 // ---------- Bill page: list of submitted bills (newest first) ----------
 function BillPage({ go, autoCreateToken }) {
-  const [creating, setCreating] = useState(false);
-  useQuickNew(() => setCreating(true));
-  const [bills, setBills] = useState([]);
+    const [creating, setCreating] = useState(false);
+    const [editBill, setEditBill] = useState(null); // the bill being edited
+    useQuickNew(() => setCreating(true));
+    const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState("");
@@ -9963,11 +10112,38 @@ function BillPage({ go, autoCreateToken }) {
     if (autoCreateToken) setCreating(true);
   }, [autoCreateToken]);
 
-  if (creating) {
+  const handleDelete = async (bill) => {
+    const units = bill.items.reduce((sum, m) => sum + m.quantity, 0);
+    if (
+      !window.confirm(
+        `Delete this bill by ${bill.adder_name}? The ${units} units it added will be taken out of stock again.`,
+      )
+    )
+      return;
+    try {
+      await deleteBill(bill.id);
+      setOpenId(null);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  if (creating || editBill) {
     return (
       <NewBillForm
-        onBack={() => setCreating(false)}
-        onSaved={() => { setCreating(false); setLoading(true); load(); }}
+        key={editBill ? editBill.id : "new"}
+        editBill={editBill}
+        onBack={() => {
+          setCreating(false);
+          setEditBill(null);
+        }}
+        onSaved={() => {
+          setCreating(false);
+          setEditBill(null);
+          setLoading(true);
+          load();
+        }}
       />
     );
   }
@@ -10010,7 +10186,10 @@ function BillPage({ go, autoCreateToken }) {
               const open = openId === bill.id;
               const units = bill.items.reduce((sum, m) => sum + m.quantity, 0);
               return (
-                <div key={bill.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div
+                  key={bill.id}
+                  className="bg-white border border-gray-200 rounded-xl overflow-hidden"
+                >
                   <button
                     onClick={() => setOpenId(open ? null : bill.id)}
                     aria-expanded={open}
@@ -10020,30 +10199,67 @@ function BillPage({ go, autoCreateToken }) {
                       <Receipt size={16} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-gray-900 truncate">{bill.adder_name}</p>
-                      <p className="text-xs text-gray-400">{formatDateTime(bill.created_at)}</p>
+                      <p className="font-medium text-gray-900 truncate">
+                        {bill.adder_name}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        {formatDateTime(bill.created_at)}
+                      </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-sm font-semibold text-green-600">+{units}</p>
-                      <p className="text-xs text-gray-400">{bill.items.length} {bill.items.length === 1 ? "item" : "items"}</p>
+                      <p className="text-sm font-semibold text-green-600">
+                        +{units}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        {bill.items.length}{" "}
+                        {bill.items.length === 1 ? "item" : "items"}
+                      </p>
                     </div>
-                    <ChevronDown size={18} className={`text-gray-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+                    <ChevronDown
+                      size={18}
+                      className={`text-gray-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+                    />
                   </button>
 
                   {open && (
                     <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-2">
                       {bill.items
                         .slice()
-                        .sort((a, b) => compareNames(a.product?.name || "", b.product?.name || ""))
+                        .sort((a, b) =>
+                          compareNames(
+                            a.product?.name || "",
+                            b.product?.name || "",
+                          ),
+                        )
                         .map((m) => (
-                          <div key={m.id} className="flex justify-between items-center gap-3 text-sm">
+                          <div
+                            key={m.id}
+                            className="flex justify-between items-center gap-3 text-sm"
+                          >
                             <div className="min-w-0">
-                              <p className="text-gray-900 truncate">{m.product?.name || `Product #${m.product_id}`}</p>
-                              
+                              <p className="text-gray-900 truncate">
+                                {m.product?.name || `Product #${m.product_id}`}
+                              </p>
                             </div>
-                            <span className="font-semibold text-green-600 shrink-0">+{m.quantity}</span>
+                            <span className="font-semibold text-green-600 shrink-0">
+                              +{m.quantity}
+                            </span>
                           </div>
                         ))}
+                      <div className="flex gap-2 pt-2">
+                        <button
+                          onClick={() => setEditBill(bill)}
+                          className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-white"
+                        >
+                          <Pencil size={14} /> Edit bill
+                        </button>
+                        <button
+                          onClick={() => handleDelete(bill)}
+                          className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                        >
+                          <Trash2 size={14} /> Delete bill
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
