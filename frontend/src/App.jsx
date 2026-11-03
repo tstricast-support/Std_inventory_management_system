@@ -33,6 +33,7 @@ import {
   ClipboardCheck,
   RotateCcw,
   Download,
+  MessageCircle,
   Percent,
   Banknote,
   TrendingUp,
@@ -482,6 +483,13 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
                           <Download size={14} /> PDF
                         </button>
 
+                        <button
+                          onClick={() => sendWhatsApp("salesdoc", doc)}
+                          className={`${btn} bg-green-600 text-white hover:bg-green-700`}
+                        >
+                          <MessageCircle size={14} /> WhatsApp
+                        </button>
+
                         {canDelete && (
                           <button
                             onClick={() => handleDelete(doc)}
@@ -908,6 +916,71 @@ async function downloadPdf(kind, record) {
     else await pdf.downloadSalesDocPdf(record, customer);
   } catch (err) {
     alert(err.message || "Could not create the PDF");
+  }
+}
+
+// ---------- Send a PDF by WhatsApp ----------
+const WHATSAPP_COUNTRY_CODE = "94"; // used when a customer's number starts with 0. Change it to your country code.
+
+function whatsappNumber(phone) {
+  const raw = String(phone || "").trim();
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) return "";
+  if (raw.startsWith("+")) return digits;
+  if (digits.startsWith("00")) return digits.slice(2);
+  if (digits.startsWith("0")) return WHATSAPP_COUNTRY_CODE + digits.slice(1);
+  return digits;
+}
+
+async function sendWhatsApp(kind, record) {
+  // phones: the share sheet can attach the PDF directly
+  const canShareFiles =
+    typeof navigator.share === "function" &&
+    typeof navigator.canShare === "function" &&
+    navigator.canShare({ files: [new File(["x"], "t.pdf", { type: "application/pdf" })] });
+  // computers: open the tab now, before the slow PDF work, so the browser doesn't block it
+  const tab = canShareFiles ? null : window.open("about:blank", "_blank");
+  try {
+    const [pdf, customers] = await Promise.all([import("./pdf.js"), getCustomers().catch(() => [])]);
+    const customer = customers.find((c) => c.id === record.customer_id);
+    const file =
+      kind === "invoice"
+        ? await pdf.downloadInvoicePdf(record, customer, true)
+        : await pdf.downloadSalesDocPdf(record, customer, true);
+    const label = kind === "invoice" ? "invoice" : record.doc_type === "quote" ? "quote" : "sales order";
+    const number = record.invoice_number || record.doc_number;
+    const text = `Hello ${record.customer_name}, please find your ${label} ${number}.`;
+
+    if (canShareFiles && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], text });
+        return;
+      } catch (e) {
+        if (e?.name === "AbortError") return; // you closed the share sheet
+        // anything else: fall through to the download + WhatsApp chat route below
+      }
+    }
+
+    // fallback: download the PDF, open the customer's WhatsApp chat
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+    const num = whatsappNumber(customer?.phone);
+    const link = `https://wa.me/${num}?text=${encodeURIComponent(text)}`;
+    if (tab) tab.location.href = link;
+    else window.open(link, "_blank");
+    alert(
+      num
+        ? `${file.name} was downloaded. Attach it in the WhatsApp chat that just opened.`
+        : `${file.name} was downloaded. This customer has no phone number saved, so choose the contact in WhatsApp and attach the file.`,
+    );
+  } catch (err) {
+    if (tab) tab.close();
+    alert(err.message || "Could not send by WhatsApp");
   }
 }
 
@@ -7404,6 +7477,14 @@ function InvoicesPage({ isAdmin, go }) {
                         >
                           <Download size={14} /> Download PDF
                         </button>
+
+                        <button
+                          onClick={() => sendWhatsApp("invoice", inv)}
+                          className="inline-flex items-center gap-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-green-700"
+                        >
+                          <MessageCircle size={14} /> Send WhatsApp
+                        </button>
+
                       </div>
 
                       {inv.status !== "void" && (

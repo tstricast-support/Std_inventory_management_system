@@ -206,7 +206,7 @@ async function makePdf(spec) {
 const lines = (items) =>
   items.map((l) => ({ ...l, imageUrl: primaryImageUrl(l.product) }));
 
-export async function downloadInvoicePdf(inv, customer) {
+export async function downloadInvoicePdf(inv, customer, asFile = false) {
   const status = inv.status === "void" ? "Void" : inv.balance_due <= 0.004 ? "Paid" : "";
   const doc = await makePdf({
     title: "INVOICE",
@@ -228,10 +228,11 @@ export async function downloadInvoicePdf(inv, customer) {
     ],
     notes: inv.notes,
   });
+  if (asFile) return new File([doc.output("blob")], `${inv.invoice_number}.pdf`, { type: "application/pdf" });
   doc.save(`${inv.invoice_number}.pdf`);
 }
 
-export async function downloadSalesDocPdf(d, customer) {
+export async function downloadSalesDocPdf(d, customer, asFile = false) {
   const isQuote = d.doc_type === "quote";
   const doc = await makePdf({
     title: isQuote ? "QUOTE" : "SALES ORDER",
@@ -249,6 +250,7 @@ export async function downloadSalesDocPdf(d, customer) {
     totals: [["Total", money(d.total), true]],
     notes: d.notes,
   });
+  if (asFile) return new File([doc.output("blob")], `${d.doc_number}.pdf`, { type: "application/pdf" });
   doc.save(`${d.doc_number}.pdf`);
 }
 
