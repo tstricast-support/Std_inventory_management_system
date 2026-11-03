@@ -3305,11 +3305,11 @@ function ItemRow({ item, onClick, expanded, onToggle, isAdmin, onLongPress }) {
             }
           : undefined
       }
-      className={`w-full flex items-center gap-3 border rounded-xl p-3 text-left bg-white border-gray-200 hover:border-gray-300 transition ${
+      className={`w-full flex items-center gap-3 border rounded-xl px-3 py-2 text-left bg-white border-gray-200 hover:border-gray-300 transition ${
         hasSubitems ? "hover:bg-gray-50" : "hover:shadow-md"
       }`}
     >
-      <div className="w-12 h-12 shrink-0 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center">
+      <div className="w-10 h-10 shrink-0 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center">
         {image ? (
           <img
             src={image.image_url}
@@ -3671,11 +3671,17 @@ function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdde
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 max-w-4xl">
+      <main className="p-4 sm:p-6 w-full">
         <div className="mb-5">
-          <SearchBox value={search} onChange={setSearch} placeholder="Search items..." />
+          <SearchBox
+            value={search}
+            onChange={setSearch}
+            placeholder="Search items..."
+          />
           {isAdmin && (
-            <p className="text-xs text-gray-400 mt-1.5">Hold an item to add stock</p>
+            <p className="text-xs text-gray-400 mt-1.5">
+              Hold an item to add stock
+            </p>
           )}
         </div>
 
@@ -3686,7 +3692,9 @@ function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdde
         ) : products.length === 0 ? (
           <p className="text-gray-400 text-center py-16">No items yet.</p>
         ) : shownProducts.length === 0 ? (
-          <p className="text-gray-400 text-center py-16">Nothing matches "{search.trim()}".</p>
+          <p className="text-gray-400 text-center py-16">
+            Nothing matches "{search.trim()}".
+          </p>
         ) : (
           <div className="space-y-2">
             {shownProducts.map((item) => (
@@ -3757,7 +3765,7 @@ function ManageItemRow({ item, expanded, onToggle, onEdit, onDelete }) {
   return (
     <div
       onClick={hasSubitems ? onToggle : undefined}
-      className={`w-full flex items-center gap-3 border rounded-xl p-3 bg-white border-gray-200 ${hasSubitems ? "cursor-pointer hover:bg-gray-50" : ""}`}
+      className={`w-full flex items-center gap-3 border rounded-xl px-3 py-2 bg-white border-gray-200 ${hasSubitems ? "cursor-pointer hover:bg-gray-50" : ""}`}
     >
       <div className="w-12 h-12 shrink-0 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center">
         {image ? (
