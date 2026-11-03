@@ -1,7 +1,6 @@
 from sqlalchemy import Column, Integer, String, Text, Numeric, Boolean, ForeignKey, TIMESTAMP, Date, func
 from sqlalchemy.orm import relationship
 from .database import Base
-from .departments import DEFAULT_DEPARTMENT
 
 class Account(Base):
     """Simple chart-of-accounts entry: a COGS, Income or Asset account (QuickBooks style)."""
@@ -55,7 +54,6 @@ class Product(Base):
     quantity = Column(Integer, nullable=False, default=0)
     price = Column(Numeric(10, 2), nullable=False, default=0)          # Sales Price
     cost = Column(Numeric(10, 2), nullable=False, default=0, server_default="0")  # Cost
-    department = Column(String(50), nullable=False, default=DEFAULT_DEPARTMENT, server_default=DEFAULT_DEPARTMENT)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 

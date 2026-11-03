@@ -45,26 +45,12 @@ import "./index.css";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
-// ---------- Departments ----------
-// slug must match backend/app/departments.py and the logo file name in public/logos/
-const DEPARTMENTS = [
-  { slug: "dd-engineering", name: "DD Engineering", logo: "/logos/dd-engineering.png" },
-  {
-    slug: "i-lab",
-    name: "I Lab",
-    logo: "/logos/i-lab.png",
-    extraName: "I Photobook",
-    extraLogo: "/logos/i-photobook.png",
-  },
-  { slug: "i-lab-std", name: "I Lab STD", logo: "/logos/i-lab-std.png" },
-];
+
+
 
 // ---------- API helpers ----------
-async function getProducts(department) {
-  const url = department
-    ? `${BASE_URL}/products/?department=${department}`
-    : `${BASE_URL}/products/`; 
-  const res = await fetch(url);
+async function getProducts() {
+  const res = await fetch(`${BASE_URL}/products/`);
   if (!res.ok) throw new Error("Failed to fetch products");
   return res.json();
 }
@@ -1012,28 +998,44 @@ async function createProduct(formValues, imageFiles) {
   formData.append("name", formValues.name);
   formData.append("sku", formValues.sku || "");
   formData.append("description", formValues.description || "");
-  formData.append("purchase_description", formValues.purchase_description || "");
+  formData.append(
+    "purchase_description",
+    formValues.purchase_description || "",
+  );
   formData.append("quantity", formValues.quantity || 0);
   formData.append("price", formValues.price || 0);
   formData.append("cost", formValues.cost || 0);
-  formData.append("department", formValues.department);
   formData.append("item_type", formValues.item_type || "Inventory Part");
-  formData.append("manufacturer_part_number", formValues.manufacturer_part_number || "");
+  formData.append(
+    "manufacturer_part_number",
+    formValues.manufacturer_part_number || "",
+  );
 
   if (formValues.parent_id) formData.append("parent_id", formValues.parent_id);
-  if (formValues.cogs_account_id) formData.append("cogs_account_id", formValues.cogs_account_id);
-  if (formValues.income_account_id) formData.append("income_account_id", formValues.income_account_id);
-  if (formValues.asset_account_id) formData.append("asset_account_id", formValues.asset_account_id);
-  if (formValues.preferred_vendor_id) formData.append("preferred_vendor_id", formValues.preferred_vendor_id);
-  if (formValues.reorder_min !== "" && formValues.reorder_min != null) formData.append("reorder_min", formValues.reorder_min);
-  if (formValues.reorder_max !== "" && formValues.reorder_max != null) formData.append("reorder_max", formValues.reorder_max);
+  if (formValues.cogs_account_id)
+    formData.append("cogs_account_id", formValues.cogs_account_id);
+  if (formValues.income_account_id)
+    formData.append("income_account_id", formValues.income_account_id);
+  if (formValues.asset_account_id)
+    formData.append("asset_account_id", formValues.asset_account_id);
+  if (formValues.preferred_vendor_id)
+    formData.append("preferred_vendor_id", formValues.preferred_vendor_id);
+  if (formValues.reorder_min !== "" && formValues.reorder_min != null)
+    formData.append("reorder_min", formValues.reorder_min);
+  if (formValues.reorder_max !== "" && formValues.reorder_max != null)
+    formData.append("reorder_max", formValues.reorder_max);
 
   imageFiles.forEach((file) => formData.append("images", file));
 
-  const res = await fetch(`${BASE_URL}/products/`, { method: "POST", body: formData });
+  const res = await fetch(`${BASE_URL}/products/`, {
+    method: "POST",
+    body: formData,
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
-    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to create product");
+    throw new Error(
+      typeof err?.detail === "string" ? err.detail : "Failed to create product",
+    );
   }
   return res.json();
 }
@@ -1057,10 +1059,9 @@ async function deleteProduct(id) {
   return res.json();
 }
 
-async function getRequests(status, department) {
+async function getRequests(status) {
   const params = new URLSearchParams();
   if (status) params.set("status", status);
-  if (department) params.set("department", department);
   const qs = params.toString();
   const res = await fetch(`${BASE_URL}/requests/${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error("Failed to fetch requests");
@@ -1108,11 +1109,8 @@ async function restockProduct(id, quantity, note) {
   return res.json();
 }
 
-async function getStockMovements(department) {
-  const url = department
-    ? `${BASE_URL}/stock-movements/?department=${department}`
-    : `${BASE_URL}/stock-movements/`;
-  const res = await fetch(url);
+async function getStockMovements() {
+  const res = await fetch(`${BASE_URL}/stock-movements/`);
   if (!res.ok) throw new Error("Failed to fetch stock history");
   return res.json();
 }
@@ -2032,9 +2030,7 @@ function flattenParents(items, excludeId = null, trail = []) {
   return out;
 }
 
-// Used by the tree-based search boxes (Items page, department page): keeps a parent/parent-subitem
-// as scaffolding only if it or something inside it matches; a parent name match reveals everything
-// nested inside it, since only leaf items are ever actually selectable.
+
 function filterItemTree(items, q) {
   const filterNode = (item) => {
     const hasKids = item.subitems?.length > 0;
@@ -2087,7 +2083,9 @@ function ProductKindChooser({ onPick, onClose }) {
 // kind: "item"       -> normal form (Subitem of is optional, parents = top-level items)
 //       "subitem"    -> Create Subitem (Subitem of is required, parents = existing subitems)
 //       "under-item" -> opened by "+ New" inside a subitem form (Subitem of required, parents = top-level items)
-function ProductFormBody({ initialData, defaultDepartment, onSubmit, onClose, onImagesChanged, kind = "item" }) {
+
+
+function ProductFormBody({ initialData, onSubmit, onClose, onImagesChanged, kind = "item" }) {
   const isEditMode = Boolean(initialData);
   const parentKind = kind === "subitem" ? "sub" : "top";               // which items are offered as parents
   const requireParent = kind === "subitem" || kind === "under-item";   // Subitem of is ticked and locked
@@ -2113,7 +2111,6 @@ function ProductFormBody({ initialData, defaultDepartment, onSubmit, onClose, on
     quantity: initialData?.quantity ?? 0,
 
     sku: initialData?.sku || "",
-    department: initialData?.department || defaultDepartment,
   });
 
   const [vendors, setVendors] = useState([]);
@@ -2170,7 +2167,7 @@ function ProductFormBody({ initialData, defaultDepartment, onSubmit, onClose, on
       throw new Error("An item with this name already exists - select it from the list");
     }
     const created = await createProduct(
-      { name, department: form.department, item_type: form.item_type },
+      { name, item_type: form.item_type },
       []
     );
     setParentOptions((prev) => [...prev, created]);
@@ -2331,22 +2328,9 @@ function ProductFormBody({ initialData, defaultDepartment, onSubmit, onClose, on
             </div>
           </div>
 
-          {/* ---- existing app fields: SKU, Department ---- */}
+          {/* ---- existing app fields: SKU ---- */}
           <input placeholder="SKU (optional)" value={form.sku} onChange={(e) => handleChange("sku", e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Department</label>
-            <select
-              value={form.department}
-              onChange={(e) => handleChange("department", e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {DEPARTMENTS.map((d) => (
-                <option key={d.slug} value={d.slug}>{d.name}</option>
-              ))}
-            </select>
-          </div>
 
           {!isEditMode && (
             <div>
@@ -2384,7 +2368,6 @@ function ProductFormBody({ initialData, defaultDepartment, onSubmit, onClose, on
         {creatingParent && (
           <ProductFormBody
             kind="under-item"
-            defaultDepartment={form.department}
             onSubmit={handleParentCreated}
             onClose={() => setCreatingParent(false)}
           />
@@ -2394,7 +2377,7 @@ function ProductFormBody({ initialData, defaultDepartment, onSubmit, onClose, on
   );
 }
 // ---------- Shared inventory view (used by both routes) ----------
-function InventoryView({ isAdmin, department, onBack }) {
+function InventoryView({ isAdmin, onBack }) {
   const [products, setProducts] = useState([]);
   const [requests, setRequests] = useState([]);
   const [stockMovements, setStockMovements] = useState([]);
@@ -2410,10 +2393,10 @@ function InventoryView({ isAdmin, department, onBack }) {
 
   const loadData = async (silent = false) => {
     if (!silent) setLoading(true);
-    const calls = [getProducts(department.slug)];
+    const calls = [getProducts()];
     if (isAdmin) {
-      calls.push(getRequests(undefined, department.slug));
-      calls.push(getStockMovements(department.slug));
+      calls.push(getRequests());
+      calls.push(getStockMovements());
     }
     const results = await Promise.all(calls);
     setProducts(results[0]);
@@ -2525,13 +2508,14 @@ function InventoryView({ isAdmin, department, onBack }) {
         <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
           <div className="flex flex-wrap gap-3 justify-between items-center mb-3">
             <div className="flex items-center gap-3">
-              <button onClick={onBack} aria-label="Back to departments"
-                className="p-2 -ml-2 rounded-full text-gray-500 hover:bg-gray-100">
-                <ArrowLeft size={20} />
-              </button>
-              <img src={department.logo} alt="" className="w-10 h-10 object-contain rounded-lg border border-gray-200 bg-white p-1" />
+              {onBack && (
+                <button onClick={onBack} aria-label="Back"
+                  className="p-2 -ml-2 rounded-full text-gray-500 hover:bg-gray-100">
+                  <ArrowLeft size={20} />
+                </button>
+              )}
               <div>
-                <h1 className="text-xl font-bold text-gray-900">{department.name}</h1>
+                <h1 className="text-xl font-bold text-gray-900">Inventory</h1>
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isAdmin ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}>
                   {isAdmin ? "Admin" : "Employee (Read Only)"}
                 </span>
@@ -2617,7 +2601,6 @@ function InventoryView({ isAdmin, department, onBack }) {
       {showForm && (
         <ProductForm
           initialData={editingProduct}
-          defaultDepartment={department.slug}
           onSubmit={editingProduct ? handleUpdate : handleCreate}
           onClose={() => { setShowForm(false); setEditingProduct(null); }}
           onImagesChanged={() => loadData(true)}
@@ -2644,7 +2627,10 @@ function InventoryView({ isAdmin, department, onBack }) {
   );
 }
 
-const AddProductButton = forwardRef(function AddProductButton({ onCreated, hideTrigger }, ref) {
+const AddProductButton = forwardRef(function AddProductButton(
+  { onCreated, hideTrigger },
+  ref,
+) {
   const [open, setOpen] = useState(false);
 
   const handleOpen = () => setOpen(true);
@@ -2667,11 +2653,7 @@ const AddProductButton = forwardRef(function AddProductButton({ onCreated, hideT
         </button>
       )}
       {open && (
-        <ProductForm
-          defaultDepartment={DEPARTMENTS[0].slug}
-          onSubmit={handleCreate}
-          onClose={() => setOpen(false)}
-        />
+        <ProductForm onSubmit={handleCreate} onClose={() => setOpen(false)} />
       )}
     </>
   );
@@ -2687,12 +2669,14 @@ function LowStockBell() {
     const load = async () => {
       if (document.hidden) return;
       try {
-        const products = await getProducts(); // every department, top-level items with nested subitems
+        const products = await getProducts(); // top-level items with nested subitems
         const flat = [];
-        const walk = (list) => list.forEach((p) => {
-          if (!p.subitems?.length) flat.push(p); // only real leaf items can be "low stock" - categories don't hold their own stock
-          else walk(p.subitems);
-        });
+        const walk = (list) =>
+          list.forEach((p) => {
+            if (!p.subitems?.length)
+              flat.push(p); // only real leaf items can be "low stock" - categories don't hold their own stock
+            else walk(p.subitems);
+          });
         walk(products);
         if (!cancelled) setItems(flat.filter(isLowStock));
       } catch {
@@ -2701,7 +2685,9 @@ function LowStockBell() {
     };
     load();
     const interval = setInterval(load, 15000);
-    const onVisible = () => { if (!document.hidden) load(); };
+    const onVisible = () => {
+      if (!document.hidden) load();
+    };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
@@ -2712,7 +2698,11 @@ function LowStockBell() {
 
   const goToItem = (item) => {
     setOpen(false);
-    setSearchParams({ view: "items", item: String(item.id), from: searchParams.toString() || "home" });
+    setSearchParams({
+      view: "items",
+      item: String(item.id),
+      from: searchParams.toString() || "home",
+    });
   };
 
   return (
@@ -2737,19 +2727,22 @@ function LowStockBell() {
               Low stock ({items.length})
             </p>
             {items.length === 0 ? (
-              <p className="px-3 py-4 text-sm text-gray-400 text-center">All items are above their reorder point.</p>
+              <p className="px-3 py-4 text-sm text-gray-400 text-center">
+                All items are above their reorder point.
+              </p>
             ) : (
               items.map((item) => {
-                const dept = getDepartment(item.department);
                 return (
                   <button
                     key={item.id}
                     onClick={() => goToItem(item)}
                     className="w-full text-left px-3 py-2 border-b border-gray-50 last:border-b-0 hover:bg-gray-50 transition-colors"
                   >
-                    <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {item.name}
+                    </p>
                     <p className="text-xs text-gray-400">
-                      {dept?.name} · {item.quantity} left (min {item.reorder_min})
+                      {item.quantity} left (min {item.reorder_min})
                     </p>
                   </button>
                 );
@@ -3007,7 +3000,6 @@ function AppHeader({ isAdmin, active, onTab, onProductAdded, actions, hideAddPro
                   >
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{p.label}</p>
-                      <p className="text-xs text-gray-400">{getDepartment(p.department)?.name}</p>
                     </div>
                     <ChevronRight size={16} className="text-gray-400 shrink-0" />
                   </button>
@@ -3267,8 +3259,6 @@ function StockBadge({ quantity, lowStock }) {
 
 function ItemRow({ item, onClick, expanded, onToggle, isAdmin, onLongPress }) {
   const image = item.images?.find((i) => i.is_primary) || item.images?.[0];
-  const dept = getDepartment(item.department);
-  const subtitle = dept?.name || "";
   const low = isLowStock(item);
   const hasSubitems = (item.subitems?.length ?? 0) > 0;
   const Wrapper = hasSubitems ? "div" : "button";
@@ -3285,10 +3275,16 @@ function ItemRow({ item, onClick, expanded, onToggle, isAdmin, onLongPress }) {
     }, 550);
   };
   const cancelLongPress = () => {
-    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
   };
   const handleClick = () => {
-    if (longPressTriggered.current) { longPressTriggered.current = false; return; }
+    if (longPressTriggered.current) {
+      longPressTriggered.current = false;
+      return;
+    }
     (hasSubitems ? onToggle : onClick)();
   };
 
@@ -3300,31 +3296,49 @@ function ItemRow({ item, onClick, expanded, onToggle, isAdmin, onLongPress }) {
       onPointerLeave={canLongPress ? cancelLongPress : undefined}
       onPointerCancel={canLongPress ? cancelLongPress : undefined}
       onContextMenu={canLongPress ? (e) => e.preventDefault() : undefined}
-      style={canLongPress ? { touchAction: "manipulation", WebkitUserSelect: "none", userSelect: "none" } : undefined}
+      style={
+        canLongPress
+          ? {
+              touchAction: "manipulation",
+              WebkitUserSelect: "none",
+              userSelect: "none",
+            }
+          : undefined
+      }
       className={`w-full flex items-center gap-3 border rounded-xl p-3 text-left bg-white border-gray-200 hover:border-gray-300 transition ${
         hasSubitems ? "hover:bg-gray-50" : "hover:shadow-md"
       }`}
     >
       <div className="w-12 h-12 shrink-0 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center">
         {image ? (
-          <img src={image.image_url} alt="" className="w-full h-full object-cover" />
+          <img
+            src={image.image_url}
+            alt=""
+            className="w-full h-full object-cover"
+          />
         ) : (
           <span className="text-[10px] text-gray-400">No image</span>
         )}
       </div>
       <div className="flex-1 min-w-0">
         <p className="font-medium text-gray-900 truncate">{item.name}</p>
-        {subtitle && <p className="text-xs text-gray-400 truncate">{subtitle}</p>}
         {hasSubitems && (
           <p className="text-xs text-blue-600 font-medium mt-0.5">
-            {item.subitems.length} {item.subitems.length === 1 ? "subitem" : "subitems"}
+            {item.subitems.length}{" "}
+            {item.subitems.length === 1 ? "subitem" : "subitems"}
           </p>
         )}
       </div>
       {!hasSubitems && <StockBadge quantity={item.quantity} lowStock={low} />}
-      {hasSubitems
-        ? (expanded ? <ChevronDown size={18} className="text-gray-400 shrink-0" /> : <ChevronRight size={18} className="text-gray-400 shrink-0" />)
-        : <ChevronRight size={18} className="text-gray-400 shrink-0" />}
+      {hasSubitems ? (
+        expanded ? (
+          <ChevronDown size={18} className="text-gray-400 shrink-0" />
+        ) : (
+          <ChevronRight size={18} className="text-gray-400 shrink-0" />
+        )
+      ) : (
+        <ChevronRight size={18} className="text-gray-400 shrink-0" />
+      )}
     </Wrapper>
   );
 }
@@ -3343,8 +3357,6 @@ function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRes
   const [imageIndex, setImageIndex] = useState(0);
   const images = [...(item.images || [])].sort((a, b) => Number(b.is_primary) - Number(a.is_primary));
   const current = images[Math.min(imageIndex, images.length - 1)];
-  const dept = getDepartment(item.department);
-
   return (
     <div className="min-h-screen bg-gray-50">
       <SubHeader title="Item details" onBack={onBack} />
@@ -3449,13 +3461,6 @@ function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRes
                   value={`${item.subitems.length} ${item.subitems.length === 1 ? "item" : "items"}`}
                 />
               )}
-              <div className="flex justify-between gap-4 items-center">
-                <dt className="text-gray-500">Department</dt>
-                <dd className="flex items-center gap-2 text-gray-900 font-medium">
-                  {dept && <img src={dept.logo} alt="" className="w-6 h-6 object-contain" />}
-                  {dept?.name || item.department}
-                </dd>
-              </div>
               {item.description && (
                 <div>
                   <dt className="text-gray-500 mb-1">Description</dt>
@@ -3585,7 +3590,7 @@ function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdde
     const load = async () => {
       if (document.hidden) return;
       try {
-        const data = await getProducts(); // every department, top-level items with nested subitems
+        const data = await getProducts(); 
         if (cancelled) return;
         setProducts(data);
         setError(null);
@@ -3748,7 +3753,6 @@ function ItemActionsMenu({ onEdit, onDelete }) {
 
 function ManageItemRow({ item, expanded, onToggle, onEdit, onDelete }) {
   const image = item.images?.find((i) => i.is_primary) || item.images?.[0];
-  const dept = getDepartment(item.department);
   const hasSubitems = (item.subitems?.length ?? 0) > 0;
   return (
     <div
@@ -3756,18 +3760,31 @@ function ManageItemRow({ item, expanded, onToggle, onEdit, onDelete }) {
       className={`w-full flex items-center gap-3 border rounded-xl p-3 bg-white border-gray-200 ${hasSubitems ? "cursor-pointer hover:bg-gray-50" : ""}`}
     >
       <div className="w-12 h-12 shrink-0 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center">
-        {image ? <img src={image.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-[10px] text-gray-400">No image</span>}
+        {image ? (
+          <img
+            src={image.image_url}
+            alt=""
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <span className="text-[10px] text-gray-400">No image</span>
+        )}
       </div>
       <div className="flex-1 min-w-0">
         <p className="font-medium text-gray-900 truncate">{item.name}</p>
-        <p className="text-xs text-gray-400 truncate">{dept?.name || ""}</p>
         {hasSubitems && (
           <p className="text-xs text-blue-600 font-medium mt-0.5">
-            {item.subitems.length} {item.subitems.length === 1 ? "subitem" : "subitems"}
+            {item.subitems.length}{" "}
+            {item.subitems.length === 1 ? "subitem" : "subitems"}
           </p>
         )}
       </div>
-      {hasSubitems && (expanded ? <ChevronDown size={18} className="text-gray-400 shrink-0" /> : <ChevronRight size={18} className="text-gray-400 shrink-0" />)}
+      {hasSubitems &&
+        (expanded ? (
+          <ChevronDown size={18} className="text-gray-400 shrink-0" />
+        ) : (
+          <ChevronRight size={18} className="text-gray-400 shrink-0" />
+        ))}
       <ItemActionsMenu onEdit={onEdit} onDelete={onDelete} />
     </div>
   );
@@ -6014,45 +6031,73 @@ function AccountDetail({ accountId, go, fromParam }) {
             <div className="bg-white border border-gray-200 rounded-xl p-4">
               <dl className="space-y-2 text-sm">
                 <DetailRow label="Category" value={data.category || "—"} />
-                {data.account_code && <DetailRow label="Account code" value={data.account_code} />}
-                <DetailRow label="Ledger balance" value={formatRs(data.ledger_balance)} />
+                {data.account_code && (
+                  <DetailRow label="Account code" value={data.account_code} />
+                )}
+                <DetailRow
+                  label="Ledger balance"
+                  value={formatRs(data.ledger_balance)}
+                />
                 {itemLinked && (
                   <>
-                    <DetailRow label="Total value" value={formatRs(data.total_value)} />
+                    <DetailRow
+                      label="Total value"
+                      value={formatRs(data.total_value)}
+                    />
                     <DetailRow label="Items linked" value={data.item_count} />
-                    <DetailRow label="Calculated as" value={`Stock quantity × ${basisLabel}`} />
+                    <DetailRow
+                      label="Calculated as"
+                      value={`Stock quantity × ${basisLabel}`}
+                    />
                   </>
                 )}
-                {data.description && <DetailRow label="Description" value={data.description} />}
+                {data.description && (
+                  <DetailRow label="Description" value={data.description} />
+                )}
               </dl>
             </div>
 
             {itemLinked && (
               <div>
                 <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
-                  Items using this account <span className="text-gray-400 font-normal">({data.items.length})</span>
+                  Items using this account{" "}
+                  <span className="text-gray-400 font-normal">
+                    ({data.items.length})
+                  </span>
                 </h2>
                 {data.items.length === 0 ? (
-                  <p className="text-gray-400 text-sm">No items use this account yet.</p>
+                  <p className="text-gray-400 text-sm">
+                    No items use this account yet.
+                  </p>
                 ) : (
                   <div className="space-y-2">
                     {data.items.map((i) => (
                       <button
                         key={i.id}
                         type="button"
-                        onClick={() => go({ view: "items", item: String(i.id) })}
+                        onClick={() =>
+                          go({ view: "items", item: String(i.id) })
+                        }
                         className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors"
                       >
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-gray-900 truncate">{i.name}</p>
+                          <p className="font-medium text-gray-900 truncate">
+                            {i.name}
+                          </p>
                           <p className="text-xs text-gray-400 truncate">
-                            {i.parent_name ? `Subitem of ${i.parent_name} · ` : ""}
-                            {DEPARTMENTS.find((d) => d.slug === i.department)?.name || i.department}
-                            {" · "}{i.quantity} × {formatRs(i.unit_value)}
+                            {i.parent_name
+                              ? `Subitem of ${i.parent_name} · `
+                              : ""}
+                            {i.quantity} × {formatRs(i.unit_value)}
                           </p>
                         </div>
-                        <span className="shrink-0 font-semibold text-gray-900">{formatRs(i.value)}</span>
-                        <ChevronRight size={16} className="shrink-0 text-gray-400" />
+                        <span className="shrink-0 font-semibold text-gray-900">
+                          {formatRs(i.value)}
+                        </span>
+                        <ChevronRight
+                          size={16}
+                          className="shrink-0 text-gray-400"
+                        />
                       </button>
                     ))}
                   </div>
@@ -6082,7 +6127,10 @@ function AccountDetail({ accountId, go, fromParam }) {
         <TypedDeleteConfirm
           label={data.name}
           onCancel={() => setShowDeleteConfirm(false)}
-          onConfirm={() => { setShowDeleteConfirm(false); handleDelete(); }}
+          onConfirm={() => {
+            setShowDeleteConfirm(false);
+            handleDelete();
+          }}
         />
       )}
       {showEditForm && (
@@ -9237,7 +9285,7 @@ function SearchSelect({
 }
 
 // Inline "create item" panel shown under the Item title
-function CreateItemPanel({ department, existingNames, parentOptions = [], onCreate, onCancel }) {
+function CreateItemPanel({ existingNames, parentOptions = [], onCreate, onCancel }) {
   const [form, setForm] = useState({ name: "", sku: "", price: "", is_subitem: false, parent_id: "" });
   const [imageFiles, setImageFiles] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -9248,7 +9296,7 @@ function CreateItemPanel({ department, existingNames, parentOptions = [], onCrea
     const name = form.name.trim();
     if (!name) return setError("Enter an item name");
     if (existingNames.includes(name.toLowerCase())) {
-      return setError("This item already exists in this department — select it from the list");
+      return setError("This item already exists — select it from the list");
     }
     if (form.is_subitem && !form.parent_id) {
       return setError('Select the parent item, or untick "Subitem of"');
@@ -9263,7 +9311,6 @@ function CreateItemPanel({ department, existingNames, parentOptions = [], onCrea
           description: "",
           quantity: 0, // stock is added through the bill so it is logged with a timestamp
           price: form.price || 0,
-          department,
           parent_id: form.is_subitem ? form.parent_id : "",
         },
         imageFiles
@@ -9276,7 +9323,7 @@ function CreateItemPanel({ department, existingNames, parentOptions = [], onCrea
 
   return (
     <div className="mb-3 border border-blue-200 bg-blue-50/50 rounded-xl p-3 space-y-2">
-      <p className="text-xs font-medium text-blue-700">New item in this department</p>
+      <p className="text-xs font-medium text-blue-700">New item</p>
       {error && <div className="bg-red-50 text-red-600 text-xs rounded-lg px-3 py-2">{error}</div>}
       <input
         autoFocus
@@ -9400,7 +9447,6 @@ function NewBillForm({ onBack, onSaved }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
-  const [department, setDepartment] = useState("");
   const [itemId, setItemId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [lines, setLines] = useState([]); // [{ product, quantity }]
@@ -9416,24 +9462,16 @@ function NewBillForm({ onBack, onSaved }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const allDeptItems = flattenParents(products.filter((p) => p.department === department));
-  const departmentItems = allDeptItems
+  const allItems = flattenParents(products);
+  const billableItems = allItems
     .filter((p) => !(p.subitems?.length > 0)) // only real, leaf-level items can be billed - categories can't
     .sort((a, b) => compareNames(a.name, b.name));
-  const selectedItem = departmentItems.find((p) => String(p.id) === itemId);
+  const selectedItem = billableItems.find((p) => String(p.id) === itemId);
   const totalUnits = lines.reduce((sum, l) => sum + l.quantity, 0);
   const qtyNumber = Number(quantity);
   const qtyValid = Number.isInteger(qtyNumber) && qtyNumber > 0;
 
-  const departmentOptions = DEPARTMENTS.map((d) => ({ value: d.slug, label: d.name }));
-  const itemOptions = departmentItems.map((p) => ({ value: String(p.id), label: p.label, hint: `${p.quantity} in stock` }));
-  const handleDepartment = (slug) => {
-    setDepartment(slug);
-    setItemId("");
-    setShowCreateItem(false);
-    setFormError(null);
-  };
-
+  const itemOptions = billableItems.map((p) => ({ value: String(p.id), label: p.label, hint: `${p.quantity} in stock` }));
   const handleCreateItem = async (values, imageFiles) => {
     const created = await createProduct(values, imageFiles);
     setProducts((prev) => [...prev, created]);
@@ -9474,8 +9512,6 @@ function NewBillForm({ onBack, onSaved }) {
     onSaved();
   };
 
-  const deptName = getDepartment(department)?.name;
-
   return (
     <div className="min-h-screen bg-gray-50">
       <SubHeader title="New Bill" subtitle="Add stock for many items at once" onBack={onBack} />
@@ -9490,26 +9526,12 @@ function NewBillForm({ onBack, onSaved }) {
             <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 space-y-5">
               {formError && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2">{formError}</div>}
 
-              {/* Department */}
-              <div>
-                <FieldLabel>Department</FieldLabel>
-                <SearchSelect
-                  value={department}
-                  onChange={handleDepartment}
-                  options={departmentOptions}
-                  placeholder="Select department"
-                  searchable={false}
-                />
-              </div>
-
               {/* Item */}
               <div>
                 <FieldLabel
                   action={
                     <FieldButton
                       onClick={() => setShowCreateItem((v) => !v)}
-                      disabled={!department}
-                      title={!department ? "Select a department first" : undefined}
                     >
                       Create Item
                     </FieldButton>
@@ -9518,11 +9540,10 @@ function NewBillForm({ onBack, onSaved }) {
                   Item
                 </FieldLabel>
 
-                {showCreateItem && department && (
+                {showCreateItem && (
                   <CreateItemPanel
-                    department={department}
-                    existingNames={allDeptItems.map((p) => p.name.toLowerCase())}
-                    parentOptions={allDeptItems.filter((p) => !p.parent_id)}
+                    existingNames={allItems.map((p) => p.name.toLowerCase())}
+                    parentOptions={allItems.filter((p) => !p.parent_id)}
                     onCreate={handleCreateItem}
                     onCancel={() => setShowCreateItem(false)}
                   />
@@ -9532,16 +9553,13 @@ function NewBillForm({ onBack, onSaved }) {
                   value={itemId}
                   onChange={setItemId}
                   options={itemOptions}
-                  disabled={!department}
-                  placeholder={
-                    !department ? "Select a department first" : departmentItems.length ? "Search or select item" : "No items yet"
-                  }
+                  placeholder={billableItems.length ? "Search or select item" : "No items yet"}
                   searchPlaceholder="Search items..."
-                  emptyText={departmentItems.length ? "No item found" : "No items in this department yet"}
+                  emptyText={billableItems.length ? "No item found" : "No items yet"}
                 />
-                {department && departmentItems.length === 0 && !showCreateItem && (
+                {billableItems.length === 0 && !showCreateItem && (
                   <p className="text-xs text-gray-400 mt-1.5">
-                    Nothing in {deptName} yet — use “Create Item” to add one.
+                    No items yet — use “Create Item” to add one.
                   </p>
                 )}
 
@@ -9615,12 +9633,10 @@ function NewBillForm({ onBack, onSaved }) {
               ) : (
                 <div className="space-y-2">
                   {lines.map((l) => {
-                    const dept = getDepartment(l.product.department);
                     return (
                       <div key={l.product.id} className="flex items-center gap-3 border border-gray-200 rounded-lg p-3">
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-gray-900 truncate">{l.product.name}</p>
-                          <p className="text-xs text-gray-400 truncate">{dept?.name}</p>
                           <p className="text-xs text-gray-500 mt-0.5">
                             {l.product.quantity} → <span className="font-medium text-green-600">{l.product.quantity + l.quantity}</span>
                           </p>
@@ -9774,9 +9790,7 @@ function BillPage({ go, autoCreateToken }) {
                           <div key={m.id} className="flex justify-between items-center gap-3 text-sm">
                             <div className="min-w-0">
                               <p className="text-gray-900 truncate">{m.product?.name || `Product #${m.product_id}`}</p>
-                              {m.product?.department && (
-                                <p className="text-xs text-gray-400 truncate">{getDepartment(m.product.department)?.name || m.product.department}</p>
-                              )}
+                              
                             </div>
                             <span className="font-semibold text-green-600 shrink-0">+{m.quantity}</span>
                           </div>
@@ -9925,10 +9939,7 @@ function NewIssuedForm({ onBack, onSaved }) {
 
   const leafProducts = flattenParents(products).filter((p) => !(p.subitems?.length > 0));
   const sortedProducts = [...leafProducts].sort((a, b) => compareNames(a.name, b.name));
-  const itemOptions = sortedProducts.map((p) => {
-  const deptName = getDepartment(p.department)?.name || p.department;
-    return { value: String(p.id), label: p.label, hint: `${deptName} · ${p.quantity} in stock`, search: `${p.label} ${deptName}` };
-  });
+  const itemOptions = sortedProducts.map((p) => ({ value: String(p.id), label: p.label, hint: `${p.quantity} in stock` }));
   const selectedItem = leafProducts.find((p) => String(p.id) === itemId);
   const alreadyInList = lines.find((l) => l.product.id === selectedItem?.id)?.quantity || 0;
   const pendingDeduct = selectedItem ? Math.max(0, alreadyInList - covered(selectedItem.id)) : 0;
@@ -10104,7 +10115,7 @@ function NewIssuedForm({ onBack, onSaved }) {
                   onChange={setItemId}
                   options={itemOptions}
                   placeholder="Search or select item"
-                  searchPlaceholder="Search by item or department..."
+                  searchPlaceholder="Search items..."
                   emptyText={products.length ? "No item found — use “Create Product”" : "No products yet — use “Create Product”"}
                 />
 
@@ -10166,13 +10177,11 @@ function NewIssuedForm({ onBack, onSaved }) {
               ) : (
                 <div className="space-y-2">
                   {lines.map((l) => {
-                    const dept = getDepartment(l.product.department);
                     const cov = covered(l.product.id);
                     return (
                       <div key={l.product.id} className="flex items-center gap-3 border border-gray-200 rounded-lg p-3">
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-gray-900 truncate">{l.product.name}</p>
-                          <p className="text-xs text-gray-400 truncate">{dept?.name}</p>
                           <p className="text-xs text-gray-500 mt-0.5">
                             {l.product.quantity} → <span className="font-medium text-amber-600">{l.product.quantity - (l.quantity - cov)}</span>
                           </p>
@@ -10281,7 +10290,6 @@ function NewIssuedForm({ onBack, onSaved }) {
 
       {showProductForm && (
         <ProductForm
-          defaultDepartment={DEPARTMENTS[0].slug}
           onSubmit={handleCreateProduct}
           onClose={() => setShowProductForm(false)}
         />
@@ -10461,9 +10469,7 @@ function IssuedPage({ go, autoCreateToken }) {
                                     <div key={m.id} className="flex justify-between items-center gap-3 text-sm">
                                       <div className="min-w-0">
                                         <p className="text-gray-900 truncate">{m.product?.name || `Product #${m.product_id}`}</p>
-                                        {m.product?.department && (
-                                          <p className="text-xs text-gray-400 truncate">{getDepartment(m.product.department)?.name || m.product.department}</p>
-                                        )}
+                                        
                                       </div>
                                       <span className="font-semibold text-amber-600 shrink-0">−{m.quantity}</span>
                                     </div>
@@ -10573,147 +10579,199 @@ const ALT_GO = {
   KeyU: "issued", KeyG: "manage",
 };
 
-function GlobalAdminShortcuts({ isAdmin, defaultDepartment, onProductCreated, onNewBill }) {
-  const [open, setOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
-  const [searchParams, setSearchParams] = useSearchParams();
+  function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
+    const [open, setOpen] = useState(false);
+    const [helpOpen, setHelpOpen] = useState(false);
+    const [searchParams, setSearchParams] = useSearchParams();
 
-  useEffect(() => {
-    if (!isAdmin) return;
-    const typing = () => {
-      const el = document.activeElement;
-      return !!el && (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || el.isContentEditable);
-    };
-    // a form / dialog is open: don't navigate away from half-typed work
-    const formOpen = () =>
-      [...document.querySelectorAll(".fixed.inset-0")].some((el) => el.querySelector("form, input, select, textarea"));
-    const go = (view) => setSearchParams(view ? { view } : {});
-    const openNew = (view) => {
-      if (searchParams.get("view") === view) {
-        window.dispatchEvent(new CustomEvent("app:new", { detail: { handled: false } }));
-      } else {
-        pendingNew = true;
-        setSearchParams({ view });
-      }
-    };
-    const overlayButton = (pattern) =>
-      [...document.querySelectorAll(".fixed.inset-0 button")].reverse().find((b) => pattern.test(b.textContent.trim()));
+    useEffect(() => {
+      if (!isAdmin) return;
+      const typing = () => {
+        const el = document.activeElement;
+        return (
+          !!el &&
+          (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) ||
+            el.isContentEditable)
+        );
+      };
+      // a form / dialog is open: don't navigate away from half-typed work
+      const formOpen = () =>
+        [...document.querySelectorAll(".fixed.inset-0")].some((el) =>
+          el.querySelector("form, input, select, textarea"),
+        );
+      const go = (view) => setSearchParams(view ? { view } : {});
+      const openNew = (view) => {
+        if (searchParams.get("view") === view) {
+          window.dispatchEvent(
+            new CustomEvent("app:new", { detail: { handled: false } }),
+          );
+        } else {
+          pendingNew = true;
+          setSearchParams({ view });
+        }
+      };
+      const overlayButton = (pattern) =>
+        [...document.querySelectorAll(".fixed.inset-0 button")]
+          .reverse()
+          .find((b) => pattern.test(b.textContent.trim()));
 
-    const onKeyDown = (e) => {
-      const mod = e.ctrlKey || e.metaKey;
-      const key = e.key.toLowerCase();
+      const onKeyDown = (e) => {
+        const mod = e.ctrlKey || e.metaKey;
+        const key = e.key.toLowerCase();
 
-      // ---- keys that work everywhere ----
-      if (e.key === "F1" || (e.key === "?" && !typing() && !mod)) {
-        e.preventDefault();
-        setHelpOpen((v) => !v);
-        return;
-      }
-      if (e.key === "Escape") {
-        if (helpOpen) { setHelpOpen(false); return; }
-        overlayButton(/^(cancel|close)$/i)?.click();
-        return;
-      }
-      if (mod && e.key === "Enter") {
-        e.preventDefault();
-        const form = [...document.querySelectorAll(".fixed.inset-0 form")].pop();
-        if (form) form.requestSubmit();
-        else overlayButton(/^(save|create|record|submit|post|add)\b/i)?.click();
-        return;
-      }
-      if (e.key === "/" && !mod && !e.altKey && !typing()) {
-        e.preventDefault();
-        [...document.querySelectorAll('input[placeholder^="Search"]')].find((i) => i.offsetParent !== null)?.focus();
-        return;
-      }
+        // ---- keys that work everywhere ----
+        if (e.key === "F1" || (e.key === "?" && !typing() && !mod)) {
+          e.preventDefault();
+          setHelpOpen((v) => !v);
+          return;
+        }
+        if (e.key === "Escape") {
+          if (helpOpen) {
+            setHelpOpen(false);
+            return;
+          }
+          overlayButton(/^(cancel|close)$/i)?.click();
+          return;
+        }
+        if (mod && e.key === "Enter") {
+          e.preventDefault();
+          const form = [
+            ...document.querySelectorAll(".fixed.inset-0 form"),
+          ].pop();
+          if (form) form.requestSubmit();
+          else
+            overlayButton(/^(save|create|record|submit|post|add)\b/i)?.click();
+          return;
+        }
+        if (e.key === "/" && !mod && !e.altKey && !typing()) {
+          e.preventDefault();
+          [...document.querySelectorAll('input[placeholder^="Search"]')]
+            .find((i) => i.offsetParent !== null)
+            ?.focus();
+          return;
+        }
 
-      if (formOpen() || helpOpen) return; // everything below would leave an open form
+        if (formOpen() || helpOpen) return; // everything below would leave an open form
 
-      // ---- Alt + letter: go to a list ----
-      if (e.altKey && !mod && !e.shiftKey) {
-        if (e.code === "KeyA") { e.preventDefault(); e.stopPropagation(); window.dispatchEvent(new CustomEvent("app:new", { detail: { handled: false } })); return; }
-        if (e.code in ALT_GO) { e.preventDefault(); go(ALT_GO[e.code]); }
-        return;
-      }
+        // ---- Alt + letter: go to a list ----
+        if (e.altKey && !mod && !e.shiftKey) {
+          if (e.code === "KeyA") {
+            e.preventDefault();
+            e.stopPropagation();
+            window.dispatchEvent(
+              new CustomEvent("app:new", { detail: { handled: false } }),
+            );
+            return;
+          }
+          if (e.code in ALT_GO) {
+            e.preventDefault();
+            go(ALT_GO[e.code]);
+          }
+          return;
+        }
 
-      // ---- Ctrl + letter ----
-      if (!mod || e.shiftKey || e.altKey) return;
+        // ---- Ctrl + letter ----
+        if (!mod || e.shiftKey || e.altKey) return;
 
-      if (key === "n") {
-        e.preventDefault(); // stop the browser's own "new window" (only possible in the installed app window)
-        const detail = { handled: false };
-        window.dispatchEvent(new CustomEvent("app:new", { detail }));
-        if (!detail.handled) setOpen(true); // no "New" on this page -> new item
-      } else if (key === "i") {
-        e.preventDefault();
-        openNew("invoices");
-      } else if (key === "w") {
-        e.preventDefault();
-        openNew("vendorpayments");
-      } else if (key === "b") {
-        e.preventDefault(); // stop Chrome's "toggle bookmarks bar"
-        onNewBill();
-      } else if (key === "f") {
-        e.preventDefault();
-        [...document.querySelectorAll('input[placeholder^="Search"]')].find((i) => i.offsetParent !== null)?.focus();
-      } else if (key === "a" && typing()) {
-        return; // let Ctrl+A select the text inside a field
-      } else if (key in CTRL_GO) {
-        e.preventDefault();
-        go(CTRL_GO[key]);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isAdmin, onNewBill, searchParams, helpOpen]);
+        if (key === "n") {
+          e.preventDefault(); // stop the browser's own "new window" (only possible in the installed app window)
+          const detail = { handled: false };
+          window.dispatchEvent(new CustomEvent("app:new", { detail }));
+          if (!detail.handled) setOpen(true); // no "New" on this page -> new item
+        } else if (key === "i") {
+          e.preventDefault();
+          openNew("invoices");
+        } else if (key === "w") {
+          e.preventDefault();
+          openNew("vendorpayments");
+        } else if (key === "b") {
+          e.preventDefault(); // stop Chrome's "toggle bookmarks bar"
+          onNewBill();
+        } else if (key === "f") {
+          e.preventDefault();
+          [...document.querySelectorAll('input[placeholder^="Search"]')]
+            .find((i) => i.offsetParent !== null)
+            ?.focus();
+        } else if (key === "a" && typing()) {
+          return; // let Ctrl+A select the text inside a field
+        } else if (key in CTRL_GO) {
+          e.preventDefault();
+          go(CTRL_GO[key]);
+        }
+      };
+      window.addEventListener("keydown", onKeyDown);
+      return () => window.removeEventListener("keydown", onKeyDown);
+    }, [isAdmin, onNewBill, searchParams, helpOpen]);
 
-  // the "Keyboard shortcuts" link in the sidebar
-  useEffect(() => {
-    const show = () => setHelpOpen(true);
-    window.addEventListener("app:help", show);
-    return () => window.removeEventListener("app:help", show);
-  }, []);
+    // the "Keyboard shortcuts" link in the sidebar
+    useEffect(() => {
+      const show = () => setHelpOpen(true);
+      window.addEventListener("app:help", show);
+      return () => window.removeEventListener("app:help", show);
+    }, []);
 
-  return (
-    <>
-      {open && (
-        <ProductForm
-          defaultDepartment={defaultDepartment}
-          onSubmit={async (values, imageFiles) => {
-            await createProduct(values, imageFiles);
-            onProductCreated?.();
-          }}
-          onClose={() => setOpen(false)}
-        />
-      )}
+    return (
+      <>
+        {open && (
+          <ProductForm
+            onSubmit={async (values, imageFiles) => {
+              await createProduct(values, imageFiles);
+              onProductCreated?.();
+            }}
+            onClose={() => setOpen(false)}
+          />
+        )}
 
-      {isAdmin && helpOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setHelpOpen(false)}>
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold text-gray-900">Keyboard shortcuts</h2>
-              <button type="button" onClick={() => setHelpOpen(false)} className="text-sm text-gray-500 hover:text-gray-800">Close</button>
+        {isAdmin && helpOpen && (
+          <div
+            className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+            onClick={() => setHelpOpen(false)}
+          >
+            <div
+              className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Keyboard shortcuts
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setHelpOpen(false)}
+                  className="text-sm text-gray-500 hover:text-gray-800"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+                {SHORTCUT_HELP.map(([group, rows]) => (
+                  <div key={group}>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1.5">
+                      {group}
+                    </h3>
+                    {rows.map(([keys, label]) => (
+                      <div
+                        key={keys}
+                        className="flex items-start justify-between gap-3 py-1 text-sm"
+                      >
+                        <span className="text-gray-600">{label}</span>
+                        <kbd className="shrink-0 text-xs bg-gray-100 border border-gray-300 rounded px-1.5 py-0.5 text-gray-700 whitespace-nowrap">
+                          {keys}
+                        </kbd>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-4">
+                On Mac, use Cmd instead of Ctrl and Option instead of Alt.
+              </p>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
-              {SHORTCUT_HELP.map(([group, rows]) => (
-                <div key={group}>
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1.5">{group}</h3>
-                  {rows.map(([keys, label]) => (
-                    <div key={keys} className="flex items-start justify-between gap-3 py-1 text-sm">
-                      <span className="text-gray-600">{label}</span>
-                      <kbd className="shrink-0 text-xs bg-gray-100 border border-gray-300 rounded px-1.5 py-0.5 text-gray-700 whitespace-nowrap">{keys}</kbd>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-gray-400 mt-4">On Mac, use Cmd instead of Ctrl and Option instead of Alt.</p>
           </div>
-        </div>
-      )}
-    </>
-  );
-}
+        )}
+      </>
+    );
+  }
 
 // ---------- Zoho-style shell + dashboard (admin) ----------
 // Sidebar sections, in order. A thin line is drawn between sections.
@@ -10721,7 +10779,7 @@ const ZOHO_NAV = [
   [
     { id: "home", label: "Home", Icon: Home },
     { id: "customers", label: "Customers", Icon: Users },
-    { id: "items", label: "Items", Icon: Tag, departments: true },
+    { id: "items", label: "Items", Icon: Tag },
   ],
   [
     { id: "quotes", label: "Quotes", Icon: FileSignature },
@@ -10738,6 +10796,7 @@ const ZOHO_NAV = [
   [
     { id: "bill", label: "Stock Bill", Icon: Receipt },
     { id: "issued", label: "Issued", Icon: ClipboardList },
+    { id: "inventory", label: "Requests & Stock History", Icon: History },
     { id: "manage", label: "Manage", Icon: Settings },
   ],
   [
@@ -10751,22 +10810,18 @@ const ZOHO_NAV = [
 
 function ZohoSidebar({ onNavigate }) {
   const [params, setParams] = useSearchParams();
-  const [deptOpen, setDeptOpen] = useState(true);
-  const dept = params.get("dept");
-  const activeId = dept ? "items" : params.get("view") || "home";
+  const activeId = params.get("view") || "home";
 
   const go = (id) => {
     setParams(id === "home" ? {} : { view: id });
     onNavigate?.();
   };
-  const goDept = (slug) => {
-    setParams({ dept: slug });
-    onNavigate?.();
-  };
 
   const rowCls = (active) =>
     `w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-left transition ${
-      active ? "bg-blue-500 text-white" : "text-gray-300 hover:bg-white/10 hover:text-white"
+      active
+        ? "bg-blue-500 text-white"
+        : "text-gray-300 hover:bg-white/10 hover:text-white"
     }`;
 
   return (
@@ -10782,7 +10837,7 @@ function ZohoSidebar({ onNavigate }) {
             key={gi}
             className={gi > 0 ? "mt-2 pt-2 border-t border-white/10" : ""}
           >
-            {group.map(({ id, label, Icon, departments }) => (
+            {group.map(({ id, label, Icon }) => (
               <div key={id}>
                 <button
                   onClick={() => go(id)}
@@ -10790,48 +10845,7 @@ function ZohoSidebar({ onNavigate }) {
                 >
                   <Icon size={16} className="shrink-0" />
                   <span className="flex-1 truncate">{label}</span>
-                  {departments && (
-                    <span
-                      role="button"
-                      aria-label="Show departments"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeptOpen((v) => !v);
-                      }}
-                      className="p-0.5 rounded hover:bg-white/20"
-                    >
-                      <ChevronDown
-                        size={14}
-                        className={`transition ${deptOpen ? "" : "-rotate-90"}`}
-                      />
-                    </span>
-                  )}
                 </button>
-
-                {departments && deptOpen && (
-                  <div className="ml-4 mt-0.5 mb-1 pl-3 border-l border-white/10 space-y-0.5">
-                    {DEPARTMENTS.map((d) => (
-                      <button
-                        key={d.slug}
-                        onClick={() => goDept(d.slug)}
-                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-left ${
-                          dept === d.slug
-                            ? "bg-blue-500/80 text-white"
-                            : "text-gray-400 hover:bg-white/10 hover:text-white"
-                        }`}
-                      >
-                        <span className="w-4 h-4 shrink-0 rounded bg-white flex items-center justify-center overflow-hidden">
-                          <img
-                            src={d.logo}
-                            alt=""
-                            className="max-w-full max-h-full object-contain"
-                          />
-                        </span>
-                        <span className="truncate">{d.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
             ))}
           </div>
@@ -11283,8 +11297,7 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
   );
 }
 
-// ---------- Picks home / items / a department, using the URL query ----------
-//   /?dept=i-lab                 -> department stock
+// ---------- Picks home / items / etc., using the URL query ----------
 //   /?view=items                 -> flat item list (subitems nested)
 //   /?view=items&item=12         -> full item card
 function AppShell() {
@@ -11295,22 +11308,12 @@ function AppShell() {
   const refresh = () => setRefreshToken((n) => n + 1);
   const [quickBillToken, setQuickBillToken] = useState(0);
   const [quickIssuedToken, setQuickIssuedToken] = useState(0);
-  const department = DEPARTMENTS.find((d) => d.slug === searchParams.get("dept"));
 
   const goNewBill = () => { setSearchParams({ view: "bill" }); setQuickBillToken((n) => n + 1); };
   const goNewIssued = () => { setSearchParams({ view: "issued" }); setQuickIssuedToken((n) => n + 1); };
 
   let page;
-  if (department) {
-    page = (
-      <InventoryView
-        key={department.slug}
-        isAdmin={isAdmin}
-        department={department}
-        onBack={() => setSearchParams({})}
-      />
-    );
-  } else if (searchParams.get("view") === "bill" && isAdmin) {
+  if (searchParams.get("view") === "bill" && isAdmin) {
     page = <BillPage go={setSearchParams} autoCreateToken={quickBillToken} />;
   } else if (searchParams.get("view") === "issued" && isAdmin) {
     page = (
@@ -11389,6 +11392,8 @@ function AppShell() {
         onProductAdded={refresh}
       />
     );
+  } else if (searchParams.get("view") === "inventory" && isAdmin) {
+    page = <InventoryView isAdmin={isAdmin} onBack={() => setSearchParams({})} />;
   } else if (searchParams.get("view") === "items") {
     page = (
       <ItemsPage
@@ -11409,15 +11414,7 @@ function AppShell() {
       />
     );
   } else {
-    page = (
-      <DepartmentHome
-        isAdmin={isAdmin}
-        onSelect={(slug) => setSearchParams({ dept: slug })}
-        refreshToken={refreshToken}
-        onProductAdded={refresh}
-        onTab={(tab) => tab !== "home" && setSearchParams({ view: tab })}
-      />
-    );
+    page = <InventoryView isAdmin={isAdmin} />;
   }
 
   return (
@@ -11425,7 +11422,6 @@ function AppShell() {
       {isAdmin ? <ZohoLayout>{page}</ZohoLayout> : page}
       <GlobalAdminShortcuts
         isAdmin={isAdmin}
-        defaultDepartment={department ? department.slug : DEPARTMENTS[0].slug}
         onProductCreated={refresh}
         onNewBill={goNewBill}
         onNewIssued={goNewIssued}

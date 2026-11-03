@@ -134,7 +134,7 @@ def account_detail(account_id: int, db: Session = Depends(get_db)):
     for p in products:
         unit = float(getattr(p, "price" if a.account_type == "income" else "cost") or 0)
         items.append({
-            "id": p.id, "name": p.name, "sku": p.sku, "department": p.department,
+            "id": p.id, "name": p.name, "sku": p.sku,
             "quantity": p.quantity, "unit_value": unit, "value": unit * p.quantity,
             "parent_name": p.parent.name if p.parent else None,
         })

@@ -2,7 +2,6 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from decimal import Decimal
 from datetime import date, datetime
 from typing import Optional, List
-from .departments import DEFAULT_DEPARTMENT
 
 
 # ---------- Account (chart of accounts) ----------
@@ -37,7 +36,6 @@ class AccountItemValue(BaseModel):
     id: int
     name: str
     sku: Optional[str] = None
-    department: str
     quantity: int
     unit_value: float          # cost (COGS/Asset accounts) or sales price (Income accounts)
     value: float               # quantity x unit_value
@@ -145,7 +143,7 @@ class ProductBase(BaseModel):
     quantity: int = 0
     price: Decimal = Decimal("0")                      # Sales Price
     cost: Decimal = Decimal("0")                        # Cost
-    department: str = DEFAULT_DEPARTMENT
+    
 
     item_type: str = "Inventory Part"
     manufacturer_part_number: Optional[str] = None
@@ -169,7 +167,7 @@ class ProductUpdate(BaseModel):
     quantity: Optional[int] = None
     price: Optional[Decimal] = None
     cost: Optional[Decimal] = None
-    department: Optional[str] = None
+    
 
     item_type: Optional[str] = None
     manufacturer_part_number: Optional[str] = None
@@ -264,7 +262,7 @@ class BillProductOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
-    department: str
+
 
 class BillItemOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)

@@ -5,7 +5,6 @@ from typing import Optional, List
 from .. import models, schemas
 from ..database import get_db
 from ..imagekit_client import upload_image, delete_image
-from ..departments import validate_department, DEFAULT_DEPARTMENT
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
@@ -19,10 +18,8 @@ PRODUCT_RELATIONS = (
 )
 
 @router.get("/", response_model=list[schemas.ProductOut])
-def list_products(department: Optional[str] = None, db: Session = Depends(get_db)):
+def list_products(db: Session = Depends(get_db)):
     query = db.query(models.Product).options(*PRODUCT_RELATIONS)
-    if department:
-        query = query.filter(models.Product.department == department)
     # only top-level items; subitems ride along nested inside `subitems`
     query = query.filter(models.Product.parent_id.is_(None))
     return query.all()
@@ -50,7 +47,6 @@ def create_product(
     quantity: int = Form(0),
     price: float = Form(0),
     cost: float = Form(0),
-    department: str = Form(DEFAULT_DEPARTMENT),
     item_type: str = Form("Inventory Part"),
     manufacturer_part_number: Optional[str] = Form(None),
     reorder_min: Optional[int] = Form(None),
@@ -63,7 +59,6 @@ def create_product(
     images: List[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
 ):
-    validate_department(department)
 
     if parent_id is not None:
         parent = db.query(models.Product).get(parent_id)
@@ -73,8 +68,7 @@ def create_product(
     product = models.Product(
         name=name, sku=(sku or "").strip() or None, description=description, purchase_description=purchase_description,
         quantity=quantity, price=price, cost=cost,
-        department=department, item_type=item_type,
-        manufacturer_part_number=manufacturer_part_number,
+        item_type=item_type, manufacturer_part_number=manufacturer_part_number,
         reorder_min=reorder_min, reorder_max=reorder_max, parent_id=parent_id,
         cogs_account_id=cogs_account_id, income_account_id=income_account_id,
         asset_account_id=asset_account_id, preferred_vendor_id=preferred_vendor_id,
@@ -103,8 +97,6 @@ def update_product(product_id: int, payload: schemas.ProductUpdate, db: Session 
     if not product:
         raise HTTPException(404, "Product not found")
 
-    if payload.department is not None:
-        validate_department(payload.department)
 
     if payload.parent_id is not None:
         if payload.parent_id == product_id:

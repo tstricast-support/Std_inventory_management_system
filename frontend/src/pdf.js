@@ -7,7 +7,7 @@ import autoTable from "jspdf-autotable";
 const COMPANY = {
   name: "I LAB std",
   lines: ["NO 17/A", "Hollycross road, Gampaha", "Phone: +94 00 000 0000"],
-  logo: "/logos/i-lab.png", // a file in public/logos/ (or null for no logo)
+  logo: "/logos/i-lab-std.png", // a file in public/logos/ (or null for no logo)
 };
 
 const money = (n) =>
