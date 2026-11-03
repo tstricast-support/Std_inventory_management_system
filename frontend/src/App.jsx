@@ -295,7 +295,7 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox
@@ -4051,7 +4051,7 @@ const shownAccounts = q ? sortedAccounts.filter((a) => a.name.toLowerCase().incl
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={true} active="manage" onProductAdded={onProductAdded} onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 max-w-4xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <div className="mb-5">
           <SearchBox value={search} onChange={setSearch} placeholder="Search Items / Vendors / Acc..." />
         </div>
@@ -4316,7 +4316,7 @@ function VendorsPage({ isAdmin, go }) {
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <div className="mb-5 flex justify-end">
           <button onClick={() => setFormOpen(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
             + Add Vendor
@@ -4457,7 +4457,7 @@ function TaxesPage({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="taxes" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <div className="mb-5 flex gap-3 items-center">
           <p className="flex-1 text-sm text-gray-500">
             Tax rates you can add to invoice and bill lines. The default one is pre-selected on new lines.
@@ -4606,7 +4606,7 @@ function ReportsPage({ isAdmin, go }) {
   return (
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="reports" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
-      <main className="p-4 sm:p-6 max-w-4xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <h1 className="text-xl font-bold text-gray-900 mb-3">Reports</h1>
         <div className="flex flex-wrap gap-2 mb-5">
           {REPORT_TABS.map(([key, label]) => (
@@ -5068,7 +5068,7 @@ function DashboardPage({ isAdmin, go }) {
   return (
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="dashboard" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
-      <main className="p-4 sm:p-6 max-w-4xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <h1 className="text-xl font-bold text-gray-900 mb-3">Dashboard</h1>
         <ReportBody loading={loading} error={error} data={data}>
           {data && (
@@ -5167,7 +5167,7 @@ function BankAccountsList({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="banking" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <div className="mb-5 flex flex-wrap gap-2 items-center">
           <div className="flex-1 min-w-[10rem]">
             <p className="text-xs text-gray-400">Total in bank and cash accounts</p>
@@ -5359,7 +5359,7 @@ function BankRegister({ isAdmin, go, accountId }) {
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <button
           onClick={() => go({ view: "banking" })}
           className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3"
@@ -5611,7 +5611,7 @@ function BankReconcile({ isAdmin, go, accountId }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="banking" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <button onClick={() => go({ view: "banking", account: accountId })} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3">
           <ArrowLeft size={16} /> Back to {account?.name || "account"}
         </button>
@@ -5885,7 +5885,7 @@ function CustomersPage({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="customers" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox value={search} onChange={setSearch} placeholder="Search customers..." />
@@ -6145,7 +6145,7 @@ function AccountDetail({ accountId, go, fromParam }) {
         subtitle={data ? ACCOUNT_TYPE_NAMES[data.account_type] : undefined}
         onBack={back}
       />
-      <main className="p-4 sm:p-6 max-w-3xl space-y-6">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto space-y-6">
         {loading ? (
           <p className="text-gray-400 text-center py-16">Loading...</p>
         ) : error ? (
@@ -6894,7 +6894,7 @@ function JournalsPage({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="journals" onTab={(t) => go(t === "home" ? {} : { view: t })} />
 
-      <main className="p-4 sm:p-6 max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <div className="mb-5 flex items-center gap-2">
           {subTab("journals", "Journals")}
           {subTab("trial", "Trial balance")}
@@ -7242,7 +7242,7 @@ function InvoicesPage({ isAdmin, go }) {
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox
@@ -7922,7 +7922,7 @@ function CreditNotesPage({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="creditnotes" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox value={search} onChange={setSearch} placeholder="Search credit notes..." />
@@ -8446,7 +8446,7 @@ function PaymentsPage({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="payments" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox value={search} onChange={setSearch} placeholder="Search payments..." />
@@ -8733,7 +8733,7 @@ function PurchaseBillsPage({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="purchases" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox value={search} onChange={setSearch} placeholder="Search bills..." />
@@ -9142,7 +9142,7 @@ function VendorPaymentsPage({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="vendorpayments" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox value={search} onChange={setSearch} placeholder="Search payments made..." />
@@ -9983,7 +9983,7 @@ function BillPage({ go, autoCreateToken }) {
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 max-w-4xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <div className="mb-4 flex justify-end">
           <button onClick={() => setCreating(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
             + New Bill
@@ -10643,7 +10643,7 @@ function IssuedPage({ go, autoCreateToken }) {
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 max-w-4xl">
+      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <div className="mb-4 flex justify-end">
           <button onClick={() => setCreating(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
             + Create Issued List
@@ -11430,7 +11430,7 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
         </div>
       </div>
 
-      <main className={`p-4 sm:p-6 ${layout.fullWidth ? "" : "max-w-6xl"}`}>
+      <main className="p-4 sm:p-6 w-full">
         <ReportBody loading={loading} error={error} data={data}>
           {data && activeTab === "dashboard" && (
             shown.length === 0 ? (
