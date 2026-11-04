@@ -8006,6 +8006,9 @@ function QuickItemModal({ initialName, onSave, onClose }) {
   );
 }
 
+const INVOICE_ROW_GRID =
+  "grid grid-cols-2 gap-2 sm:grid-cols-[28px_minmax(0,1.5fr)_minmax(0,1.5fr)_64px_96px_96px_32px] sm:items-center";
+
 const blankInvoiceLine = () => ({ product_id: "", description: "", quantity: "1", rate: "" });
 
 function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
@@ -8102,14 +8105,25 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     setLines((prev) =>
       prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
     );
-  const pickItem = (i, productId) => {
-    const p = itemById[productId];
-    setLine(i, {
-      product_id: productId,
-      description: p?.description || "",
-      rate: p ? String(p.price ?? 0) : "",
-    });
-  };
+    const pickItem = (i, productId) => {
+      const p = itemById[productId];
+      setLines((prev) => {
+        const next = prev.map((l, idx) =>
+          idx === i
+            ? {
+                ...l,
+                product_id: productId,
+                description: p?.description || "",
+                rate: p ? String(p.price ?? 0) : "",
+              }
+            : l,
+        );
+        // like QuickBooks: filling the last empty row opens a fresh empty row
+        return productId && i === prev.length - 1 && !prev[i].product_id
+          ? [...next, blankInvoiceLine()]
+          : next;
+      });
+    };
 
   // "Create Customer" button: save, add to the dropdown, and select it
   const handleCreateCustomer = async (_id, payload) => {
@@ -8149,10 +8163,19 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     const created = await createProduct(values, []);
     const tree = await getProducts();
     setItems(flattenParents(tree).filter((x) => !(x.subitems?.length > 0)));
-    setLine(quickItem.lineIndex, {
-      product_id: created.id,
-      description: created.description || "",
-      rate: String(created.price ?? 0),
+    const at = quickItem.lineIndex;
+    setLines((prev) => {
+      const next = prev.map((l, idx) =>
+        idx === at
+          ? {
+              ...l,
+              product_id: created.id,
+              description: created.description || "",
+              rate: String(created.price ?? 0),
+            }
+          : l,
+      );
+      return at === prev.length - 1 ? [...next, blankInvoiceLine()] : next;
     });
   };
   // the same item can be on two lines, so stock is checked against the combined quantity
@@ -8305,104 +8328,128 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
             >
               Items
             </FieldLabel>
-            {lines.map((l, i) => {
-              const p = itemById[l.product_id];
-              return (
-                <div
-                  key={i}
-                  className="border border-gray-200 rounded-lg p-3 space-y-2"
-                >
-                  <div className="flex items-start gap-3">
-                    <ItemThumb product={p} size={56} />
-                    <div className="flex-1 min-w-0 space-y-2">
-                      <SearchSelect
-                        value={l.product_id}
-                        onChange={(v) => pickItem(i, v)}
-                        options={itemOptions}
-                        placeholder="Select an item..."
-                        searchPlaceholder="Search items..."
-                        onCreateNew={(name) =>
-                          setQuickItem({ name, lineIndex: i })
-                        }
-                        createLabel="item"
-                        emptyText="No items found"
-                      />
+            <div className="border border-gray-200 rounded-lg">
+              <div
+                className={`${INVOICE_ROW_GRID} hidden sm:grid bg-gray-50 border-b border-gray-200 rounded-t-lg px-2 py-2 text-[11px] font-semibold uppercase text-gray-500`}
+              >
+                <span>#</span>
+                <span>Product / Service</span>
+                <span>Description</span>
+                <span className="text-right">Qty</span>
+                <span className="text-right">Rate</span>
+                <span className="text-right">Amount</span>
+                <span />
+              </div>
+
+              {lines.map((l, i) => {
+                const p = itemById[l.product_id];
+                return (
+                  <div
+                    key={i}
+                    className="border-b border-gray-100 last:border-b-0 px-2 py-2"
+                  >
+                    <div className={INVOICE_ROW_GRID}>
+                      <span className="hidden sm:block text-sm text-gray-400">
+                        {i + 1}
+                      </span>
+                      <div className="col-span-2 sm:col-span-1 min-w-0">
+                        <SearchSelect
+                          value={l.product_id}
+                          onChange={(v) => pickItem(i, v)}
+                          options={itemOptions}
+                          placeholder="Select an item..."
+                          searchPlaceholder="Search items..."
+                          onCreateNew={(name) =>
+                            setQuickItem({ name, lineIndex: i })
+                          }
+                          createLabel="item"
+                          emptyText="No items found"
+                        />
+                      </div>
                       <input
-                        placeholder="Description (optional)"
+                        placeholder="Description"
                         value={l.description}
                         onChange={(e) =>
                           setLine(i, { description: e.target.value })
                         }
-                        className={cls}
+                        className={cls + " col-span-2 sm:col-span-1"}
                       />
-                    </div>
-                    {lines.length > 1 && (
-                      <button
-                        type="button"
-                        title="Remove line"
-                        onClick={() =>
-                          setLines((prev) => prev.filter((_, idx) => idx !== i))
-                        }
-                        className="shrink-0 border border-gray-300 rounded-lg p-2 text-gray-500 hover:bg-gray-50"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    <label className="text-xs text-gray-500">
-                      Qty
                       <input
                         type="number"
                         min="1"
                         step="1"
+                        placeholder="Qty"
+                        aria-label="Quantity"
                         value={l.quantity}
                         onChange={(e) =>
                           setLine(i, { quantity: e.target.value })
                         }
-                        className={cls + " mt-1"}
+                        className={cls + " sm:text-right"}
                       />
-                    </label>
-                    <label className="text-xs text-gray-500">
-                      Rate
                       <input
                         type="number"
                         min="0"
                         step="0.01"
+                        placeholder="Rate"
+                        aria-label="Rate"
                         value={l.rate}
                         onChange={(e) => setLine(i, { rate: e.target.value })}
-                        className={cls + " mt-1"}
+                        className={cls + " sm:text-right"}
                       />
-                    </label>
-                    <div className="text-xs text-gray-500">
-                      Amount
-                      <p className="mt-1 py-2 text-sm font-medium text-gray-900">
+                      <p className="text-sm font-medium text-gray-900 sm:text-right truncate">
                         {formatRs(lineCents(l) / 100)}
                       </p>
+                      {lines.length > 1 ? (
+                        <button
+                          type="button"
+                          title="Remove line"
+                          onClick={() =>
+                            setLines((prev) =>
+                              prev.filter((_, idx) => idx !== i),
+                            )
+                          }
+                          className="justify-self-end p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      ) : (
+                        <span />
+                      )}
                     </div>
-                  </div>
 
-                  {overStock(l) && (
-                    <p className="text-xs text-amber-600">
-                      Only {p.quantity + (oldQty[l.product_id] || 0)} in stock.
-                      You can still sell it, but stock will go to{" "}
-                      {p.quantity +
-                        (oldQty[l.product_id] || 0) -
-                        used[l.product_id]}
-                      .
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() => setLines((prev) => [...prev, blankInvoiceLine()])}
-              className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
-            >
-              <Plus size={14} /> Add another line
-            </button>
+                    {overStock(l) && (
+                      <p className="text-xs text-amber-600 mt-1 sm:pl-8">
+                        Only {p.quantity + (oldQty[l.product_id] || 0)} in
+                        stock. You can still sell it, but stock will go to{" "}
+                        {p.quantity +
+                          (oldQty[l.product_id] || 0) -
+                          used[l.product_id]}
+                        .
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() =>
+                  setLines((prev) => [...prev, blankInvoiceLine()])
+                }
+                className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+              >
+                <Plus size={14} /> Add lines
+              </button>
+              <button
+                type="button"
+                onClick={() => setLines([blankInvoiceLine()])}
+                className="text-sm text-gray-500 hover:text-red-600"
+              >
+                Clear all lines
+              </button>
+            </div>
           </div>
 
           <textarea
