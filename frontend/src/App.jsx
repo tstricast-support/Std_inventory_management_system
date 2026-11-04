@@ -40,6 +40,7 @@ import {
   LayoutDashboard,
   Home,
   Palette,
+  Upload
 } from "lucide-react";
 import "./index.css";
 
@@ -1224,6 +1225,44 @@ async function setPrimaryImage(id, imageId) {
 async function deleteProductImage(id, imageId) {
   const res = await fetch(`${BASE_URL}/products/${id}/images/${imageId}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete image");
+  return res.json();
+}
+
+// ---------- Excel import + bulk images ----------
+async function downloadImportTemplate() {
+  const res = await fetch(`${BASE_URL}/product-import/template`);
+  if (!res.ok) throw new Error("Failed to download template");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "item-import-template.xlsx";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+ 
+async function importProductsFile(file, { updateExisting, dryRun }) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("update_existing", String(updateExisting));
+  formData.append("dry_run", String(dryRun));
+  const res = await fetch(`${BASE_URL}/product-import/`, { method: "POST", body: formData });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : "Import failed");
+  }
+  return res.json();
+}
+ 
+async function bulkUploadImages(files, replaceExisting) {
+  const formData = new FormData();
+  files.forEach((f) => formData.append("images", f));
+  formData.append("replace_existing", String(replaceExisting));
+  const res = await fetch(`${BASE_URL}/product-import/images`, { method: "POST", body: formData });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(typeof err?.detail === "string" ? err.detail : "Image upload failed");
+  }
   return res.json();
 }
 
@@ -2743,15 +2782,261 @@ function InventoryView({ isAdmin, onBack }) {
   );
 }
 
+// ---------- ImportItemsModal (Excel import + bulk images by SKU) ----------
+function ImportItemsModal({ onClose, onDone }) {
+  const [tab, setTab] = useState("excel"); // "excel" | "images"
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+ 
+  // --- Excel tab ---
+  const [file, setFile] = useState(null);
+  const [updateExisting, setUpdateExisting] = useState(false);
+  const [check, setCheck] = useState(null); // result of the dry run
+  const [imported, setImported] = useState(null); // result of the real import
+ 
+  // --- Images tab ---
+  const [imageFiles, setImageFiles] = useState([]);
+  const [replaceImages, setReplaceImages] = useState(false);
+  const [imgProgress, setImgProgress] = useState(null);
+  const [imgResult, setImgResult] = useState(null);
+ 
+  const runCheck = async (f, upd) => {
+    if (!f) return;
+    setBusy(true);
+    setError(null);
+    setImported(null);
+    try {
+      setCheck(await importProductsFile(f, { updateExisting: upd, dryRun: true }));
+    } catch (err) {
+      setCheck(null);
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+ 
+  const handleFile = (e) => {
+    const f = e.target.files[0] || null;
+    e.target.value = "";
+    setFile(f);
+    setCheck(null);
+    runCheck(f, updateExisting);
+  };
+ 
+  const handleImport = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await importProductsFile(file, { updateExisting, dryRun: false });
+      setImported(result);
+      if (result.saved) onDone?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+ 
+  const handleImages = async () => {
+    setBusy(true);
+    setError(null);
+    setImgResult(null);
+    const total = { matched: [], unmatched: [], failed: [] };
+    try {
+      // Group files that belong to the same item (PP-1.jpg, PP-1_2.jpg) so they always travel in the
+      // same batch - otherwise "Replace existing images" could delete photos uploaded a moment earlier.
+      const keyOf = (f) => f.name.replace(/\.[^.]+$/, "").replace(/[\s_-]+\d+$/, "").toLowerCase();
+      const groups = new Map();
+      imageFiles.forEach((f) => {
+        const k = keyOf(f);
+        groups.set(k, [...(groups.get(k) || []), f]);
+      });
+      const batches = [];
+      let current = [];
+      for (const g of groups.values()) {
+        if (current.length && current.length + g.length > 6) { // small batches so big uploads don't time out
+          batches.push(current);
+          current = [];
+        }
+        current.push(...g);
+      }
+      if (current.length) batches.push(current);
+ 
+      let done = 0;
+      for (const batch of batches) {
+        setImgProgress(`Uploading ${done + batch.length} of ${imageFiles.length}...`);
+        const r = await bulkUploadImages(batch, replaceImages);
+        done += batch.length;
+        total.matched.push(...r.matched);
+        total.unmatched.push(...r.unmatched);
+        total.failed.push(...r.failed);
+      }
+      setImgResult(total);
+      if (total.matched.length) onDone?.();
+    } catch (err) {
+      setError(err.message);
+      setImgResult(total);
+    } finally {
+      setImgProgress(null);
+      setBusy(false);
+    }
+  };
+ 
+  const tabCls = (t) =>
+    `pb-2 text-sm font-medium border-b-2 ${tab === t ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`;
+ 
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">Import items</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none" aria-label="Close">×</button>
+        </div>
+ 
+        <div className="flex gap-4 border-b border-gray-100 mb-4">
+          <button onClick={() => { setTab("excel"); setError(null); }} className={tabCls("excel")}>1. Excel file</button>
+          <button onClick={() => { setTab("images"); setError(null); }} className={tabCls("images")}>2. Bulk images</button>
+        </div>
+ 
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">{error}</div>}
+ 
+        {tab === "excel" && (
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => downloadImportTemplate().catch((err) => setError(err.message))}
+              className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline"
+            >
+              <Download size={14} /> Download Excel template
+            </button>
+ 
+            <label className="block border-2 border-dashed border-gray-300 rounded-lg px-4 py-6 text-center text-sm text-gray-500 cursor-pointer hover:bg-gray-50">
+              <input type="file" accept=".xlsx,.xlsm,.csv" onChange={handleFile} disabled={busy} className="hidden" />
+              {file ? file.name : "Click to choose an .xlsx or .csv file"}
+            </label>
+ 
+            <label className="flex items-center gap-2 text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={updateExisting}
+                disabled={busy}
+                onChange={(e) => { setUpdateExisting(e.target.checked); runCheck(file, e.target.checked); }}
+              />
+              Update existing items that have the same SKU (stock quantity is never changed)
+            </label>
+ 
+            {busy && !imported && <p className="text-sm text-gray-400">Checking file...</p>}
+ 
+            {check && !imported && (
+              <div className="text-sm border border-gray-200 rounded-lg p-3 space-y-2">
+                <p className="text-gray-700">
+                  {check.total_rows} rows: <b className="text-green-600">{check.created} new</b>
+                  {check.updated > 0 && <>, <b className="text-blue-600">{check.updated} updated</b></>}
+                  {check.skipped > 0 && <>, <b className="text-gray-500">{check.skipped} skipped (SKU exists)</b></>}
+                  {check.errors.length > 0 && <>, <b className="text-red-600">{check.errors.length} with errors</b></>}
+                </p>
+                {check.errors.length > 0 && (
+                  <div className="max-h-40 overflow-y-auto bg-red-50 rounded p-2 text-xs text-red-700 space-y-0.5">
+                    {check.errors.map((er, i) => (
+                      <p key={i}>Row {er.row}{er.name ? ` (${er.name})` : ""}: {er.message}</p>
+                    ))}
+                    <p className="pt-1 font-medium">Nothing is imported until every row is fixed. Correct the file and choose it again.</p>
+                  </div>
+                )}
+              </div>
+            )}
+ 
+            {imported?.saved && (
+              <div className="bg-green-50 text-green-700 text-sm rounded-lg px-3 py-2">
+                Done: {imported.created} created, {imported.updated} updated, {imported.skipped} skipped.
+                {" "}Now open the <b>Bulk images</b> tab to add pictures.
+              </div>
+            )}
+ 
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Close</button>
+              <button
+                onClick={handleImport}
+                disabled={busy || !check || check.errors.length > 0 || (check.created + check.updated === 0) || imported?.saved}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {busy && check ? "Importing..." : `Import ${check ? check.created + check.updated : ""} items`}
+              </button>
+            </div>
+          </div>
+        )}
+ 
+        {tab === "images" && (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-500">
+              Select many pictures at once. Each file name must match the item's <b>SKU</b> (or exact item name),
+              e.g. <code className="bg-gray-100 px-1 rounded">PP-A4-001.jpg</code>. For extra photos of the same
+              item use <code className="bg-gray-100 px-1 rounded">PP-A4-001_2.jpg</code>.
+              The first picture becomes the main image.
+            </p>
+ 
+            <label className="block border-2 border-dashed border-gray-300 rounded-lg px-4 py-6 text-center text-sm text-gray-500 cursor-pointer hover:bg-gray-50">
+              <input
+                type="file" accept="image/*" multiple disabled={busy} className="hidden"
+                onChange={(e) => { setImageFiles(Array.from(e.target.files)); setImgResult(null); e.target.value = ""; }}
+              />
+              {imageFiles.length ? `${imageFiles.length} image(s) selected` : "Click to choose images"}
+            </label>
+ 
+            <label className="flex items-center gap-2 text-sm text-gray-600">
+              <input type="checkbox" checked={replaceImages} disabled={busy} onChange={(e) => setReplaceImages(e.target.checked)} />
+              Replace the item's existing images
+            </label>
+ 
+            {imgProgress && <p className="text-sm text-gray-400">{imgProgress}</p>}
+ 
+            {imgResult && (
+              <div className="text-sm border border-gray-200 rounded-lg p-3 space-y-2">
+                <p><b className="text-green-600">{imgResult.matched.length} uploaded</b>
+                  {imgResult.unmatched.length > 0 && <>, <b className="text-amber-600">{imgResult.unmatched.length} no matching item</b></>}
+                  {imgResult.failed.length > 0 && <>, <b className="text-red-600">{imgResult.failed.length} failed</b></>}
+                </p>
+                {imgResult.unmatched.length > 0 && (
+                  <p className="text-xs text-amber-700 max-h-24 overflow-y-auto">No match: {imgResult.unmatched.join(", ")}</p>
+                )}
+                {imgResult.failed.length > 0 && (
+                  <p className="text-xs text-red-700 max-h-24 overflow-y-auto">
+                    {imgResult.failed.map((f) => `${f.file} (${f.message})`).join(", ")}
+                  </p>
+                )}
+              </div>
+            )}
+ 
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Close</button>
+              <button
+                onClick={handleImages}
+                disabled={busy || imageFiles.length === 0}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {busy ? "Uploading..." : "Upload images"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const AddProductButton = forwardRef(function AddProductButton(
   { onCreated, hideTrigger },
   ref,
 ) {
   const [open, setOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const handleOpen = () => setOpen(true);
 
-  useImperativeHandle(ref, () => ({ open: handleOpen }));
+  useImperativeHandle(ref, () => ({
+    open: handleOpen,
+    openImport: () => setImportOpen(true),
+  }));
 
   const handleCreate = async (values, imageFiles) => {
     await createProduct(values, imageFiles);
@@ -2761,15 +3046,29 @@ const AddProductButton = forwardRef(function AddProductButton(
   return (
     <>
       {!hideTrigger && (
-        <button
-          onClick={handleOpen}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
-        >
-          + Add Product
-        </button>
+        <>
+          <button
+            onClick={() => setImportOpen(true)}
+            className="inline-flex items-center gap-1.5 border border-gray-300 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap"
+          >
+            <Upload size={14} /> Import
+          </button>
+          <button
+            onClick={handleOpen}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
+          >
+            + Add Product
+          </button>
+        </>
       )}
       {open && (
         <ProductForm onSubmit={handleCreate} onClose={() => setOpen(false)} />
+      )}
+      {importOpen && (
+        <ImportItemsModal
+          onClose={() => setImportOpen(false)}
+          onDone={() => onCreated?.()}
+        />
       )}
     </>
   );
@@ -3316,12 +3615,20 @@ function AppHeader({
                   >
                     {actions}
                     {hideAddProduct && (
-                      <button
-                        onClick={() => addProductRef.current?.open()}
-                        className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
-                      >
-                        + Add Product
-                      </button>
+                      <>
+                        <button
+                          onClick={() => addProductRef.current?.openImport()}
+                          className="border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap"
+                        >
+                          Import items
+                        </button>
+                        <button
+                          onClick={() => addProductRef.current?.open()}
+                          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
+                        >
+                          + Add Product
+                        </button>
+                      </>
                     )}
                   </div>
                 </>

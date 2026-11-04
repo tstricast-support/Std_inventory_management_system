@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 from app.account_types import DEFAULT_ACCOUNTS
 from app.database import Base, engine
-from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments,sales_documents,credit_notes,taxes,banking,reports,dashboard
+from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments,sales_documents,credit_notes,taxes,banking,reports,dashboard,product_import
 Base.metadata.create_all(bind=engine) 
 
 
@@ -145,7 +145,8 @@ app.include_router(credit_notes.router)
 app.include_router(taxes.router)
 app.include_router(banking.router)
 app.include_router(reports.router)
-app.include_router(dashboard.router)     
+app.include_router(dashboard.router)  
+app.include_router(product_import.router)   
 
 @app.get("/")
 def root():
