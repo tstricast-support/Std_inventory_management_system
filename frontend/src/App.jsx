@@ -303,7 +303,7 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox
@@ -3547,6 +3547,9 @@ function ItemRow({ item, onClick, expanded, onToggle, isAdmin, onLongPress }) {
       </div>
       <div className="flex-1 min-w-0">
         <p className="font-medium text-gray-900 truncate">{item.name}</p>
+        {!hasSubitems && (
+          <p className="text-xs text-gray-500 mt-0.5">{formatRs(item.price)}</p>
+        )}
         {hasSubitems && (
           <p className="text-xs text-blue-600 font-medium mt-0.5">
             {item.subitems.length}{" "}
@@ -3733,33 +3736,59 @@ function SubitemRow({ item, onClick, expanded, onToggle, isAdmin, onLongPress })
       onPointerLeave={canLongPress ? cancelLongPress : undefined}
       onPointerCancel={canLongPress ? cancelLongPress : undefined}
       onContextMenu={canLongPress ? (e) => e.preventDefault() : undefined}
-      style={canLongPress ? { touchAction: "manipulation", WebkitUserSelect: "none", userSelect: "none" } : undefined}
+      style={
+        canLongPress
+          ? {
+              touchAction: "manipulation",
+              WebkitUserSelect: "none",
+              userSelect: "none",
+            }
+          : undefined
+      }
       className={`w-full flex items-center gap-2 border rounded-xl pl-3 pr-3 py-2.5 text-left transition ${
         hasSubitems ? "hover:bg-gray-50" : "hover:shadow-md"
       } ${
-        low ? "bg-red-50 border-red-200 hover:border-red-300" : "bg-white border-gray-200 hover:border-gray-300"
+        low
+          ? "bg-red-50 border-red-200 hover:border-red-300"
+          : "bg-white border-gray-200 hover:border-gray-300"
       }`}
     >
       <CornerDownRight size={14} className="text-gray-300 shrink-0" />
       <div className="w-9 h-9 shrink-0 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center">
         {image ? (
-          <img src={image.image_url} alt="" className="w-full h-full object-cover" />
+          <img
+            src={image.image_url}
+            alt=""
+            className="w-full h-full object-cover"
+          />
         ) : (
           <span className="text-[8px] text-gray-400">No image</span>
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
+        <p className="text-sm font-medium text-gray-900 truncate">
+          {item.name}
+        </p>
+        {!hasSubitems && (
+          <p className="text-xs text-gray-500">{formatRs(item.price)}</p>
+        )}
         {hasSubitems && (
           <p className="text-xs text-blue-600 font-medium">
-            {item.subitems.length} {item.subitems.length === 1 ? "subitem" : "subitems"}
+            {item.subitems.length}{" "}
+            {item.subitems.length === 1 ? "subitem" : "subitems"}
           </p>
         )}
       </div>
       {!hasSubitems && <StockBadge quantity={item.quantity} lowStock={low} />}
-      {hasSubitems
-        ? (expanded ? <ChevronDown size={16} className="text-gray-400 shrink-0" /> : <ChevronRight size={16} className="text-gray-400 shrink-0" />)
-        : <ChevronRight size={16} className="text-gray-400 shrink-0" />}
+      {hasSubitems ? (
+        expanded ? (
+          <ChevronDown size={16} className="text-gray-400 shrink-0" />
+        ) : (
+          <ChevronRight size={16} className="text-gray-400 shrink-0" />
+        )
+      ) : (
+        <ChevronRight size={16} className="text-gray-400 shrink-0" />
+      )}
     </Wrapper>
   );
 }
@@ -3896,7 +3925,7 @@ function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdde
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 w-full">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5">
           <SearchBox
             value={search}
@@ -4160,7 +4189,7 @@ const shownAccounts = q ? sortedAccounts.filter((a) => a.name.toLowerCase().incl
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={true} active="manage" onProductAdded={onProductAdded} onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5">
           <SearchBox value={search} onChange={setSearch} placeholder="Search Items / Vendors / Acc..." />
         </div>
@@ -4425,7 +4454,7 @@ function VendorsPage({ isAdmin, go }) {
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex justify-end">
           <button onClick={() => setFormOpen(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
             + Add Vendor
@@ -4566,7 +4595,7 @@ function TaxesPage({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="taxes" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <p className="flex-1 text-sm text-gray-500">
             Tax rates you can add to invoice and bill lines. The default one is pre-selected on new lines.
@@ -4720,7 +4749,7 @@ function ReportsPage({ isAdmin, go }) {
         active="reports"
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-5xl">
         <h1 className="text-xl font-bold text-gray-900 mb-3">Reports</h1>
         <div className="flex flex-wrap gap-2 mb-5">
           {REPORT_TABS.map(([key, label]) => (
@@ -5419,7 +5448,7 @@ function DashboardPage({ isAdmin, go }) {
   return (
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="dashboard" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <h1 className="text-xl font-bold text-gray-900 mb-3">Dashboard</h1>
         <ReportBody loading={loading} error={error} data={data}>
           {data && (
@@ -5518,7 +5547,7 @@ function BankAccountsList({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="banking" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex flex-wrap gap-2 items-center">
           <div className="flex-1 min-w-[10rem]">
             <p className="text-xs text-gray-400">Total in bank and cash accounts</p>
@@ -5710,7 +5739,7 @@ function BankRegister({ isAdmin, go, accountId }) {
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <button
           onClick={() => go({ view: "banking" })}
           className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3"
@@ -5962,7 +5991,7 @@ function BankReconcile({ isAdmin, go, accountId }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="banking" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <button onClick={() => go({ view: "banking", account: accountId })} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3">
           <ArrowLeft size={16} /> Back to {account?.name || "account"}
         </button>
@@ -6236,7 +6265,7 @@ function CustomersPage({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="customers" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox value={search} onChange={setSearch} placeholder="Search customers..." />
@@ -6496,7 +6525,7 @@ function AccountDetail({ accountId, go, fromParam }) {
         subtitle={data ? ACCOUNT_TYPE_NAMES[data.account_type] : undefined}
         onBack={back}
       />
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto space-y-6">
+      <main className="p-4 sm:p-6 w-full max-w-3xl space-y-6">
         {loading ? (
           <p className="text-gray-400 text-center py-16">Loading...</p>
         ) : error ? (
@@ -7245,7 +7274,7 @@ function JournalsPage({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="journals" onTab={(t) => go(t === "home" ? {} : { view: t })} />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex items-center gap-2">
           {subTab("journals", "Journals")}
           {subTab("trial", "Trial balance")}
@@ -7608,7 +7637,7 @@ function InvoicesPage({ isAdmin, go }) {
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox
@@ -7818,6 +7847,165 @@ function InvoicesPage({ isAdmin, go }) {
   );
 }
 
+// Small popup shown when a typed customer name isn't in the list: name + optional phone / address
+function QuickCustomerModal({ initialName, onSave, onClose }) {
+  const [name, setName] = useState(initialName || "");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({
+        customer_type: "Business",
+        display_name: name.trim(),
+        phone: phone.trim() || null,
+        billing_address: address.trim() || null,
+        shipping_address: address.trim() || null,
+        payment_terms: "Due on Receipt",
+        opening_balance: 0,
+        is_active: true,
+      });
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60]">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+        <h2 className="text-lg font-semibold mb-1">New customer</h2>
+        <p className="text-xs text-gray-500 mb-4">Phone number and address are optional.</p>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">{error}</div>}
+        <form onSubmit={submit} className="space-y-3">
+          <label className="block text-xs text-gray-500">
+            Customer name *
+            <input required value={name} onChange={(e) => setName(e.target.value)} className={cls + " mt-1"} />
+          </label>
+          <label className="block text-xs text-gray-500">
+            Phone number (optional)
+            <input
+              autoFocus
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className={cls + " mt-1"}
+            />
+          </label>
+          <label className="block text-xs text-gray-500">
+            Address (optional)
+            <textarea rows={2} value={address} onChange={(e) => setAddress(e.target.value)} className={cls + " mt-1"} />
+          </label>
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !name.trim()}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save customer"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Small popup shown when a typed item name isn't in the list: name + type + optional price
+function QuickItemModal({ initialName, onSave, onClose }) {
+  const [name, setName] = useState(initialName || "");
+  const [itemType, setItemType] = useState("Inventory Part");
+  const [price, setPrice] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({ name: name.trim(), item_type: itemType, price: Number(price) || 0 });
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60]">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+        <h2 className="text-lg font-semibold mb-1">New item</h2>
+        <p className="text-xs text-gray-500 mb-4">Selling price is optional. You can edit the item fully later in Products.</p>
+        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">{error}</div>}
+        <form onSubmit={submit} className="space-y-3">
+          <label className="block text-xs text-gray-500">
+            Item name *
+            <input required value={name} onChange={(e) => setName(e.target.value)} className={cls + " mt-1"} />
+          </label>
+          <label className="block text-xs text-gray-500">
+            Item type
+            <select value={itemType} onChange={(e) => setItemType(e.target.value)} className={cls + " mt-1"}>
+              {ITEM_TYPES.filter((t) => t !== "Inventory Assembly").map((t) => (
+                <option key={t}>{t}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-xs text-gray-500">
+            Selling price (optional)
+            <input
+              autoFocus
+              type="number"
+              min="0"
+              step="0.01"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              className={cls + " mt-1"}
+            />
+          </label>
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !name.trim()}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save item"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 const blankInvoiceLine = () => ({ product_id: "", description: "", quantity: "1", rate: "" });
 
 function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
@@ -7865,6 +8053,8 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
   const [showItemForm, setShowItemForm] = useState(false);
   const cls =
     "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const [quickCustomerName, setQuickCustomerName] = useState(null); // typed name, or null = popup closed
+  const [quickItem, setQuickItem] = useState(null); // { name, lineIndex } or null = popup closed
 
   useEffect(() => {
     Promise.all([getCustomers(), getProducts()])
@@ -7947,6 +8137,24 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     });
   };
 
+  // Enter on "+ Create new customer": save from the popup, add to the dropdown, and select it
+  const handleQuickCustomer = async (payload) => {
+    const created = await createCustomer(payload);
+    setCustomers((prev) => [...prev, created]);
+    setCustomerId(created.id);
+  };
+
+  // Enter on "+ Create new item": save from the popup, reload the list, and fill the line it was typed on
+  const handleQuickItem = async (values) => {
+    const created = await createProduct(values, []);
+    const tree = await getProducts();
+    setItems(flattenParents(tree).filter((x) => !(x.subitems?.length > 0)));
+    setLine(quickItem.lineIndex, {
+      product_id: created.id,
+      description: created.description || "",
+      rate: String(created.price ?? 0),
+    });
+  };
   // the same item can be on two lines, so stock is checked against the combined quantity
   const used = {};
   lines.forEach((l) => {
@@ -7975,7 +8183,6 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
         Number(l.quantity) > 0 &&
         toCents(l.rate) >= 0,
     ) &&
-
     totalCents > 0 &&
     effectiveDue >= date;
 
@@ -8011,7 +8218,7 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
+      <div className="bg-white rounded-xl shadow-xl w-full lg:w-1/2 lg:min-w-[640px] p-6 max-h-[92vh] overflow-y-auto">
         <h2 className="text-lg font-semibold mb-4">
           {editInvoice ? `Edit ${editInvoice.invoice_number}` : "New Invoice"}
         </h2>
@@ -8044,6 +8251,8 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
                 options={customerOptions}
                 placeholder="Select a customer..."
                 searchPlaceholder="Search customers..."
+                onCreateNew={(name) => setQuickCustomerName(name)}
+                createLabel="customer"
                 emptyText="No customers found"
               />
             )}
@@ -8112,6 +8321,10 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
                         options={itemOptions}
                         placeholder="Select an item..."
                         searchPlaceholder="Search items..."
+                        onCreateNew={(name) =>
+                          setQuickItem({ name, lineIndex: i })
+                        }
+                        createLabel="item"
                         emptyText="No items found"
                       />
                       <input
@@ -8227,6 +8440,21 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
           </div>
         </form>
 
+        {quickCustomerName !== null && (
+          <QuickCustomerModal
+            initialName={quickCustomerName}
+            onSave={handleQuickCustomer}
+            onClose={() => setQuickCustomerName(null)}
+          />
+        )}
+        {quickItem && (
+          <QuickItemModal
+            initialName={quickItem.name}
+            onSave={handleQuickItem}
+            onClose={() => setQuickItem(null)}
+          />
+        )}
+
         {/* Rendered outside the <form> so their submit doesn't reach the invoice form */}
         {showCustomerForm && (
           <CustomerForm
@@ -8311,7 +8539,7 @@ function CreditNotesPage({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="creditnotes" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox value={search} onChange={setSearch} placeholder="Search credit notes..." />
@@ -8845,7 +9073,7 @@ function PaymentsPage({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="payments" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox value={search} onChange={setSearch} placeholder="Search payments..." />
@@ -9132,7 +9360,7 @@ function PurchaseBillsPage({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="purchases" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox value={search} onChange={setSearch} placeholder="Search bills..." />
@@ -9541,7 +9769,7 @@ function VendorPaymentsPage({ isAdmin, go }) {
     <div className="min-h-screen bg-gray-50">
       <AppHeader isAdmin={isAdmin} active="vendorpayments" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox value={search} onChange={setSearch} placeholder="Search payments made..." />
@@ -9824,6 +10052,8 @@ function SearchSelect({
   searchPlaceholder = "Search...",
   emptyText = "No results found",
   disabled = false,
+  onCreateNew = null,
+  createLabel = "item",
   searchable = true,
 }) {
   const [open, setOpen] = useState(false);
@@ -9834,9 +10064,20 @@ function SearchSelect({
   const selected = options.find((o) => o.value === value);
   const q = query.trim().toLowerCase();
   const filtered = q ? options.filter((o) => (o.search || o.label).toLowerCase().includes(q)) : options;
+  const canCreate =
+    Boolean(onCreateNew) &&
+    q !== "" &&
+    !options.some((o) => o.label.trim().toLowerCase() === q);
+  const rowCount = filtered.length + (canCreate ? 1 : 0);
   const close = () => {
     setOpen(false);
     setQuery("");
+  };
+
+  const createNow = () => {
+    const name = query.trim();
+    close();
+    onCreateNew(name);
   };
 
   useEffect(() => {
@@ -9863,9 +10104,13 @@ function SearchSelect({
   const handleKeyDown = (e) => {
     if (!open) return;
     if (e.key === "Escape") close();
-    else if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(i + 1, filtered.length - 1)); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(i + 1, rowCount - 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
-    else if (e.key === "Enter") { e.preventDefault(); if (filtered[active]) choose(filtered[active]); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      if (filtered[active]) choose(filtered[active]);
+      else if (canCreate) createNow();
+    }
   };
 
   return (
@@ -9904,7 +10149,9 @@ function SearchSelect({
           )}
           <ul role="listbox" className="max-h-56 overflow-y-auto py-1">
             {filtered.length === 0 ? (
-              <li className="px-3 py-4 text-sm text-gray-400 text-center">{emptyText}</li>
+              <li className="px-3 py-4 text-sm text-gray-400 text-center">
+                {q ? `No matches for "${query.trim()}".` : emptyText}
+              </li>
             ) : (
               filtered.map((o, i) => (
                 <li
@@ -9924,6 +10171,19 @@ function SearchSelect({
                   </span>
                 </li>
               ))
+            )}
+            {canCreate && (
+              <li
+                role="option"
+                onClick={createNow}
+                onMouseEnter={() => setActive(filtered.length)}
+                className={`flex items-center justify-between gap-3 px-3 py-2.5 text-sm cursor-pointer font-medium text-blue-600 border-t border-gray-100 ${
+                  active === filtered.length ? "bg-blue-50" : ""
+                }`}
+              >
+                <span className="truncate">+ Create new {createLabel} "{query.trim()}"</span>
+                <span className="shrink-0 text-xs font-normal text-gray-400">Press Enter</span>
+              </li>
             )}
           </ul>
         </div>
@@ -10531,7 +10791,7 @@ function BillPage({ go, autoCreateToken }) {
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-4 flex justify-end">
           <button onClick={() => setCreating(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
             + New Bill
@@ -11231,7 +11491,7 @@ function IssuedPage({ go, autoCreateToken }) {
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
+      <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-4 flex justify-end">
           <button onClick={() => setCreating(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
             + Create Issued List
@@ -12290,5 +12550,4 @@ function NotFound() {
       </div>
     </div>
   );
-
 }
