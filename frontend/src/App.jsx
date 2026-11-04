@@ -181,6 +181,11 @@ async function reportRequest(path, failMsg) {
 }
 const getProfitLoss = (from, to) => reportRequest(`profit-and-loss?date_from=${from}&date_to=${to}`, "Failed to load Profit & Loss");
 const getBalanceSheet = (asOf) => reportRequest(`balance-sheet?as_of=${asOf}`, "Failed to load Balance Sheet");
+const getSalesSummary = (from, to) =>
+  reportRequest(
+    `sales-summary?date_from=${from}&date_to=${to}&top=10`,
+    "Failed to load Sales Summary",
+  );
 const getAgeing = (kind, asOf) => reportRequest(`${kind}-ageing?as_of=${asOf}`, "Failed to load the ageing report");
 
 const getDashboard = async (year) => {
@@ -4700,6 +4705,7 @@ const localIso = (d = new Date()) =>
 
 const REPORT_TABS = [
   ["pl", "Profit & Loss"],
+  ["sales", "Sales Summary"],
   ["bs", "Balance Sheet"],
   ["ar", "Receivables Ageing"],
   ["ap", "Payables Ageing"],
@@ -4709,7 +4715,11 @@ function ReportsPage({ isAdmin, go }) {
   const [report, setReport] = useState("pl");
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="reports" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="reports"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
       <main className="p-4 sm:p-6 w-full max-w-[1600px] mx-auto">
         <h1 className="text-xl font-bold text-gray-900 mb-3">Reports</h1>
         <div className="flex flex-wrap gap-2 mb-5">
@@ -4718,7 +4728,9 @@ function ReportsPage({ isAdmin, go }) {
               key={key}
               onClick={() => setReport(key)}
               className={`px-3 py-1.5 rounded-full text-sm font-medium border ${
-                report === key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                report === key
+                  ? "bg-blue-600 text-white border-blue-600"
+                  : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
               }`}
             >
               {label}
@@ -4726,6 +4738,7 @@ function ReportsPage({ isAdmin, go }) {
           ))}
         </div>
         {report === "pl" && <ProfitLossReport />}
+        {report === "sales" && <SalesSummaryReport />}
         {report === "bs" && <BalanceSheetReport />}
         {report === "ar" && <AgeingReport key="ar" kind="receivables" />}
         {report === "ap" && <AgeingReport key="ap" kind="payables" />}
@@ -4901,6 +4914,240 @@ function ProfitLossReport() {
               />
             </div>
           </ReportCard>
+        )}
+      </ReportBody>
+    </>
+  );
+}
+
+// ---------- Sales Summary report: best customers, best products, trend, with date filters ----------
+const SALES_FILTERS = [
+  ["today", "Today"],
+  ["month", "This Month"],
+  ["lastMonth", "Last Month"],
+  ["pickMonth", "Pick Month"],
+  ["pickDay", "Pick Day"],
+  ["year", "Year"],
+  ["custom", "Custom Range"],
+];
+
+function SalesSummaryReport() {
+  const now = new Date();
+  const [mode, setMode] = useState("month");
+  const [day, setDay] = useState(localIso());
+  const [monthVal, setMonthVal] = useState(localIso().slice(0, 7));   // "YYYY-MM"
+  const [yearVal, setYearVal] = useState(String(now.getFullYear()));
+  const [customFrom, setCustomFrom] = useState(`${now.getFullYear()}-01-01`);
+  const [customTo, setCustomTo] = useState(localIso());
+
+  // turn the chosen filter into a [from, to] pair of YYYY-MM-DD strings
+  const [from, to] = (() => {
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    if (mode === "today") return [localIso(), localIso()];
+    if (mode === "month") return [localIso(new Date(y, m, 1)), localIso(new Date(y, m + 1, 0))];
+    if (mode === "lastMonth") return [localIso(new Date(y, m - 1, 1)), localIso(new Date(y, m, 0))];
+    if (mode === "pickMonth") {
+      const [py, pm] = (monthVal || localIso().slice(0, 7)).split("-").map(Number);
+      return [localIso(new Date(py, pm - 1, 1)), localIso(new Date(py, pm, 0))];
+    }
+    if (mode === "pickDay") return [day, day];
+    if (mode === "year") {
+      const py = /^\d{4}$/.test(yearVal) ? Number(yearVal) : y;
+      return [`${py}-01-01`, `${py}-12-31`];
+    }
+    return [customFrom, customTo];
+  })();
+
+  const { data, loading, error } = useReport(() => getSalesSummary(from, to), [from, to]);
+
+  const stat = (label, value, tone) => (
+    <div className="bg-white border border-gray-200 rounded-xl p-3">
+      <p className="text-xs text-gray-400">{label}</p>
+      <p className={`text-lg font-bold mt-0.5 ${tone === "bad" ? "text-red-600" : tone === "good" ? "text-green-700" : "text-gray-900"}`}>
+        {value}
+      </p>
+    </div>
+  );
+
+  const maxTrend = data ? Math.max(...data.trend.map((t) => t.sales), 1) : 1;
+
+  return (
+    <>
+      {/* ---- filters ---- */}
+      <div className="flex flex-wrap gap-2 mb-3">
+        {SALES_FILTERS.map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setMode(key)}
+            className={`px-3 py-1 rounded-lg text-xs font-medium border ${
+              mode === key ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-3 mb-4 max-w-xl">
+        {mode === "pickDay" && (
+          <label className="text-xs text-gray-500 flex-1 min-w-[140px]">
+            Day
+            <input type="date" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} className={dateInputCls} />
+          </label>
+        )}
+        {mode === "pickMonth" && (
+          <label className="text-xs text-gray-500 flex-1 min-w-[140px]">
+            Month
+            <input type="month" value={monthVal} onChange={(e) => e.target.value && setMonthVal(e.target.value)} className={dateInputCls} />
+          </label>
+        )}
+        {mode === "year" && (
+          <label className="text-xs text-gray-500 flex-1 min-w-[140px]">
+            Year
+            <input
+              type="number"
+              min="2000"
+              max="2100"
+              value={yearVal}
+              onChange={(e) => setYearVal(e.target.value)}
+              className={dateInputCls}
+            />
+          </label>
+        )}
+        {mode === "custom" && (
+          <>
+            <label className="text-xs text-gray-500 flex-1 min-w-[140px]">
+              Start date
+              <input type="date" value={customFrom} max={customTo} onChange={(e) => e.target.value && setCustomFrom(e.target.value)} className={dateInputCls} />
+            </label>
+            <label className="text-xs text-gray-500 flex-1 min-w-[140px]">
+              End date
+              <input type="date" value={customTo} min={customFrom} onChange={(e) => e.target.value && setCustomTo(e.target.value)} className={dateInputCls} />
+            </label>
+          </>
+        )}
+      </div>
+
+      <ReportBody loading={loading} error={error} data={data}>
+        {data && (
+          <>
+            <p className="text-xs text-gray-400 mb-3">
+              {formatJournalDate(data.date_from)} to {formatJournalDate(data.date_to)} · void invoices are not counted
+            </p>
+
+            {/* ---- most buyer customer ---- */}
+            {data.top_customer ? (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-500">Most buying customer</p>
+                <p className="text-lg font-bold text-gray-900">{data.top_customer.customer_name}</p>
+                <p className="text-sm text-gray-600">{formatRs(data.top_customer.sales)} in this period</p>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400 mb-4">No sales in this period.</p>
+            )}
+
+            {/* ---- totals ---- */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              {stat("Total sales", formatRs(data.totals.sales))}
+              {stat("Credit notes (returns)", formatRs(data.totals.returns), data.totals.returns > 0 ? "bad" : undefined)}
+              {stat("Net sales", formatRs(data.totals.net_sales), "good")}
+              {stat("Gross profit (sales - item cost)", formatRs(data.totals.gross_profit), data.totals.gross_profit < 0 ? "bad" : "good")}
+              {stat("Payments received", formatRs(data.totals.collected))}
+              {stat("Still unpaid (this period's invoices)", formatRs(data.totals.outstanding), data.totals.outstanding > 0 ? "bad" : undefined)}
+              {stat("Invoices / Customers", `${data.totals.invoice_count} / ${data.totals.customer_count}`)}
+              {stat("Items sold · Avg invoice", `${data.totals.items_sold} · ${formatRs(data.totals.average_invoice)}`)}
+            </div>
+
+            {/* ---- sales trend ---- */}
+            {data.trend.length > 0 && (
+              <ReportCard title={`Sales by ${data.group_by}`}>
+                <div className="space-y-1.5 max-h-72 overflow-y-auto">
+                  {data.trend.map((t) => (
+                    <div key={t.label} className="flex items-center gap-2 text-xs">
+                      <span className="w-20 shrink-0 text-gray-500">{t.label}</span>
+                      <div className="flex-1 bg-gray-100 rounded h-4 overflow-hidden">
+                        <div className="bg-blue-500 h-4" style={{ width: `${Math.max((t.sales / maxTrend) * 100, 1)}%` }} />
+                      </div>
+                      <span className="w-28 shrink-0 text-right text-gray-900">{formatRs(t.sales)}</span>
+                    </div>
+                  ))}
+                </div>
+              </ReportCard>
+            )}
+
+            {/* ---- top customers ---- */}
+            <ReportCard title="Top customers (by sales)">
+              {data.top_customers.length === 0 ? (
+                <p className="text-sm text-gray-400">Nothing to show.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
+                        <th className="py-1.5 pr-2">#</th>
+                        <th className="py-1.5 pr-2">Customer</th>
+                        <th className="py-1.5 pr-2 text-right">Invoices</th>
+                        <th className="py-1.5 pr-2 text-right">Qty</th>
+                        <th className="py-1.5 pr-2 text-right">Sales</th>
+                        <th className="py-1.5 pr-2 text-right">Returns</th>
+                        <th className="py-1.5 pr-2 text-right">Paid</th>
+                        <th className="py-1.5 text-right">Unpaid</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.top_customers.map((c, i) => (
+                        <tr key={c.customer_id} className={`border-b border-gray-50 ${i === 0 ? "font-semibold" : ""}`}>
+                          <td className="py-1.5 pr-2 text-gray-400">{i + 1}</td>
+                          <td className="py-1.5 pr-2 text-gray-900">{c.customer_name}</td>
+                          <td className="py-1.5 pr-2 text-right">{c.invoices}</td>
+                          <td className="py-1.5 pr-2 text-right">{c.quantity}</td>
+                          <td className="py-1.5 pr-2 text-right">{formatRs(c.sales)}</td>
+                          <td className="py-1.5 pr-2 text-right">{formatRs(c.returns)}</td>
+                          <td className="py-1.5 pr-2 text-right">{formatRs(c.paid)}</td>
+                          <td className={`py-1.5 text-right ${c.balance > 0 ? "text-red-600" : ""}`}>{formatRs(c.balance)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </ReportCard>
+
+            {/* ---- top products ---- */}
+            <ReportCard title="Top selling items">
+              {data.top_products.length === 0 ? (
+                <p className="text-sm text-gray-400">Nothing to show.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
+                        <th className="py-1.5 pr-2">#</th>
+                        <th className="py-1.5 pr-2">Item</th>
+                        <th className="py-1.5 pr-2 text-right">Qty sold</th>
+                        <th className="py-1.5 pr-2 text-right">Sales</th>
+                        <th className="py-1.5 pr-2 text-right">Cost</th>
+                        <th className="py-1.5 text-right">Profit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.top_products.map((p, i) => (
+                        <tr key={p.product_id ?? p.item_name} className="border-b border-gray-50">
+                          <td className="py-1.5 pr-2 text-gray-400">{i + 1}</td>
+                          <td className="py-1.5 pr-2 text-gray-900">{p.item_name}</td>
+                          <td className="py-1.5 pr-2 text-right">{p.quantity}</td>
+                          <td className="py-1.5 pr-2 text-right">{formatRs(p.sales)}</td>
+                          <td className="py-1.5 pr-2 text-right">{formatRs(p.cost)}</td>
+                          <td className={`py-1.5 text-right ${p.profit < 0 ? "text-red-600" : "text-green-700"}`}>{formatRs(p.profit)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </ReportCard>
+          </>
         )}
       </ReportBody>
     </>

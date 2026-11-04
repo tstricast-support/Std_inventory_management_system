@@ -1,6 +1,6 @@
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from .. import models
@@ -226,3 +226,128 @@ def payables_ageing(as_of: date | None = None, db: Session = Depends(get_db)):
     nets = _nets(db)
     ledger = -sum((nets.get(a.id, Decimal("0")) for a in db.query(models.Account).filter(models.Account.account_type == "accounts_payable")), Decimal("0"))
     return _build_ageing(as_of, entries, {}, ledger)
+
+
+
+# ---------------------------------------------------------------- Sales Summary (top customers / products / trend)
+@router.get("/sales-summary")
+def sales_summary(
+    date_from: date | None = None,
+    date_to: date | None = None,
+    top: int = 10,
+    db: Session = Depends(get_db),
+):
+    """Sales between two dates: totals, best customers, best products and a sales trend (void documents are ignored)."""
+    today = date.today()
+    date_to = date_to or today
+    date_from = date_from or date(date_to.year, date_to.month, 1)      # default = this month
+    if date_from > date_to:
+        raise HTTPException(400, "Start date must be on or before the end date")
+    top = max(1, min(top, 100))
+
+    invoices = (
+        db.query(models.Invoice)
+        .options(joinedload(models.Invoice.customer), joinedload(models.Invoice.items))
+        .filter(models.Invoice.status != "void",
+                models.Invoice.invoice_date >= date_from, models.Invoice.invoice_date <= date_to)
+        .all()
+    )
+    credit_notes = (
+        db.query(models.CreditNote)
+        .options(joinedload(models.CreditNote.customer))
+        .filter(models.CreditNote.status != "void",
+                models.CreditNote.credit_date >= date_from, models.CreditNote.credit_date <= date_to)
+        .all()
+    )
+    money_in = (
+        db.query(func.coalesce(func.sum(models.Payment.amount), 0))
+        .filter(models.Payment.payment_date >= date_from, models.Payment.payment_date <= date_to)
+        .scalar()
+    )
+
+    # monthly buckets when the range is longer than ~2 months, otherwise daily
+    monthly = (date_to - date_from).days > 62
+    bucket = (lambda d: d.strftime("%Y-%m")) if monthly else (lambda d: d.isoformat())
+
+    customers: dict[int, dict] = {}
+    products: dict[str, dict] = {}
+    trend: dict[str, dict] = {}
+    sales = cost = outstanding = Decimal("0")
+    qty_total = 0
+
+    def cust(cid: int, name: str) -> dict:
+        if cid not in customers:
+            customers[cid] = {"customer_id": cid, "customer_name": name, "invoices": 0, "quantity": 0,
+                              "sales": Decimal("0"), "returns": Decimal("0"), "paid": Decimal("0"),
+                              "balance": Decimal("0"), "last_purchase": None}
+        return customers[cid]
+
+    for inv in invoices:
+        total, paid = _money(inv.total), _money(inv.amount_paid)
+        c = cust(inv.customer_id, inv.customer_name)
+        c["invoices"] += 1
+        c["sales"] += total
+        c["paid"] += paid
+        c["balance"] += total - paid
+        if c["last_purchase"] is None or inv.invoice_date > c["last_purchase"]:
+            c["last_purchase"] = inv.invoice_date
+        sales += total
+        outstanding += total - paid
+
+        t = trend.setdefault(bucket(inv.invoice_date), {"sales": Decimal("0"), "invoices": 0})
+        t["sales"] += total
+        t["invoices"] += 1
+
+        for it in inv.items:
+            qty = int(it.quantity or 0)
+            line_cost = _money(it.unit_cost) * qty
+            c["quantity"] += qty
+            qty_total += qty
+            cost += line_cost
+            key = f"p{it.product_id}" if it.product_id else f"n{it.item_name}"
+            p = products.setdefault(key, {"product_id": it.product_id, "item_name": it.item_name,
+                                          "quantity": 0, "sales": Decimal("0"), "cost": Decimal("0")})
+            p["quantity"] += qty
+            p["sales"] += _money(it.amount)
+            p["cost"] += line_cost
+
+    returns = Decimal("0")
+    for cn in credit_notes:
+        amount = _money(cn.total)
+        cust(cn.customer_id, cn.customer_name)["returns"] += amount
+        returns += amount
+
+    customer_rows = sorted(customers.values(), key=lambda x: x["sales"], reverse=True)
+    product_rows = sorted(products.values(), key=lambda x: x["sales"], reverse=True)
+    top_customer = customer_rows[0] if customer_rows else None
+
+    return {
+        "date_from": date_from, "date_to": date_to, "group_by": "month" if monthly else "day",
+        "totals": {
+            "invoice_count": len(invoices),
+            "customer_count": sum(1 for c in customer_rows if c["invoices"] > 0),
+            "items_sold": qty_total,
+            "sales": float(sales),
+            "returns": float(returns),
+            "net_sales": float(sales - returns),
+            "cost": float(cost),
+            "gross_profit": float(sales - cost),
+            "collected": float(_money(money_in)),
+            "outstanding": float(outstanding),
+            "average_invoice": float((sales / len(invoices)).quantize(CENT, ROUND_HALF_UP)) if invoices else 0.0,
+        },
+        "top_customer": {"customer_name": top_customer["customer_name"], "sales": float(top_customer["sales"])} if top_customer else None,
+        "top_customers": [
+            {**c, "sales": float(c["sales"]), "returns": float(c["returns"]), "paid": float(c["paid"]),
+             "balance": float(c["balance"])}
+            for c in customer_rows[:top]
+        ],
+        "top_products": [
+            {**p, "sales": float(p["sales"]), "cost": float(p["cost"]), "profit": float(p["sales"] - p["cost"])}
+            for p in product_rows[:top]
+        ],
+        "trend": [
+            {"label": k, "sales": float(v["sales"]), "invoices": v["invoices"]}
+            for k, v in sorted(trend.items())
+        ],
+    }
