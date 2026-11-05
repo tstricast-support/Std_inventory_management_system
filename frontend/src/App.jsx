@@ -12874,8 +12874,11 @@ function ZohoSidebar({ onNavigate }) {
   return (
     <div className="flex flex-col min-h-full">
       <div className="flex items-center gap-2 px-4 h-14 bg-black/20 text-white shrink-0">
-        <LayoutGrid size={22} />
-        <span className="text-lg font-semibold">STD</span>
+        <img
+          src="/YAVERO.png"
+          alt="YAVERO"
+          className="h-8 w-8 object-contain"
+        />
       </div>
 
       <nav className="flex-1 px-2 py-3">

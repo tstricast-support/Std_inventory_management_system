@@ -209,8 +209,8 @@ function AuthCard({ title, subtitle, children }) {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm bg-white rounded-xl shadow-xl border border-gray-200 p-6">
         <div className="flex items-center gap-2 text-[#1f2640] mb-4">
-          <LayoutGrid size={24} />
-          <span className="text-lg font-semibold">STD OPERATION</span>
+          
+                    <img src="/YAVERO.png" alt="YAVERO" className="h-8 w-8 object-contain" />
         </div>
         <h1 className="text-xl font-bold text-gray-900">{title}</h1>
         {subtitle && (
