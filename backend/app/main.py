@@ -1,5 +1,6 @@
 import os
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 from app.account_types import DEFAULT_ACCOUNTS
@@ -200,8 +201,36 @@ app.include_router(audit_log.router, dependencies=guard("users"))
 def health():
     return {"status": "ok"}
 
-@app.get("/")
-def root():
-    return {"message": "STD OPERATIONS API is running"}
+# ---------------------------------------------------------------------------------------------
+# Serve the built React app from THIS server, so the web app and the API share one address.
+# (The login cookie is SameSite=Strict, so it only works when both are on the same address.)
+# Put the output of "npm run build" (the dist folder) next to the app folder as "frontend_dist",
+# or point the FRONTEND_DIR environment variable at it. No folder = API only, as before.
+# This block must stay at the very END of the file: it answers every address nothing above matched.
+# ---------------------------------------------------------------------------------------------
+FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR") or Path(__file__).resolve().parent.parent / "frontend_dist")
+
+if (FRONTEND_DIR / "index.html").is_file():
+    _web_root = FRONTEND_DIR.resolve()
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def web_app(full_path: str):
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")        # a wrong API address must stay a JSON 404
+        clean = full_path.strip("/")
+        if clean in ("admin", "admin.html"):                                # same rewrite your serve.json had
+            return FileResponse(_web_root / "admin.html", headers={"Cache-Control": "no-cache"})
+        if clean:
+            candidate = (_web_root / clean).resolve()
+            if _web_root in candidate.parents and candidate.is_file():      # real file inside the folder only
+                cache = "public, max-age=31536000, immutable" if clean.startswith("assets/") else "no-cache"
+                return FileResponse(candidate, headers={"Cache-Control": cache})
+            if "." in clean.rsplit("/", 1)[-1]:                             # a missing .js/.png must be a 404, not the app page
+                raise HTTPException(status_code=404, detail="Not found")
+        return FileResponse(_web_root / "index.html", headers={"Cache-Control": "no-cache"})
+else:
+    @app.get("/")
+    def root():
+        return {"message": "STD OPERATIONS API is running"}
 
 

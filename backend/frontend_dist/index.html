@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+
+  <!-- Prevents pinch-zoom and makes it feel native -->
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+
+  <title>STD OPERATION</title>
+  <meta name="description" content="Browse inventory and request items" />
+
+  <!-- Android / Chrome / Edge theme color (matches the employee manifest) -->
+  <meta name="theme-color" content="#1f2640" />
+  <!-- Run fullscreen, no browser UI, when installed / added to home screen -->
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="STD OPERATION" />
+
+  <!-- iOS home screen icon (needs its own tag, ignores manifest icons) -->
+  <link rel="apple-touch-icon" href="/pwa-192x192.png" />
+
+  <!-- Standard favicon -->
+  <link rel="icon" type="image/png" href="/pwa-192x192.png" />
+
+  <!-- Web app manifest: employee app by default.
+         ManifestSync (in App.jsx) may swap this to /manifest-admin.json on the /admin route. -->
+  <link rel="manifest" href="/manifest-employee.json" />
+  <script type="module" crossorigin src="/assets/main-CWdyEW7j.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/main-B9gwEQ3t.css">
+</head>
+
+<body>
+  <div id="root"></div>
+</body>
+
+</html>

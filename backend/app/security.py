@@ -25,9 +25,18 @@ _HEADERS = {
     "Referrer-Policy": "no-referrer",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
 }
+# Two policies, because this server now also hands out the React app (see frontend_dist in main.py):
+#  - /api/...  returns only JSON / files, so it needs no scripts, frames or images at all.
+#  - everything else (the web app) gets the same policy you already had in serve.json. It is "Report-Only":
+#    the browser logs problems in the console but blocks nothing. Once the console stays clean, rename the
+#    header below to "Content-Security-Policy" to enforce it.
+_API_CSP = "default-src 'none'; frame-ancestors 'none'"
+_APP_CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob: https://ik.imagekit.io; connect-src 'self' https://ik.imagekit.io; "
+    "frame-src 'self' blob:; object-src 'self' blob:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+)
 if IS_PRODUCTION:
-    # The API only ever returns JSON / files, so it needs no scripts, frames or images at all.
-    _HEADERS["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
     _HEADERS["Strict-Transport-Security"] = "max-age=31536000"
 
 
@@ -66,6 +75,10 @@ class SecurityMiddleware:
                     h.setdefault(k, v)
                 if path.startswith("/api/"):
                     h.setdefault("Cache-Control", "no-store")     # never keep money data / tokens in a cache
+                if IS_PRODUCTION:
+                       h.setdefault("Content-Security-Policy", _API_CSP)
+                elif IS_PRODUCTION:
+                    h.setdefault("Content-Security-Policy-Report-Only", _APP_CSP)
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
