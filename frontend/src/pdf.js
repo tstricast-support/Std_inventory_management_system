@@ -127,7 +127,7 @@ export function renderPdf(spec, images = {}) {
     head: [["#", "Item", "Qty", "Rate", "Amount"]],
     body: spec.items.map((it, i) => [
       String(i + 1),
-      it.description ? `${it.item_name}\n${it.description}` : it.item_name,
+      it.description || it.item_name,
       String(it.quantity),
       money(it.rate),
       money(it.amount),

@@ -8101,11 +8101,10 @@ function InvoicesPage({ isAdmin, go }) {
                           <ItemThumb product={l.product} />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm text-gray-900 truncate">
-                              {l.item_name}
+                              {l.description || l.item_name}
                             </p>
                             <p className="text-xs text-gray-400 truncate">
                               {l.quantity} × {formatRs(l.rate)}
-                              {l.description && ` · ${l.description}`}
                             </p>
                           </div>
                           <span className="text-sm font-medium text-gray-900 shrink-0">
@@ -8674,7 +8673,7 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
           .filter((l) => l.product_id)
           .map((l) => ({
             product_id: l.product_id,
-            description: l.description || "",
+            description: l.description || l.item_name || "",
             quantity: String(l.quantity),
             rate: String(l.rate),
           }))
@@ -8824,7 +8823,7 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
           ? {
               ...l,
               product_id: productId,
-              description: p?.description || "",
+              description: p?.description || p?.name || "",
               rate: p ? String(p.price ?? 0) : "",
             }
           : l,
@@ -8844,7 +8843,7 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     const newLine = {
       ...blankInvoiceLine(),
       product_id: created.id,
-      description: created.description || "",
+      description: created.description || created.name || "",
       rate: String(created.price ?? 0),
     };
     setLines((prev) => {
@@ -8874,7 +8873,7 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
           ? {
               ...l,
               product_id: created.id,
-              description: created.description || "",
+              description: created.description || created.name || "",
               rate: String(created.price ?? 0),
             }
           : l,
