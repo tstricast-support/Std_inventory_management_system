@@ -8622,7 +8622,6 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const [showCustomerForm, setShowCustomerForm] = useState(false);
   const [showItemForm, setShowItemForm] = useState(false);
   const cls =
     "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
@@ -8736,12 +8735,7 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
       });
     };
 
-  // "Create Customer" button: save, add to the dropdown, and select it
-  const handleCreateCustomer = async (_id, payload) => {
-    const created = await createCustomer(payload);
-    setCustomers((prev) => [...prev, created]);
-    setCustomerId(created.id);
-  };
+
 
   // "Create Item" button: save, reload the item list, and put the new item on the first empty line
   const handleCreateItem = async (values, imageFiles) => {
@@ -8902,7 +8896,7 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
         <h2
           onPointerDown={startDrag}
           title="Drag to move"
-          className="sticky top-0 z-10 -mx-6 -mt-6 mb-4 px-6 pt-6 pb-3 bg-white rounded-t-xl text-lg font-semibold cursor-move select-none touch-none"
+          className="-mx-6 -mt-6 mb-4 px-6 pt-6 pb-2 rounded-t-xl text-lg font-semibold cursor-move select-none touch-none"
         >
           {editInvoice ? `Edit ${editInvoice.invoice_number}` : "New Invoice"}
         </h2>
@@ -8913,17 +8907,7 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <FieldLabel
-              action={
-                !editInvoice && (
-                  <FieldButton onClick={() => setShowCustomerForm(true)}>
-                    Create Customer
-                  </FieldButton>
-                )
-              }
-            >
-              Customer
-            </FieldLabel>
+            <FieldLabel>Customer</FieldLabel>
             {editInvoice ? (
               <p className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-700">
                 {editInvoice.customer_name}
@@ -9182,13 +9166,6 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
           />
         )}
 
-        {/* Rendered outside the <form> so their submit doesn't reach the invoice form */}
-        {showCustomerForm && (
-          <CustomerForm
-            onSubmit={handleCreateCustomer}
-            onClose={() => setShowCustomerForm(false)}
-          />
-        )}
         {showItemForm && (
           <ProductForm
             onSubmit={handleCreateItem}
