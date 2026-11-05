@@ -43,6 +43,7 @@ import {
   Upload,
   ShieldCheck,
   ScrollText,
+  X,
 } from "lucide-react";
 import "./index.css";
 import { BASE_URL, apiFetch } from "./api.js";
@@ -8695,13 +8696,12 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
   const [quickCustomerName, setQuickCustomerName] = useState(null); // typed name, or null = popup closed
   const [quickItem, setQuickItem] = useState(null); // { name, lineIndex } or null = popup closed
-    const [invoiceNo, setInvoiceNo] = useState(
-      editInvoice?.invoice_number || "",
-    );
-    const [pos, setPos] = useState({ x: 0, y: 0 }); // how far the window has been dragged
-    const [preview, setPreview] = useState(null); // { url } while the preview window is open
-    const [previewBusy, setPreviewBusy] = useState(false);
-    const panelRef = useRef(null);
+  const [invoiceNo, setInvoiceNo] = useState(editInvoice?.invoice_number || "");
+  const [pos, setPos] = useState({ x: 0, y: 0 }); // how far the window has been dragged
+  const [size, setSize] = useState({ w: null, h: null }); // null = default size until the user resizes
+  const [preview, setPreview] = useState(null); // { url } while the preview window is open
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const panelRef = useRef(null);
 
   useEffect(() => {
     Promise.all([getCustomers(), getProducts()])
@@ -8715,7 +8715,7 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
       .catch((err) => setError(err.message));
   }, []);
 
-    // new invoice: show the number it will get (the server still assigns the final one on save)
+  // new invoice: show the number it will get (the server still assigns the final one on save)
   useEffect(() => {
     if (editInvoice) return;
     getNextInvoiceNumber()
@@ -8748,6 +8748,39 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     window.addEventListener("pointerup", up);
   };
 
+  // resize the window from the bottom-right handle (top-left corner stays fixed)
+  const startResize = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = panelRef.current;
+    if (!el) return;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const startW = el.offsetWidth;
+    const startH = el.offsetHeight;
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const startPos = { ...pos };
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const move = (ev) => {
+      const w = clamp(startW + (ev.clientX - sx), 420, W - 16);
+      const h = clamp(startH + (ev.clientY - sy), 300, H - 16);
+      setSize({ w, h });
+      // the window is centred, so shift it by half the change to keep the top-left corner still
+      setPos({
+        x: startPos.x + (w - startW) / 2,
+        y: startPos.y + (h - startH) / 2,
+      });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  
 
   const customer = customers.find((c) => c.id === customerId);
   const autoDue = addDaysISO(
@@ -8783,27 +8816,25 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     setLines((prev) =>
       prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
     );
-    const pickItem = (i, productId) => {
-      const p = itemById[productId];
-      setLines((prev) => {
-        const next = prev.map((l, idx) =>
-          idx === i
-            ? {
-                ...l,
-                product_id: productId,
-                description: p?.description || "",
-                rate: p ? String(p.price ?? 0) : "",
-              }
-            : l,
-        );
-        // like QuickBooks: filling the last empty row opens a fresh empty row
-        return productId && i === prev.length - 1 && !prev[i].product_id
-          ? [...next, blankInvoiceLine()]
-          : next;
-      });
-    };
-
-
+  const pickItem = (i, productId) => {
+    const p = itemById[productId];
+    setLines((prev) => {
+      const next = prev.map((l, idx) =>
+        idx === i
+          ? {
+              ...l,
+              product_id: productId,
+              description: p?.description || "",
+              rate: p ? String(p.price ?? 0) : "",
+            }
+          : l,
+      );
+      // like QuickBooks: filling the last empty row opens a fresh empty row
+      return productId && i === prev.length - 1 && !prev[i].product_id
+        ? [...next, blankInvoiceLine()]
+        : next;
+    });
+  };
 
   // "Create Item" button: save, reload the item list, and put the new item on the first empty line
   const handleCreateItem = async (values, imageFiles) => {
@@ -8882,47 +8913,47 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     totalCents > 0 &&
     effectiveDue >= date;
 
-      const canPreview = Boolean(customerId) && filled.length > 0;
+  const canPreview = Boolean(customerId) && filled.length > 0;
 
-      // builds the same PDF that "Download PDF" makes, from what is typed in the form (nothing is saved)
-      const handlePreview = async () => {
-        setPreviewBusy(true);
-        setError(null);
-        try {
-          const pdf = await import("./pdf.js");
-          const draft = {
-            invoice_number: invoiceNo || "DRAFT",
-            customer_name:
-              customer?.display_name || editInvoice?.customer_name || "",
-            invoice_date: date,
-            due_date: effectiveDue,
-            order_number: orderNumber.trim() || null,
-            notes: notes.trim() || null,
-            status: "open",
-            total: totalCents / 100,
-            amount_paid: 0,
-            balance_due: totalCents / 100,
-            items: filled.map((l) => ({
-              item_name: itemById[l.product_id]?.name || "",
-              description: l.description.trim() || null,
-              quantity: Number(l.quantity) || 0,
-              rate: Number(l.rate) || 0,
-              amount: lineCents(l) / 100,
-              product: itemById[l.product_id],
-            })),
-          };
-          const file = await pdf.downloadInvoicePdf(draft, customer, true);
-          setPreview({ url: URL.createObjectURL(file) });
-        } catch (err) {
-          setError(err.message || "Could not create the preview");
-        } finally {
-          setPreviewBusy(false);
-        }
+  // builds the same PDF that "Download PDF" makes, from what is typed in the form (nothing is saved)
+  const handlePreview = async () => {
+    setPreviewBusy(true);
+    setError(null);
+    try {
+      const pdf = await import("./pdf.js");
+      const draft = {
+        invoice_number: invoiceNo || "DRAFT",
+        customer_name:
+          customer?.display_name || editInvoice?.customer_name || "",
+        invoice_date: date,
+        due_date: effectiveDue,
+        order_number: orderNumber.trim() || null,
+        notes: notes.trim() || null,
+        status: "open",
+        total: totalCents / 100,
+        amount_paid: 0,
+        balance_due: totalCents / 100,
+        items: filled.map((l) => ({
+          item_name: itemById[l.product_id]?.name || "",
+          description: l.description.trim() || null,
+          quantity: Number(l.quantity) || 0,
+          rate: Number(l.rate) || 0,
+          amount: lineCents(l) / 100,
+          product: itemById[l.product_id],
+        })),
       };
-      const closePreview = () => {
-        if (preview) URL.revokeObjectURL(preview.url);
-        setPreview(null);
-      };
+      const file = await pdf.downloadInvoicePdf(draft, customer, true);
+      setPreview({ url: URL.createObjectURL(file) });
+    } catch (err) {
+      setError(err.message || "Could not create the preview");
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+  const closePreview = () => {
+    if (preview) URL.revokeObjectURL(preview.url);
+    setPreview(null);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -8958,15 +8989,38 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div
         ref={panelRef}
-        style={{ position: "relative", left: pos.x, top: pos.y }}
+        style={{
+          position: "relative",
+          left: pos.x,
+          top: pos.y,
+          ...(size.w && size.h
+            ? {
+                width: size.w,
+                height: size.h,
+                minWidth: 0,
+                maxHeight: "none",
+              }
+            : {}),
+        }}
         className="bg-white rounded-xl shadow-xl w-full lg:w-1/2 lg:min-w-[640px] p-6 max-h-[92vh] overflow-y-auto"
       >
         <h2
           onPointerDown={startDrag}
           title="Drag to move"
-          className="-mx-6 -mt-6 mb-4 px-6 pt-6 pb-2 rounded-t-xl text-lg font-semibold cursor-move select-none touch-none"
+          className="-mx-6 -mt-6 mb-4 px-6 pt-6 pb-2 rounded-t-xl text-lg font-semibold cursor-move select-none touch-none flex items-center justify-between"
         >
-          {editInvoice ? `Edit ${editInvoice.invoice_number}` : "New Invoice"}
+          <span>
+            {editInvoice ? `Edit ${editInvoice.invoice_number}` : "New Invoice"}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            title="Close"
+            aria-label="Close"
+            className="p-1 rounded-md text-red-600 hover:bg-red-50 hover:text-red-700 cursor-pointer"
+          >
+            <X size={22} strokeWidth={2.5} />
+          </button>
         </h2>
         {error && (
           <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
@@ -9188,13 +9242,6 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
           </div>
 
           <div className="flex gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
-            >
-              Cancel
-            </button>
 
             <button
               type="button"
@@ -9218,6 +9265,19 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
             </button>
           </div>
         </form>
+
+        {/* resize handle (bottom-right corner) */}
+        <div className="sticky bottom-0 h-0 -mr-6">
+          <div
+            onPointerDown={startResize}
+            title="Drag to resize"
+            className="absolute right-0 bottom-0 w-5 h-5 cursor-nwse-resize touch-none select-none z-10"
+            style={{
+              background:
+                "linear-gradient(135deg, transparent 50%, #9ca3af 50%, #9ca3af 58%, transparent 58%, transparent 70%, #9ca3af 70%, #9ca3af 78%, transparent 78%)",
+            }}
+          />
+        </div>
 
         {quickCustomerName !== null && (
           <QuickCustomerModal
