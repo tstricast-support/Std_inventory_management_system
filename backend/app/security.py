@@ -1,4 +1,3 @@
-
 import os
 
 from starlette.datastructures import MutableHeaders
@@ -75,8 +74,8 @@ class SecurityMiddleware:
                     h.setdefault(k, v)
                 if path.startswith("/api/"):
                     h.setdefault("Cache-Control", "no-store")     # never keep money data / tokens in a cache
-                if IS_PRODUCTION:
-                       h.setdefault("Content-Security-Policy", _API_CSP)
+                    if IS_PRODUCTION:
+                        h.setdefault("Content-Security-Policy", _API_CSP)
                 elif IS_PRODUCTION:
                     h.setdefault("Content-Security-Policy-Report-Only", _APP_CSP)
             await send(message)
