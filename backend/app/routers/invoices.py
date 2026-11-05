@@ -59,6 +59,9 @@ def list_invoices(customer_id: int | None = None, db: Session = Depends(get_db))
         query = query.filter(models.Invoice.customer_id == customer_id)
     return query.order_by(models.Invoice.invoice_date.desc(), models.Invoice.id.desc()).all()
 
+@router.get("/next-number")
+def next_invoice_number(db: Session = Depends(get_db)):
+    return {"invoice_number": _next_number(db)}
 
 @router.get("/{invoice_id}", response_model=schemas.InvoiceOut)
 def get_invoice(invoice_id: int, db: Session = Depends(get_db)):

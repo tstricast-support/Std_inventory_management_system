@@ -216,6 +216,14 @@ const updateInvoice = (id, payload) =>
   invoiceRequest(String(id), "PUT", payload, "Failed to update invoice");
 const voidInvoice = (id) => invoiceRequest(`${id}/void`, "PUT", null, "Failed to void invoice");
 
+const getNextInvoiceNumber = () =>
+  invoiceRequest(
+    "next-number",
+    "GET",
+    null,
+    "Failed to get the next invoice number",
+  );
+
 const deleteInvoice = (id) =>
   invoiceRequest(String(id), "DELETE", null, "Failed to delete invoice");
 // ---------- Quotes + Sales orders (step 6: no stock or ledger effect until they become an invoice) ----------
@@ -7879,6 +7887,7 @@ function InvoicesPage({ isAdmin, go }) {
   const [formOpen, setFormOpen] = useState(false);
   useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
+  const [findOpen, setFindOpen] = useState(false);
 
   const load = async () => {
     try {
@@ -7959,6 +7968,12 @@ function InvoicesPage({ isAdmin, go }) {
           >
             + New Invoice
           </button>
+          <button
+            onClick={() => setFindOpen(true)}
+            className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap"
+          >
+            <Search size={14} /> Find
+          </button>
         </div>
 
         {loading ? (
@@ -7975,6 +7990,7 @@ function InvoicesPage({ isAdmin, go }) {
               return (
                 <div
                   key={inv.id}
+                  id={`inv-${inv.id}`}
                   className="bg-white border border-gray-200 rounded-xl overflow-hidden"
                 >
                   <button
@@ -8067,7 +8083,6 @@ function InvoicesPage({ isAdmin, go }) {
                         >
                           <MessageCircle size={14} /> Send WhatsApp
                         </button>
-
                       </div>
 
                       {inv.status !== "void" && (
@@ -8150,6 +8165,173 @@ function InvoicesPage({ isAdmin, go }) {
           onSaved={load}
         />
       )}
+
+      {findOpen && (
+        <InvoiceFindModal
+          invoices={invoices}
+          onClose={() => setFindOpen(false)}
+          onGoTo={(inv) => {
+            setSearch("");
+            setExpandedId(inv.id);
+            setFindOpen(false);
+            setTimeout(
+              () =>
+                document
+                  .getElementById(`inv-${inv.id}`)
+                  ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+              80,
+            );
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// QuickBooks-style "Find Invoices": customer, number, PO, status, date range, amount range
+function InvoiceFindModal({ invoices, onGoTo, onClose }) {
+  const blank = { customer: "", number: "", po: "", status: "all", from: "", to: "", min: "", max: "" };
+  const [f, setF] = useState(blank);
+  const [results, setResults] = useState(null); // null = nothing searched yet
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const set = (patch) => setF((prev) => ({ ...prev, ...patch }));
+
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const runFind = (e) => {
+    e?.preventDefault();
+    const has = (v, q) => (v || "").toLowerCase().includes(q.trim().toLowerCase());
+    setResults(
+      invoices.filter((inv) => {
+        if (f.customer && !has(inv.customer_name, f.customer)) return false;
+        if (f.number && !has(inv.invoice_number, f.number)) return false;
+        if (f.po && !has(inv.order_number, f.po)) return false;
+        if (f.status !== "all" && invoiceStatus(inv).label !== f.status) return false;
+        if (f.from && inv.invoice_date < f.from) return false;
+        if (f.to && inv.invoice_date > f.to) return false;
+        if (f.min !== "" && inv.total < Number(f.min)) return false;
+        if (f.max !== "" && inv.total > Number(f.max)) return false;
+        return true;
+      }),
+    );
+  };
+
+  const reset = () => {
+    setF(blank);
+    setResults(null);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-6 max-h-[92vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-4">Find Invoices</h2>
+        <form onSubmit={runFind} className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label className="text-xs text-gray-500">
+              Customer
+              <input autoFocus value={f.customer} onChange={(e) => set({ customer: e.target.value })} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Invoice no.
+              <input value={f.number} onChange={(e) => set({ number: e.target.value })} placeholder="e.g. INV-0012" className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Order / PO number
+              <input value={f.po} onChange={(e) => set({ po: e.target.value })} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Status
+              <select value={f.status} onChange={(e) => set({ status: e.target.value })} className={cls + " mt-1"}>
+                <option value="all">All</option>
+                <option>Open</option>
+                <option>Overdue</option>
+                <option>Partially paid</option>
+                <option>Paid</option>
+                <option>Void</option>
+              </select>
+            </label>
+            <label className="text-xs text-gray-500">
+              Date from
+              <input type="date" value={f.from} onChange={(e) => set({ from: e.target.value })} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Date to
+              <input type="date" value={f.to} min={f.from} onChange={(e) => set({ to: e.target.value })} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Amount from
+              <input type="number" min="0" step="0.01" value={f.min} onChange={(e) => set({ min: e.target.value })} className={cls + " mt-1"} />
+            </label>
+            <label className="text-xs text-gray-500">
+              Amount to
+              <input type="number" min="0" step="0.01" value={f.max} onChange={(e) => set({ max: e.target.value })} className={cls + " mt-1"} />
+            </label>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button type="submit" className="bg-blue-600 text-white rounded-lg px-5 py-2 text-sm font-medium hover:bg-blue-700">
+              Find
+            </button>
+            <button type="button" onClick={reset} className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50">
+              Reset
+            </button>
+            <button type="button" onClick={onClose} className="ml-auto border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50">
+              Close
+            </button>
+          </div>
+        </form>
+
+        {results && (
+          <div className="mt-4">
+            <p className="text-xs text-gray-500 mb-2">
+              {results.length} invoice{results.length === 1 ? "" : "s"} found
+            </p>
+            {results.length > 0 && (
+              <div className="border border-gray-200 rounded-lg max-h-72 overflow-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-[11px] uppercase text-gray-500 sticky top-0">
+                    <tr>
+                      <th className="text-left px-3 py-2">Date</th>
+                      <th className="text-left px-3 py-2">No.</th>
+                      <th className="text-left px-3 py-2">Customer</th>
+                      <th className="text-left px-3 py-2">Status</th>
+                      <th className="text-right px-3 py-2">Amount</th>
+                      <th className="text-right px-3 py-2">Balance</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {results.map((inv) => {
+                      const st = invoiceStatus(inv);
+                      return (
+                        <tr key={inv.id} onDoubleClick={() => onGoTo(inv)} className="border-t border-gray-100 hover:bg-blue-50/40">
+                          <td className="px-3 py-2 whitespace-nowrap">{formatJournalDate(inv.invoice_date)}</td>
+                          <td className="px-3 py-2 whitespace-nowrap font-medium">{inv.invoice_number}</td>
+                          <td className="px-3 py-2">{inv.customer_name}</td>
+                          <td className="px-3 py-2">
+                            <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                          </td>
+                          <td className="px-3 py-2 text-right whitespace-nowrap">{formatRs(inv.total)}</td>
+                          <td className="px-3 py-2 text-right whitespace-nowrap">{formatRs(inv.balance_due)}</td>
+                          <td className="px-3 py-2 text-right">
+                            <button type="button" onClick={() => onGoTo(inv)} className="text-blue-600 text-xs font-medium hover:underline">
+                              Go To
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -8365,6 +8547,13 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
   const [quickCustomerName, setQuickCustomerName] = useState(null); // typed name, or null = popup closed
   const [quickItem, setQuickItem] = useState(null); // { name, lineIndex } or null = popup closed
+    const [invoiceNo, setInvoiceNo] = useState(
+      editInvoice?.invoice_number || "",
+    );
+    const [pos, setPos] = useState({ x: 0, y: 0 }); // how far the window has been dragged
+    const [preview, setPreview] = useState(null); // { url } while the preview window is open
+    const [previewBusy, setPreviewBusy] = useState(false);
+    const panelRef = useRef(null);
 
   useEffect(() => {
     Promise.all([getCustomers(), getProducts()])
@@ -8377,6 +8566,40 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
       })
       .catch((err) => setError(err.message));
   }, []);
+
+    // new invoice: show the number it will get (the server still assigns the final one on save)
+  useEffect(() => {
+    if (editInvoice) return;
+    getNextInvoiceNumber()
+      .then((r) => setInvoiceNo(r.invoice_number))
+      .catch(() => {});
+  }, []);
+
+  // drag the window by its title bar (kept inside the screen)
+  const startDrag = (e) => {
+    if (e.target.closest("button")) return;
+    const el = panelRef.current;
+    if (!el) return;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const sx = e.clientX - pos.x;
+    const sy = e.clientY - pos.y;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const move = (ev) =>
+      setPos({
+        x: clamp(ev.clientX - sx, -(W / 2 + w / 2 - 100), W / 2 + w / 2 - 100),
+        y: clamp(ev.clientY - sy, h / 2 - H / 2, H / 2 + h / 2 - 40),
+      });
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
 
   const customer = customers.find((c) => c.id === customerId);
   const autoDue = addDaysISO(
@@ -8516,6 +8739,48 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     totalCents > 0 &&
     effectiveDue >= date;
 
+      const canPreview = Boolean(customerId) && filled.length > 0;
+
+      // builds the same PDF that "Download PDF" makes, from what is typed in the form (nothing is saved)
+      const handlePreview = async () => {
+        setPreviewBusy(true);
+        setError(null);
+        try {
+          const pdf = await import("./pdf.js");
+          const draft = {
+            invoice_number: invoiceNo || "DRAFT",
+            customer_name:
+              customer?.display_name || editInvoice?.customer_name || "",
+            invoice_date: date,
+            due_date: effectiveDue,
+            order_number: orderNumber.trim() || null,
+            notes: notes.trim() || null,
+            status: "open",
+            total: totalCents / 100,
+            amount_paid: 0,
+            balance_due: totalCents / 100,
+            items: filled.map((l) => ({
+              item_name: itemById[l.product_id]?.name || "",
+              description: l.description.trim() || null,
+              quantity: Number(l.quantity) || 0,
+              rate: Number(l.rate) || 0,
+              amount: lineCents(l) / 100,
+              product: itemById[l.product_id],
+            })),
+          };
+          const file = await pdf.downloadInvoicePdf(draft, customer, true);
+          setPreview({ url: URL.createObjectURL(file) });
+        } catch (err) {
+          setError(err.message || "Could not create the preview");
+        } finally {
+          setPreviewBusy(false);
+        }
+      };
+      const closePreview = () => {
+        if (preview) URL.revokeObjectURL(preview.url);
+        setPreview(null);
+      };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
@@ -8548,8 +8813,16 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full lg:w-1/2 lg:min-w-[640px] p-6 max-h-[92vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">
+      <div
+        ref={panelRef}
+        style={{ position: "relative", left: pos.x, top: pos.y }}
+        className="bg-white rounded-xl shadow-xl w-full lg:w-1/2 lg:min-w-[640px] p-6 max-h-[92vh] overflow-y-auto"
+      >
+        <h2
+          onPointerDown={startDrag}
+          title="Drag to move"
+          className="sticky top-0 z-10 -mx-6 -mt-6 mb-4 px-6 pt-6 pb-3 bg-white rounded-t-xl text-lg font-semibold cursor-move select-none touch-none"
+        >
           {editInvoice ? `Edit ${editInvoice.invoice_number}` : "New Invoice"}
         </h2>
         {error && (
@@ -8588,7 +8861,16 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <label className="text-xs text-gray-500">
+              Invoice no.
+              <input
+                readOnly
+                value={invoiceNo || "Auto"}
+                title="Assigned automatically when you save"
+                className={cls + " mt-1 bg-gray-50 text-gray-700 font-medium"}
+              />
+            </label>
             <label className="text-xs text-gray-500">
               Invoice date
               <input
@@ -8780,6 +9062,16 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
             >
               Cancel
             </button>
+
+            <button
+              type="button"
+              onClick={handlePreview}
+              disabled={!canPreview || previewBusy}
+              className="flex-1 border border-blue-300 text-blue-700 rounded-lg py-2 text-sm font-medium hover:bg-blue-50 disabled:opacity-50 inline-flex items-center justify-center gap-2"
+            >
+              <FileText size={14} /> {previewBusy ? "Preparing..." : "Preview"}
+            </button>
+
             <button
               type="submit"
               disabled={!canSave || submitting}
@@ -8821,6 +9113,37 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
             onSubmit={handleCreateItem}
             onClose={() => setShowItemForm(false)}
           />
+        )}
+        {preview && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[60]">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl h-[90vh] flex flex-col">
+              <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200">
+                <h3 className="font-semibold text-gray-900">Invoice preview</h3>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={preview.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+                  >
+                    Open in new tab
+                  </a>
+                  <button
+                    type="button"
+                    onClick={closePreview}
+                    className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-sm font-medium hover:bg-blue-700"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+              <iframe
+                src={preview.url}
+                title="Invoice preview"
+                className="flex-1 w-full rounded-b-xl"
+              />
+            </div>
+          </div>
         )}
       </div>
     </div>
