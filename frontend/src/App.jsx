@@ -7888,6 +7888,7 @@ function InvoicesPage({ isAdmin, go }) {
   useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
   const [findOpen, setFindOpen] = useState(false);
+  const [previewFor, setPreviewFor] = useState(null); // the saved invoice being previewed
 
   const load = async () => {
     try {
@@ -7921,20 +7922,20 @@ function InvoicesPage({ isAdmin, go }) {
     }
   };
 
-    const handleDelete = async (inv) => {
-      if (
-        !window.confirm(
-          `Permanently delete ${inv.invoice_number}? This can't be undone.`,
-        )
+  const handleDelete = async (inv) => {
+    if (
+      !window.confirm(
+        `Permanently delete ${inv.invoice_number}? This can't be undone.`,
       )
-        return;
-      try {
-        await deleteInvoice(inv.id);
-        await load();
-      } catch (err) {
-        alert(err.message);
-      }
-    };
+    )
+      return;
+    try {
+      await deleteInvoice(inv.id);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
 
   const q = search.trim().toLowerCase();
   const shown = invoices.filter(
@@ -8071,6 +8072,12 @@ function InvoicesPage({ isAdmin, go }) {
 
                       <div className="flex flex-wrap gap-2">
                         <button
+                          onClick={() => setPreviewFor(inv)}
+                          className="inline-flex items-center gap-2 border border-blue-300 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-50"
+                        >
+                          <FileText size={14} /> Preview
+                        </button>
+                        <button
                           onClick={() => downloadPdf("invoice", inv)}
                           className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
                         >
@@ -8184,6 +8191,80 @@ function InvoicesPage({ isAdmin, go }) {
           }}
         />
       )}
+      {previewFor && (
+        <InvoicePreviewModal
+          invoice={previewFor}
+          onClose={() => setPreviewFor(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Preview of a saved invoice (the same PDF as "Download PDF", shown on screen)
+function InvoicePreviewModal({ invoice, onClose }) {
+  const [url, setUrl] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let objectUrl = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [pdf, customers] = await Promise.all([
+          import("./pdf.js"),
+          getCustomers().catch(() => []),
+        ]);
+        const customer = customers.find((c) => c.id === invoice.customer_id);
+        const file = await pdf.downloadInvoicePdf(invoice, customer, true);
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(file);
+        setUrl(objectUrl);
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Could not create the preview");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, []);
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200">
+          <h3 className="font-semibold text-gray-900">
+            {invoice.invoice_number} · {invoice.customer_name}
+          </h3>
+          <div className="flex items-center gap-2">
+            {url && (
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+              >
+                Open in new tab
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-sm font-medium hover:bg-blue-700"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+        {error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : !url ? (
+          <p className="text-gray-400 text-center py-16">Preparing preview...</p>
+        ) : (
+          <iframe src={url} title="Invoice preview" className="flex-1 w-full rounded-b-xl" />
+        )}
+      </div>
     </div>
   );
 }
