@@ -40,32 +40,38 @@ import {
   LayoutDashboard,
   Home,
   Palette,
-  Upload
+  Upload,
+  ShieldCheck,
+  ScrollText,
 } from "lucide-react";
 import "./index.css";
+import { BASE_URL, apiFetch } from "./api.js";
+import { AuthProvider, AuthGate, useAuth, Gate, SidebarUser, HeaderSignOut, FloatingSignOut, ACCOUNTING_AREAS } from "./auth.jsx";
+import { UsersAdminPage, ProfileModal } from "./UsersAdmin.jsx";
+import { AuditLogPage, HistoryLink } from "./AuditLogPage.jsx";
 
 
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+// const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
 
 
 
 // ---------- API helpers ----------
 async function getProducts() {
-  const res = await fetch(`${BASE_URL}/products/`);
+  const res = await apiFetch(`${BASE_URL}/products/`);
   if (!res.ok) throw new Error("Failed to fetch products");
   return res.json();
 }
 
 // ---------- Vendors ----------
 async function getVendors() {
-  const res = await fetch(`${BASE_URL}/vendors/`);
+  const res = await apiFetch(`${BASE_URL}/vendors/`);
   if (!res.ok) throw new Error("Failed to fetch vendors");
   return res.json();
 }
 
 async function createVendor(payload) {
-  const res = await fetch(`${BASE_URL}/vendors/`, {
+  const res = await apiFetch(`${BASE_URL}/vendors/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -78,7 +84,7 @@ async function createVendor(payload) {
 }
 
 async function updateVendor(id, payload) {
-  const res = await fetch(`${BASE_URL}/vendors/${id}`, {
+  const res = await apiFetch(`${BASE_URL}/vendors/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -91,7 +97,7 @@ async function updateVendor(id, payload) {
 }
 
 async function deleteVendor(id) {
-  const res = await fetch(`${BASE_URL}/vendors/${id}`, { method: "DELETE" });
+  const res = await apiFetch(`${BASE_URL}/vendors/${id}`, { method: "DELETE" });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
     throw new Error(
@@ -103,7 +109,7 @@ async function deleteVendor(id) {
 
 // ---------- Customers ----------
 async function customerRequest(path, method, payload, failMsg) {
-  const res = await fetch(`${BASE_URL}/customers/${path}`, {
+  const res = await apiFetch(`${BASE_URL}/customers/${path}`, {
     method,
     headers: payload ? { "Content-Type": "application/json" } : undefined,
     body: payload ? JSON.stringify(payload) : undefined,
@@ -122,7 +128,7 @@ const deleteCustomer = (id) => customerRequest(String(id), "DELETE", null, "Fail
 
 // ---------- Taxes ----------
 async function taxRequest(path, method, payload, failMsg) {
-  const res = await fetch(`${BASE_URL}/taxes/${path}`, {
+  const res = await apiFetch(`${BASE_URL}/taxes/${path}`, {
     method,
     headers: payload ? { "Content-Type": "application/json" } : undefined,
     body: payload ? JSON.stringify(payload) : undefined,
@@ -141,7 +147,7 @@ const deleteTax = (id) => taxRequest(String(id), "DELETE", null, "Failed to dele
 
 // ---------- Banking ----------
 async function bankRequest(path, method, payload, failMsg) {
-  const res = await fetch(`${BASE_URL}/banking/${path}`, {
+  const res = await apiFetch(`${BASE_URL}/banking/${path}`, {
     method,
     headers: payload ? { "Content-Type": "application/json" } : undefined,
     body: payload ? JSON.stringify(payload) : undefined,
@@ -173,7 +179,7 @@ const undoReconciliation = (recId) => bankRequest(`reconciliations/${recId}`, "D
 
 // ---------- Reports ----------
 async function reportRequest(path, failMsg) {
-  const res = await fetch(`${BASE_URL}/reports/${path}`);
+  const res = await apiFetch(`${BASE_URL}/reports/${path}`);
   if (!res.ok) {
     const err = await res.json().catch(() => null);
     throw new Error(typeof err?.detail === "string" ? err.detail : failMsg);
@@ -190,7 +196,7 @@ const getSalesSummary = (from, to) =>
 const getAgeing = (kind, asOf) => reportRequest(`${kind}-ageing?as_of=${asOf}`, "Failed to load the ageing report");
 
 const getDashboard = async (year) => {
-  const res = await fetch(
+  const res = await apiFetch(
     `${BASE_URL}/dashboard${year ? `?year=${year}` : ""}`,
   );
   if (!res.ok) throw new Error("Failed to load the dashboard");
@@ -199,7 +205,7 @@ const getDashboard = async (year) => {
 
 // ---------- Invoices ----------
 async function invoiceRequest(path, method, payload, failMsg) {
-  const res = await fetch(`${BASE_URL}/invoices/${path}`, {
+  const res = await apiFetch(`${BASE_URL}/invoices/${path}`, {
     method,
     headers: payload ? { "Content-Type": "application/json" } : undefined,
     body: payload ? JSON.stringify(payload) : undefined,
@@ -847,7 +853,7 @@ function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
 
 // ---------- Payments received ----------
 async function paymentRequest(path, method, payload, failMsg) {
-  const res = await fetch(`${BASE_URL}/payments/${path}`, {
+  const res = await apiFetch(`${BASE_URL}/payments/${path}`, {
     method,
     headers: payload ? { "Content-Type": "application/json" } : undefined,
     body: payload ? JSON.stringify(payload) : undefined,
@@ -863,7 +869,7 @@ const createPayment = (payload) => paymentRequest("", "POST", payload, "Failed t
 const deletePayment = (id) => paymentRequest(String(id), "DELETE", null, "Failed to delete payment");
 // ---------- Purchase bills (what you owe vendors) ----------
 async function purchaseBillRequest(path, method, payload, failMsg) {
-  const res = await fetch(`${BASE_URL}/purchase-bills/${path}`, {
+  const res = await apiFetch(`${BASE_URL}/purchase-bills/${path}`, {
     method,
     headers: payload ? { "Content-Type": "application/json" } : undefined,
     body: payload ? JSON.stringify(payload) : undefined,
@@ -881,7 +887,7 @@ const voidPurchaseBill = (id) => purchaseBillRequest(`${id}/void`, "PUT", null, 
 
 // ---------- Vendor payments (payments made) ----------
 async function vendorPaymentRequest(path, method, payload, failMsg) {
-  const res = await fetch(`${BASE_URL}/vendor-payments/${path}`, {
+  const res = await apiFetch(`${BASE_URL}/vendor-payments/${path}`, {
     method,
     headers: payload ? { "Content-Type": "application/json" } : undefined,
     body: payload ? JSON.stringify(payload) : undefined,
@@ -899,7 +905,7 @@ const deleteVendorPayment = (id) => vendorPaymentRequest(String(id), "DELETE", n
 
 // ---------- Quotes + Sales orders ----------
 async function salesDocRequest(path, method, payload, failMsg) {
-  const res = await fetch(`${BASE_URL}/sales-documents/${path}`, {
+  const res = await apiFetch(`${BASE_URL}/sales-documents/${path}`, {
     method,
     headers: payload ? { "Content-Type": "application/json" } : undefined,
     body: payload ? JSON.stringify(payload) : undefined,
@@ -1000,7 +1006,7 @@ async function sendWhatsApp(kind, record) {
 
 // ---------- Credit notes ----------
 async function creditNoteRequest(path, method, payload, failMsg) {
-  const res = await fetch(`${BASE_URL}/credit-notes/${path}`, {
+  const res = await apiFetch(`${BASE_URL}/credit-notes/${path}`, {
     method,
     headers: payload ? { "Content-Type": "application/json" } : undefined,
     body: payload ? JSON.stringify(payload) : undefined,
@@ -1022,13 +1028,13 @@ const deleteCreditNote = (id) =>
 // ---------- Accounts (chart of accounts) ----------
 async function getAccounts(accountType) {
   const url = accountType ? `${BASE_URL}/accounts/?account_type=${accountType}` : `${BASE_URL}/accounts/`;
-  const res = await fetch(url);
+  const res = await apiFetch(url);
   if (!res.ok) throw new Error("Failed to fetch accounts");
   return res.json();
 }
 
 async function createAccount(payload) {
-  const res = await fetch(`${BASE_URL}/accounts/`, {
+  const res = await apiFetch(`${BASE_URL}/accounts/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -1041,7 +1047,7 @@ async function createAccount(payload) {
 }
 
 async function updateAccount(id, payload) {
-  const res = await fetch(`${BASE_URL}/accounts/${id}`, {
+  const res = await apiFetch(`${BASE_URL}/accounts/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -1054,28 +1060,28 @@ async function updateAccount(id, payload) {
 }
 
 async function deleteAccount(id) {
-  const res = await fetch(`${BASE_URL}/accounts/${id}`, { method: "DELETE" });
+  const res = await apiFetch(`${BASE_URL}/accounts/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete account");
   return res.json();
 }
 
 // every account + its total value (Accounting list page)
 async function getAccountsSummary() {
-  const res = await fetch(`${BASE_URL}/accounts/summary`);
+  const res = await apiFetch(`${BASE_URL}/accounts/summary`);
   if (!res.ok) throw new Error("Failed to fetch accounts");
   return res.json();
 }
 
 // one account + the items that make up its value (Account detail page)
 async function getAccountDetail(id) {
-  const res = await fetch(`${BASE_URL}/accounts/${id}/detail`);
+  const res = await apiFetch(`${BASE_URL}/accounts/${id}/detail`);
   if (!res.ok) throw new Error(res.status === 404 ? "This account no longer exists." : "Failed to fetch account");
   return res.json();
 }
 
 // ---------- Journals ----------
 async function journalRequest(path, method, payload, failMsg) {
-  const res = await fetch(`${BASE_URL}/journals/${path}`, {
+  const res = await apiFetch(`${BASE_URL}/journals/${path}`, {
     method,
     headers: payload ? { "Content-Type": "application/json" } : undefined,
     body: payload ? JSON.stringify(payload) : undefined,
@@ -1125,7 +1131,7 @@ async function createProduct(formValues, imageFiles) {
 
   imageFiles.forEach((file) => formData.append("images", file));
 
-  const res = await fetch(`${BASE_URL}/products/`, {
+  const res = await apiFetch(`${BASE_URL}/products/`, {
     method: "POST",
     body: formData,
   });
@@ -1139,7 +1145,7 @@ async function createProduct(formValues, imageFiles) {
 }
 
 async function updateProduct(id, updates) {
-  const res = await fetch(`${BASE_URL}/products/${id}`, {
+  const res = await apiFetch(`${BASE_URL}/products/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),
@@ -1152,7 +1158,7 @@ async function updateProduct(id, updates) {
 }
 
 async function deleteProduct(id) {
-  const res = await fetch(`${BASE_URL}/products/${id}`, { method: "DELETE" });
+  const res = await apiFetch(`${BASE_URL}/products/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete product");
   return res.json();
 }
@@ -1161,13 +1167,13 @@ async function getRequests(status) {
   const params = new URLSearchParams();
   if (status) params.set("status", status);
   const qs = params.toString();
-  const res = await fetch(`${BASE_URL}/requests/${qs ? `?${qs}` : ""}`);
+  const res = await apiFetch(`${BASE_URL}/requests/${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error("Failed to fetch requests");
   return res.json();
 }
 
 async function createRequest(payload) {
-  const res = await fetch(`${BASE_URL}/requests/`, {
+  const res = await apiFetch(`${BASE_URL}/requests/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -1180,7 +1186,7 @@ async function createRequest(payload) {
 }
 
 async function approveRequest(id) {
-  const res = await fetch(`${BASE_URL}/requests/${id}/approve`, { method: "PUT" });
+  const res = await apiFetch(`${BASE_URL}/requests/${id}/approve`, { method: "PUT" });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
     throw new Error(err?.detail || "Failed to approve request");
@@ -1189,13 +1195,13 @@ async function approveRequest(id) {
 }
 
 async function rejectRequest(id) {
-  const res = await fetch(`${BASE_URL}/requests/${id}/reject`, { method: "PUT" });
+  const res = await apiFetch(`${BASE_URL}/requests/${id}/reject`, { method: "PUT" });
   if (!res.ok) throw new Error("Failed to reject request");
   return res.json();
 }
 
 async function restockProduct(id, quantity, note) {
-  const res = await fetch(`${BASE_URL}/products/${id}/restock`, {
+  const res = await apiFetch(`${BASE_URL}/products/${id}/restock`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ quantity: Number(quantity), note: note || null }),
@@ -1208,7 +1214,7 @@ async function restockProduct(id, quantity, note) {
 }
 
 async function getStockMovements() {
-  const res = await fetch(`${BASE_URL}/stock-movements/`);
+  const res = await apiFetch(`${BASE_URL}/stock-movements/`);
   if (!res.ok) throw new Error("Failed to fetch stock history");
   return res.json();
 }
@@ -1216,7 +1222,7 @@ async function getStockMovements() {
 async function addProductImages(id, files) {
   const formData = new FormData();
   files.forEach((file) => formData.append("images", file));
-  const res = await fetch(`${BASE_URL}/products/${id}/images`, { method: "POST", body: formData });
+  const res = await apiFetch(`${BASE_URL}/products/${id}/images`, { method: "POST", body: formData });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
     throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to upload images");
@@ -1225,20 +1231,20 @@ async function addProductImages(id, files) {
 }
 
 async function setPrimaryImage(id, imageId) {
-  const res = await fetch(`${BASE_URL}/products/${id}/images/${imageId}/primary`, { method: "PUT" });
+  const res = await apiFetch(`${BASE_URL}/products/${id}/images/${imageId}/primary`, { method: "PUT" });
   if (!res.ok) throw new Error("Failed to set main image");
   return res.json();
 }
 
 async function deleteProductImage(id, imageId) {
-  const res = await fetch(`${BASE_URL}/products/${id}/images/${imageId}`, { method: "DELETE" });
+  const res = await apiFetch(`${BASE_URL}/products/${id}/images/${imageId}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete image");
   return res.json();
 }
 
 // ---------- Excel import + bulk images ----------
 async function downloadImportTemplate() {
-  const res = await fetch(`${BASE_URL}/product-import/template`);
+  const res = await apiFetch(`${BASE_URL}/product-import/template`);
   if (!res.ok) throw new Error("Failed to download template");
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -1254,7 +1260,7 @@ async function importProductsFile(file, { updateExisting, dryRun }) {
   formData.append("file", file);
   formData.append("update_existing", String(updateExisting));
   formData.append("dry_run", String(dryRun));
-  const res = await fetch(`${BASE_URL}/product-import/`, { method: "POST", body: formData });
+  const res = await apiFetch(`${BASE_URL}/product-import/`, { method: "POST", body: formData });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
     throw new Error(typeof err?.detail === "string" ? err.detail : "Import failed");
@@ -1266,7 +1272,7 @@ async function bulkUploadImages(files, replaceExisting) {
   const formData = new FormData();
   files.forEach((f) => formData.append("images", f));
   formData.append("replace_existing", String(replaceExisting));
-  const res = await fetch(`${BASE_URL}/product-import/images`, { method: "POST", body: formData });
+  const res = await apiFetch(`${BASE_URL}/product-import/images`, { method: "POST", body: formData });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
     throw new Error(typeof err?.detail === "string" ? err.detail : "Image upload failed");
@@ -1275,13 +1281,13 @@ async function bulkUploadImages(files, replaceExisting) {
 }
 
 async function getIssuedLists() {
-  const res = await fetch(`${BASE_URL}/issued/`);
+  const res = await apiFetch(`${BASE_URL}/issued/`);
   if (!res.ok) throw new Error("Failed to fetch issued lists");
   return res.json();
 }
 
 async function createIssuedList(payload) {
-  const res = await fetch(`${BASE_URL}/issued/`, {
+  const res = await apiFetch(`${BASE_URL}/issued/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -1294,13 +1300,13 @@ async function createIssuedList(payload) {
 }
 
 async function getReconcilableRequests(issuedDate) {
-  const res = await fetch(`${BASE_URL}/issued/reconcilable?issued_date=${issuedDate}`);
+  const res = await apiFetch(`${BASE_URL}/issued/reconcilable?issued_date=${issuedDate}`);
   if (!res.ok) throw new Error("Failed to load approved requests");
   return res.json();
 }
 
 async function deleteIssuedList(id) {
-  const res = await fetch(`${BASE_URL}/issued/${id}`, { method: "DELETE" });
+  const res = await apiFetch(`${BASE_URL}/issued/${id}`, { method: "DELETE" });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
     throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to undo issued list");
@@ -1309,13 +1315,13 @@ async function deleteIssuedList(id) {
 }
 
 async function getBills() {
-  const res = await fetch(`${BASE_URL}/bills/`);
+  const res = await apiFetch(`${BASE_URL}/bills/`);
   if (!res.ok) throw new Error("Failed to fetch bills");
   return res.json();
 }
 
 async function createBill(adderName, items) {
-  const res = await fetch(`${BASE_URL}/bills/`, {
+  const res = await apiFetch(`${BASE_URL}/bills/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ adder_name: adderName, items }),
@@ -1329,7 +1335,7 @@ async function createBill(adderName, items) {
 
 
 async function updateBill(id, adderName, items) {
-  const res = await fetch(`${BASE_URL}/bills/${id}`, {
+  const res = await apiFetch(`${BASE_URL}/bills/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ adder_name: adderName, items }),
@@ -1344,7 +1350,7 @@ async function updateBill(id, adderName, items) {
 }
 
 async function deleteBill(id) {
-  const res = await fetch(`${BASE_URL}/bills/${id}`, { method: "DELETE" });
+  const res = await apiFetch(`${BASE_URL}/bills/${id}`, { method: "DELETE" });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
     throw new Error(
@@ -2541,6 +2547,7 @@ function ProductFormBody({ initialData, onSubmit, onClose, onImagesChanged, kind
 }
 // ---------- Shared inventory view (used by both routes) ----------
 function InventoryView({ isAdmin, onBack }) {
+  const { can } = useAuth();
   const [products, setProducts] = useState([]);
   const [requests, setRequests] = useState([]);
   const [stockMovements, setStockMovements] = useState([]);
@@ -2656,7 +2663,7 @@ function InventoryView({ isAdmin, onBack }) {
         parentName={parentName}
         onBack={() => setItemId(null)}
         isAdmin={isAdmin}
-        onRestock={isAdmin ? (p) => setRestockingProduct(p) : undefined}
+        onRestock={isAdmin && can("stock_bills", "create") ? (p) => setRestockingProduct(p) : undefined}
         onRequest={!isAdmin ? (p) => setRequestingProduct(p) : undefined}
       />
     ) : (
@@ -3641,12 +3648,14 @@ function AppHeader({
                   </div>
                 </>
               )}
-              <button
-                onClick={openNewInvoice}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
-              >
-                + New Invoice
-              </button>
+              <Gate area="invoices" level="create">
+                <button
+                  onClick={openNewInvoice}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
+                >
+                  + New Invoice
+                </button>
+              </Gate>
               <AddProductButton
                 ref={addProductRef}
                 onCreated={onProductAdded}
@@ -4147,6 +4156,7 @@ function ItemRowWithSubitems({ item, expanded, onToggle, onSelect, forceOpen, is
 
 // ---------- Items page: flat A-Z item list (with subitems nested) -> full item card ----------
 function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdded }) {
+  const { can } = useAuth();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -4207,7 +4217,7 @@ function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdde
             parentName={parentName}
             onBack={back}
             isAdmin={isAdmin}
-            onRestock={isAdmin ? (p) => setRestockingProduct(p) : undefined}
+            onRestock={isAdmin && can("stock_bills", "create") ? (p) => setRestockingProduct(p) : undefined}
           />
           {restockingProduct && (
             <RestockModal
@@ -6931,12 +6941,14 @@ function AccountDetail({ accountId, go, fromParam }) {
               >
                 <Pencil size={16} /> Edit account
               </button>
-              <button
-                onClick={() => setShowDeleteConfirm(true)}
-                className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-50"
-              >
-                <Trash2 size={16} /> Delete account
-              </button>
+              <Gate right="Delete account">
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-50"
+                >
+                  <Trash2 size={16} /> Delete account
+                </button>
+              </Gate>
             </div>
           </>
         )}
@@ -7587,7 +7599,11 @@ function JournalsPage({ isAdmin, go }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="journals" onTab={(t) => go(t === "home" ? {} : { view: t })} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="journals"
+        onTab={(t) => go(t === "home" ? {} : { view: t })}
+      />
 
       <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex items-center gap-2">
@@ -7610,57 +7626,91 @@ function JournalsPage({ isAdmin, go }) {
           <p className="text-red-500 text-center py-16">{error}</p>
         ) : tab === "journals" ? (
           journals.length === 0 ? (
-            <p className="text-gray-400 text-center py-16">No manual journals yet.</p>
+            <p className="text-gray-400 text-center py-16">
+              No manual journals yet.
+            </p>
           ) : (
             <div className="space-y-2">
               {journals.map((j) => (
-                <div key={j.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div
+                  key={j.id}
+                  className="bg-white border border-gray-200 rounded-xl overflow-hidden"
+                >
                   <button
                     type="button"
-                    onClick={() => setExpandedId(expandedId === j.id ? null : j.id)}
+                    onClick={() =>
+                      setExpandedId(expandedId === j.id ? null : j.id)
+                    }
                     className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50"
                   >
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-gray-900 truncate">{j.journal_number}</p>
+                      <p className="font-medium text-gray-900 truncate">
+                        {j.journal_number}
+                      </p>
                       <p className="text-xs text-gray-400 truncate">
                         {formatJournalDate(j.journal_date)}
-                        {(j.reference || j.notes) && ` · ${j.reference || j.notes}`}
+                        {(j.reference || j.notes) &&
+                          ` · ${j.reference || j.notes}`}
                       </p>
                     </div>
-                    <span className="shrink-0 font-semibold text-gray-900">{formatRs(j.total)}</span>
-                    {expandedId === j.id ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                    <span className="shrink-0 font-semibold text-gray-900">
+                      {formatRs(j.total)}
+                    </span>
+                    {expandedId === j.id ? (
+                      <ChevronDown size={16} className="text-gray-400" />
+                    ) : (
+                      <ChevronRight size={16} className="text-gray-400" />
+                    )}
                   </button>
 
                   {expandedId === j.id && (
                     <div className="border-t border-gray-100 p-3 space-y-3">
-                      {j.notes && <p className="text-sm text-gray-600">{j.notes}</p>}
+                      {j.notes && (
+                        <p className="text-sm text-gray-600">{j.notes}</p>
+                      )}
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="text-xs text-gray-400 uppercase text-left">
                             <th className="font-medium pb-1">Account</th>
-                            <th className="font-medium pb-1 text-right">Debit</th>
-                            <th className="font-medium pb-1 text-right">Credit</th>
+                            <th className="font-medium pb-1 text-right">
+                              Debit
+                            </th>
+                            <th className="font-medium pb-1 text-right">
+                              Credit
+                            </th>
                           </tr>
                         </thead>
                         <tbody>
                           {j.lines.map((l) => (
                             <tr key={l.id} className="border-t border-gray-50">
                               <td className="py-1.5 pr-2">
-                                <p className="text-gray-900">{l.account_name}</p>
-                                {l.description && <p className="text-xs text-gray-400">{l.description}</p>}
+                                <p className="text-gray-900">
+                                  {l.account_name}
+                                </p>
+                                {l.description && (
+                                  <p className="text-xs text-gray-400">
+                                    {l.description}
+                                  </p>
+                                )}
                               </td>
-                              <td className="py-1.5 text-right">{l.debit > 0 ? formatRs(l.debit) : ""}</td>
-                              <td className="py-1.5 text-right">{l.credit > 0 ? formatRs(l.credit) : ""}</td>
+                              <td className="py-1.5 text-right">
+                                {l.debit > 0 ? formatRs(l.debit) : ""}
+                              </td>
+                              <td className="py-1.5 text-right">
+                                {l.credit > 0 ? formatRs(l.credit) : ""}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
+                      <Gate right="delete_records">
                       <button
                         onClick={() => setDeleteTarget(j)}
                         className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
                       >
                         <Trash2 size={14} /> Delete journal
                       </button>
+                      </Gate>
                     </div>
                   )}
                 </div>
@@ -7668,7 +7718,9 @@ function JournalsPage({ isAdmin, go }) {
             </div>
           )
         ) : trial.length === 0 ? (
-          <p className="text-gray-400 text-center py-16">Nothing to show yet. Add a journal first.</p>
+          <p className="text-gray-400 text-center py-16">
+            Nothing to show yet. Add a journal first.
+          </p>
         ) : (
           <div className="bg-white border border-gray-200 rounded-xl p-3">
             <table className="w-full text-sm">
@@ -7684,10 +7736,16 @@ function JournalsPage({ isAdmin, go }) {
                   <tr key={r.account_id} className="border-t border-gray-50">
                     <td className="py-1.5 pr-2">
                       <p className="text-gray-900">{r.name}</p>
-                      <p className="text-xs text-gray-400">{ACCOUNT_TYPE_NAMES[r.account_type] || r.account_type}</p>
+                      <p className="text-xs text-gray-400">
+                        {ACCOUNT_TYPE_NAMES[r.account_type] || r.account_type}
+                      </p>
                     </td>
-                    <td className="py-1.5 text-right">{r.debit > 0 ? formatRs(r.debit) : ""}</td>
-                    <td className="py-1.5 text-right">{r.credit > 0 ? formatRs(r.credit) : ""}</td>
+                    <td className="py-1.5 text-right">
+                      {r.debit > 0 ? formatRs(r.debit) : ""}
+                    </td>
+                    <td className="py-1.5 text-right">
+                      {r.credit > 0 ? formatRs(r.credit) : ""}
+                    </td>
                   </tr>
                 ))}
                 <tr className="border-t-2 border-gray-200 font-semibold">
@@ -7697,14 +7755,20 @@ function JournalsPage({ isAdmin, go }) {
                 </tr>
               </tbody>
             </table>
-            <p className={`mt-2 text-xs ${Math.abs(totalDebit - totalCredit) < 0.005 ? "text-green-600" : "text-red-600"}`}>
-              {Math.abs(totalDebit - totalCredit) < 0.005 ? "Balanced: debits equal credits." : "Out of balance!"}
+            <p
+              className={`mt-2 text-xs ${Math.abs(totalDebit - totalCredit) < 0.005 ? "text-green-600" : "text-red-600"}`}
+            >
+              {Math.abs(totalDebit - totalCredit) < 0.005
+                ? "Balanced: debits equal credits."
+                : "Out of balance!"}
             </p>
           </div>
         )}
       </main>
 
-      {formOpen && <JournalForm onClose={() => setFormOpen(false)} onSaved={load} />}
+      {formOpen && (
+        <JournalForm onClose={() => setFormOpen(false)} onSaved={load} />
+      )}
 
       {deleteTarget && (
         <TypedDeleteConfirm
@@ -8090,6 +8154,7 @@ function InvoicesPage({ isAdmin, go }) {
                         >
                           <MessageCircle size={14} /> Send WhatsApp
                         </button>
+                        <HistoryLink type="invoice" id={inv.id} />
                       </div>
 
                       {inv.status !== "void" && (
@@ -8116,23 +8181,26 @@ function InvoicesPage({ isAdmin, go }) {
                           >
                             <RotateCcw size={14} /> Credit note
                           </button>
-
-                          <button
-                            onClick={() => handleVoid(inv)}
-                            className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
-                          >
-                            <Trash2 size={14} /> Void invoice
-                          </button>
+                          <Gate right="void_transactions">
+                            <button
+                              onClick={() => handleVoid(inv)}
+                              className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                            >
+                              <Trash2 size={14} /> Void invoice
+                            </button>
+                          </Gate>
                         </div>
                       )}
                       {inv.status === "void" && (
                         <div className="flex flex-wrap gap-2">
-                          <button
-                            onClick={() => handleDelete(inv)}
-                            className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
-                          >
-                            <Trash2 size={14} /> Delete invoice
-                          </button>
+                          <Gate right="delete_records">
+                            <button
+                              onClick={() => handleDelete(inv)}
+                              className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                            >
+                              <Trash2 size={14} /> Delete invoice
+                            </button>
+                          </Gate>
                         </div>
                       )}
                     </div>
@@ -9435,22 +9503,26 @@ function CreditNotesPage({ isAdmin, go }) {
                               <FileText size={14} /> Apply to invoice
                             </button>
                           )}
-                          <button
-                            onClick={() => handleVoid(cn)}
-                            className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}
-                          >
-                            <Trash2 size={14} /> Void credit note
-                          </button>
+                          <Gate right="void_transactions">
+                            <button
+                              onClick={() => handleVoid(cn)}
+                              className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}
+                            >
+                              <Trash2 size={14} /> Void credit note
+                            </button>
+                          </Gate>
                         </div>
                       )}
                       {cn.status === "void" && (
                         <div className="flex flex-wrap gap-2">
-                          <button
-                            onClick={() => handleDelete(cn)}
-                            className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}
-                          >
-                            <Trash2 size={14} /> Delete credit note
-                          </button>
+                          <Gate right="delete_records">
+                            <button
+                              onClick={() => handleDelete(cn)}
+                              className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}
+                            >
+                              <Trash2 size={14} /> Delete credit note
+                            </button>
+                          </Gate>
                         </div>
                       )}
                     </div>
@@ -9832,7 +9904,10 @@ function PaymentsPage({ isAdmin, go }) {
             {shown.map((p) => {
               const open = expandedId === p.id;
               return (
-                <div key={p.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div
+                  key={p.id}
+                  className="bg-white border border-gray-200 rounded-xl overflow-hidden"
+                >
                   <button
                     type="button"
                     onClick={() => setExpandedId(open ? null : p.id)}
@@ -9840,35 +9915,59 @@ function PaymentsPage({ isAdmin, go }) {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 truncate">
-                        {p.payment_number} <span className="text-gray-400 font-normal">· {p.customer_name}</span>
+                        {p.payment_number}{" "}
+                        <span className="text-gray-400 font-normal">
+                          · {p.customer_name}
+                        </span>
                       </p>
                       <p className="text-xs text-gray-400 truncate">
-                        {formatJournalDate(p.payment_date)} · {p.payment_mode} → {p.deposit_account_name}
+                        {formatJournalDate(p.payment_date)} · {p.payment_mode} →{" "}
+                        {p.deposit_account_name}
                       </p>
                     </div>
-                    <span className="shrink-0 font-semibold text-green-700">{formatRs(p.amount)}</span>
-                    {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                    <span className="shrink-0 font-semibold text-green-700">
+                      {formatRs(p.amount)}
+                    </span>
+                    {open ? (
+                      <ChevronDown size={16} className="text-gray-400" />
+                    ) : (
+                      <ChevronRight size={16} className="text-gray-400" />
+                    )}
                   </button>
 
                   {open && (
                     <div className="border-t border-gray-100 p-3 space-y-3">
-                      {p.reference && <p className="text-sm text-gray-600">Reference: {p.reference}</p>}
-                      {p.notes && <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">{p.notes}</p>}
+                      {p.reference && (
+                        <p className="text-sm text-gray-600">
+                          Reference: {p.reference}
+                        </p>
+                      )}
+                      {p.notes && (
+                        <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">
+                          {p.notes}
+                        </p>
+                      )}
                       <div className="text-sm space-y-1">
-                        <p className="text-xs text-gray-400 uppercase">Applied to</p>
+                        <p className="text-xs text-gray-400 uppercase">
+                          Applied to
+                        </p>
                         {p.allocations.map((a) => (
                           <div key={a.id} className="flex justify-between">
-                            <span className="text-gray-900">{a.invoice_number}</span>
+                            <span className="text-gray-900">
+                              {a.invoice_number}
+                            </span>
                             <span>{formatRs(a.amount)}</span>
                           </div>
                         ))}
                       </div>
+                      <Gate right="delete_records">
                       <button
                         onClick={() => handleDelete(p)}
                         className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
                       >
                         <Trash2 size={14} /> Delete payment
                       </button>
+                      </Gate>
                     </div>
                   )}
                 </div>
@@ -10182,12 +10281,14 @@ function PurchaseBillsPage({ isAdmin, go }) {
                               <CreditCard size={14} /> Record payment
                             </button>
                           )}
+                          <Gate right="void_transactions">
                           <button
                             onClick={() => handleVoid(b)}
                             className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
                           >
                             <Trash2 size={14} /> Void bill
                           </button>
+                          </Gate>
                         </div>
                       )}
                     </div>
@@ -10528,7 +10629,10 @@ function VendorPaymentsPage({ isAdmin, go }) {
             {shown.map((p) => {
               const open = expandedId === p.id;
               return (
-                <div key={p.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div
+                  key={p.id}
+                  className="bg-white border border-gray-200 rounded-xl overflow-hidden"
+                >
                   <button
                     type="button"
                     onClick={() => setExpandedId(open ? null : p.id)}
@@ -10536,35 +10640,59 @@ function VendorPaymentsPage({ isAdmin, go }) {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 truncate">
-                        {p.payment_number} <span className="text-gray-400 font-normal">· {p.vendor_name}</span>
+                        {p.payment_number}{" "}
+                        <span className="text-gray-400 font-normal">
+                          · {p.vendor_name}
+                        </span>
                       </p>
                       <p className="text-xs text-gray-400 truncate">
-                        {formatJournalDate(p.payment_date)} · {p.payment_mode} from {p.paid_from_account_name}
+                        {formatJournalDate(p.payment_date)} · {p.payment_mode}{" "}
+                        from {p.paid_from_account_name}
                       </p>
                     </div>
-                    <span className="shrink-0 font-semibold text-red-700">{formatRs(p.amount)}</span>
-                    {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                    <span className="shrink-0 font-semibold text-red-700">
+                      {formatRs(p.amount)}
+                    </span>
+                    {open ? (
+                      <ChevronDown size={16} className="text-gray-400" />
+                    ) : (
+                      <ChevronRight size={16} className="text-gray-400" />
+                    )}
                   </button>
 
                   {open && (
                     <div className="border-t border-gray-100 p-3 space-y-3">
-                      {p.reference && <p className="text-sm text-gray-600">Reference: {p.reference}</p>}
-                      {p.notes && <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">{p.notes}</p>}
+                      {p.reference && (
+                        <p className="text-sm text-gray-600">
+                          Reference: {p.reference}
+                        </p>
+                      )}
+                      {p.notes && (
+                        <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">
+                          {p.notes}
+                        </p>
+                      )}
                       <div className="text-sm space-y-1">
-                        <p className="text-xs text-gray-400 uppercase">Applied to</p>
+                        <p className="text-xs text-gray-400 uppercase">
+                          Applied to
+                        </p>
                         {p.allocations.map((a) => (
                           <div key={a.id} className="flex justify-between">
-                            <span className="text-gray-900">{a.bill_number}</span>
+                            <span className="text-gray-900">
+                              {a.bill_number}
+                            </span>
                             <span>{formatRs(a.amount)}</span>
                           </div>
                         ))}
                       </div>
-                      <button
-                        onClick={() => handleDelete(p)}
-                        className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
-                      >
-                        <Trash2 size={14} /> Delete payment
-                      </button>
+                      <Gate right="delete_records">
+                        <button
+                          onClick={() => handleDelete(p)}
+                          className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                        >
+                          <Trash2 size={14} /> Delete payment
+                        </button>
+                      </Gate>
                     </div>
                   )}
                 </div>
@@ -11620,12 +11748,14 @@ function BillPage({ go, autoCreateToken }) {
                         >
                           <Pencil size={14} /> Edit bill
                         </button>
-                        <button
-                          onClick={() => handleDelete(bill)}
-                          className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
-                        >
-                          <Trash2 size={14} /> Delete bill
-                        </button>
+                        <Gate right="delete_records">
+                          <button
+                            onClick={() => handleDelete(bill)}
+                            className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                          >
+                            <Trash2 size={14} /> Delete bill
+                          </button>
+                        </Gate>
                       </div>
                     </div>
                   )}
@@ -12605,6 +12735,27 @@ const ALT_GO = {
     );
   }
 
+
+  // which permission area each sidebar entry / ?view= value needs (convenience only - the server checks again)
+const VIEW_AREA = {
+  customers: "customers", items: "inventory", manage: "inventory",
+  quotes: "sales_documents", salesorders: "sales_documents", invoices: "invoices",
+  payments: "payments_in", creditnotes: "credit_notes",
+  vendors: "vendors", purchases: "purchase_bills", vendorpayments: "payments_out",
+  bill: "stock_bills", issued: "issued", inventory: "requests",
+  accounting: "chart_of_accounts", journals: "journals", banking: "banking", taxes: "taxes", reports: "reports",
+};
+function viewAllowed(id, can, hasRight, openMode) {
+      if (id === "users" || id === "audit")
+        return !openMode && can("users", "view") && hasRight("manage_users");
+  if (openMode) return true;
+  const area = VIEW_AREA[id];
+  if (!area) return true;                       // home, dashboard, unknown values
+  if (!can(area, "view")) return false;
+  if (id === "reports" && !hasRight("view_reports")) return false;
+  return true;
+}
+
 // ---------- Zoho-style shell + dashboard (admin) ----------
 // Sidebar sections, in order. A thin line is drawn between sections.
 const ZOHO_NAV = [
@@ -12638,11 +12789,16 @@ const ZOHO_NAV = [
     { id: "taxes", label: "Taxes", Icon: Percent },
     { id: "reports", label: "Reports", Icon: TrendingUp },
   ],
+  [
+    { id: "users", label: "Users & Roles", Icon: ShieldCheck },
+    { id: "audit", label: "Audit Log", Icon: ScrollText },
+  ],
 ];
 
 function ZohoSidebar({ onNavigate }) {
   const [params, setParams] = useSearchParams();
   const activeId = params.get("view") || "home";
+  const { can, hasRight, openMode } = useAuth();
 
   const go = (id) => {
     setParams(id === "home" ? {} : { view: id });
@@ -12664,25 +12820,32 @@ function ZohoSidebar({ onNavigate }) {
       </div>
 
       <nav className="flex-1 px-2 py-3">
-        {ZOHO_NAV.map((group, gi) => (
-          <div
-            key={gi}
-            className={gi > 0 ? "mt-2 pt-2 border-t border-white/10" : ""}
-          >
-            {group.map(({ id, label, Icon }) => (
-              <div key={id}>
-                <button
-                  onClick={() => go(id)}
-                  className={rowCls(activeId === id)}
-                >
-                  <Icon size={16} className="shrink-0" />
-                  <span className="flex-1 truncate">{label}</span>
-                </button>
-              </div>
-            ))}
-          </div>
-        ))}
+        {ZOHO_NAV.map((group, gi) => {
+          const items = group.filter((n) =>
+            viewAllowed(n.id, can, hasRight, openMode),
+          );
+          if (items.length === 0) return null;
+          return (
+            <div
+              key={gi}
+              className={gi > 0 ? "mt-2 pt-2 border-t border-white/10" : ""}
+            >
+              {items.map(({ id, label, Icon }) => (
+                <div key={id}>
+                  <button
+                    onClick={() => go(id)}
+                    className={rowCls(activeId === id)}
+                  >
+                    <Icon size={16} className="shrink-0" />
+                    <span className="flex-1 truncate">{label}</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          );
+        })}
       </nav>
+      <SidebarUser />
       <button
         onClick={() => window.dispatchEvent(new Event("app:help"))}
         className="m-2 px-3 py-2 rounded-md text-xs text-left text-gray-400 hover:bg-white/10 hover:text-white"
@@ -12706,19 +12869,55 @@ function ZohoLayout({ children }) {
           <div className="w-64 max-w-[80%] bg-[#1f2640] h-full overflow-y-auto">
             <ZohoSidebar onNavigate={() => setDrawer(false)} />
           </div>
-          <div className="flex-1 bg-black/40" onClick={() => setDrawer(false)} />
+          <div
+            className="flex-1 bg-black/40"
+            onClick={() => setDrawer(false)}
+          />
         </div>
       )}
 
       <div className="flex-1 min-w-0">
         <div className="md:hidden flex items-center gap-3 bg-[#1f2640] text-white px-4 py-3">
-          <button onClick={() => setDrawer(true)} aria-label="Open menu" className="p-1 -ml-1 rounded hover:bg-white/10">
+          <button
+            onClick={() => setDrawer(true)}
+            aria-label="Open menu"
+            className="p-1 -ml-1 rounded hover:bg-white/10"
+          >
             <Menu size={22} />
           </button>
           <span className="font-semibold">STD OPERATION</span>
+          <HeaderSignOut />
         </div>
         {children}
       </div>
+    </div>
+  );
+}
+// shown instead of the dashboard when the user may not see reports (e.g. Sales)
+function WelcomeHome({ go }) {
+  const { user, can, hasRight, openMode } = useAuth();
+  const links = ZOHO_NAV.flat().filter((n) => n.id !== "home" && viewAllowed(n.id, can, hasRight, openMode));
+  return (
+    <div className="p-4 sm:p-6">
+      <h1 className="text-xl font-semibold text-gray-900">Welcome{user ? `, ${user.full_name}` : ""}</h1>
+      <p className="text-sm text-gray-500 mt-1 mb-4">Pick where to start:</p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {links.map(({ id, label, Icon }) => (
+          <button key={id} onClick={() => go({ view: id })}
+            className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-800 hover:border-blue-500 hover:text-blue-600">
+            <Icon size={16} /> {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NoAccess() {
+  return (
+    <div className="p-6">
+      <h1 className="text-lg font-semibold text-gray-900">No access</h1>
+      <p className="text-sm text-gray-500 mt-1">Your role does not include this page. Ask an administrator if you need it.</p>
     </div>
   );
 }
@@ -13129,13 +13328,20 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
   );
 }
 
-// ---------- Picks home / items / etc., using the URL query ----------
-//   /?view=items                 -> flat item list (subitems nested)
-//   /?view=items&item=12         -> full item card
+
 function AppShell() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const isAdmin = location.pathname.startsWith("/admin");
+    const { openMode, can, hasRight } = useAuth();
+    // Login not enforced yet (AUTH_REQUIRED=false): keep the old behaviour. Enforced: decided by the role.
+    const isAdmin = openMode
+      ? location.pathname.startsWith("/admin")
+      : ACCOUNTING_AREAS.some((a) => can(a, "view"));
+    const viewParam = searchParams.get("view");
+    const viewBlocked =
+      !!viewParam && !viewAllowed(viewParam, can, hasRight, openMode);
+    const canDashboard =
+      openMode || (can("reports", "view") && hasRight("view_reports"));
   const [refreshToken, setRefreshToken] = useState(0);
   const refresh = () => setRefreshToken((n) => n + 1);
   const [quickBillToken, setQuickBillToken] = useState(0);
@@ -13144,110 +13350,120 @@ function AppShell() {
   const goNewBill = () => { setSearchParams({ view: "bill" }); setQuickBillToken((n) => n + 1); };
   const goNewIssued = () => { setSearchParams({ view: "issued" }); setQuickIssuedToken((n) => n + 1); };
 
-  let page;
-  if (searchParams.get("view") === "bill" && isAdmin) {
-    page = <BillPage go={setSearchParams} autoCreateToken={quickBillToken} />;
-  } else if (searchParams.get("view") === "issued" && isAdmin) {
-    page = (
-      <IssuedPage go={setSearchParams} autoCreateToken={quickIssuedToken} />
-    );
-  } else if (searchParams.get("view") === "accounting" && isAdmin) {
-    page = searchParams.get("account") ? (
-      <AccountDetail
-        accountId={searchParams.get("account")}
-        go={setSearchParams}
-        fromParam={searchParams.get("from")}
-      />
-    ) : (
-      <AccountingPage isAdmin={isAdmin} go={setSearchParams} />
-    );
-  } else if (searchParams.get("view") === "journals" && isAdmin) {
-    page = <JournalsPage isAdmin={isAdmin} go={setSearchParams} />;
-  } else if (searchParams.get("view") === "customers" && isAdmin) {
-    page = <CustomersPage isAdmin={isAdmin} go={setSearchParams} />;
-  } else if (searchParams.get("view") === "quotes" && isAdmin) {
-    page = (
-      <SalesDocumentsPage
-        key="quote"
-        isAdmin={isAdmin}
-        go={setSearchParams}
-        docType="quote"
-      />
-    );
-  } else if (searchParams.get("view") === "salesorders" && isAdmin) {
-    page = (
-      <SalesDocumentsPage
-        key="sales_order"
-        isAdmin={isAdmin}
-        go={setSearchParams}
-        docType="sales_order"
-      />
-    );
-  } else if (searchParams.get("view") === "creditnotes" && isAdmin) {
-    page = <CreditNotesPage isAdmin={isAdmin} go={setSearchParams} />;
-  } else if (searchParams.get("view") === "invoices" && isAdmin) {
-    page = <InvoicesPage isAdmin={isAdmin} go={setSearchParams} />;
-  } else if (searchParams.get("view") === "payments" && isAdmin) {
-    page = <PaymentsPage isAdmin={isAdmin} go={setSearchParams} />;
-  } else if (searchParams.get("view") === "purchases" && isAdmin) {
-    page = <PurchaseBillsPage isAdmin={isAdmin} go={setSearchParams} />;
-  } else if (searchParams.get("view") === "vendorpayments" && isAdmin) {
-    page = <VendorPaymentsPage isAdmin={isAdmin} go={setSearchParams} />;
-  } else if (searchParams.get("view") === "taxes" && isAdmin) {
-    page = <TaxesPage isAdmin={isAdmin} go={setSearchParams} />;
-  } else if (searchParams.get("view") === "banking" && isAdmin) {
-    page = (
-      <BankingPage
-        isAdmin={isAdmin}
-        go={setSearchParams}
-        accountId={searchParams.get("account")}
-        reconcile={searchParams.get("reconcile")}
-      />
-    );
-  } else if (searchParams.get("view") === "reports" && isAdmin) {
-    page = <ReportsPage isAdmin={isAdmin} go={setSearchParams} />;
-  } else if (searchParams.get("view") === "dashboard" && isAdmin) {
-    page = (
-      <ZohoDashboard
-        isAdmin={isAdmin}
-        go={setSearchParams}
-        onProductAdded={refresh}
-      />
-    );
-  } else if (searchParams.get("view") === "vendors" && isAdmin) {
-    page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
-  } else if (searchParams.get("view") === "manage" && isAdmin) {
-    page = (
-      <ManagePage
-        go={setSearchParams}
-        refreshToken={refreshToken}
-        onProductAdded={refresh}
-      />
-    );
-  } else if (searchParams.get("view") === "inventory" && isAdmin) {
-    page = <InventoryView isAdmin={isAdmin} onBack={() => setSearchParams({})} />;
-  } else if (searchParams.get("view") === "items") {
-    page = (
-      <ItemsPage
-        isAdmin={isAdmin}
-        itemId={searchParams.get("item")}
-        fromParam={searchParams.get("from")}
-        go={setSearchParams}
-        refreshToken={refreshToken}
-        onProductAdded={refresh}
-      />
-    );
-  } else if (isAdmin) {
-    page = (
-      <ZohoDashboard
-        isAdmin={isAdmin}
-        go={setSearchParams}
-        onProductAdded={refresh}
-      />
-    );
-  } else {
-    page = <InventoryView isAdmin={isAdmin} />;
-  }
+    let page;
+    if (viewBlocked) {
+      page = <NoAccess />;
+    } else if (searchParams.get("view") === "bill" && isAdmin) {
+      page = <BillPage go={setSearchParams} autoCreateToken={quickBillToken} />;
+    } else if (searchParams.get("view") === "issued" && isAdmin) {
+      page = (
+        <IssuedPage go={setSearchParams} autoCreateToken={quickIssuedToken} />
+      );
+    } else if (searchParams.get("view") === "accounting" && isAdmin) {
+      page = searchParams.get("account") ? (
+        <AccountDetail
+          accountId={searchParams.get("account")}
+          go={setSearchParams}
+          fromParam={searchParams.get("from")}
+        />
+      ) : (
+        <AccountingPage isAdmin={isAdmin} go={setSearchParams} />
+      );
+    } else if (searchParams.get("view") === "journals" && isAdmin) {
+      page = <JournalsPage isAdmin={isAdmin} go={setSearchParams} />;
+    } else if (searchParams.get("view") === "customers" && isAdmin) {
+      page = <CustomersPage isAdmin={isAdmin} go={setSearchParams} />;
+    } else if (searchParams.get("view") === "quotes" && isAdmin) {
+      page = (
+        <SalesDocumentsPage
+          key="quote"
+          isAdmin={isAdmin}
+          go={setSearchParams}
+          docType="quote"
+        />
+      );
+    } else if (searchParams.get("view") === "salesorders" && isAdmin) {
+      page = (
+        <SalesDocumentsPage
+          key="sales_order"
+          isAdmin={isAdmin}
+          go={setSearchParams}
+          docType="sales_order"
+        />
+      );
+    } else if (searchParams.get("view") === "creditnotes" && isAdmin) {
+      page = <CreditNotesPage isAdmin={isAdmin} go={setSearchParams} />;
+    } else if (searchParams.get("view") === "invoices" && isAdmin) {
+      page = <InvoicesPage isAdmin={isAdmin} go={setSearchParams} />;
+    } else if (searchParams.get("view") === "payments" && isAdmin) {
+      page = <PaymentsPage isAdmin={isAdmin} go={setSearchParams} />;
+    } else if (searchParams.get("view") === "purchases" && isAdmin) {
+      page = <PurchaseBillsPage isAdmin={isAdmin} go={setSearchParams} />;
+    } else if (searchParams.get("view") === "vendorpayments" && isAdmin) {
+      page = <VendorPaymentsPage isAdmin={isAdmin} go={setSearchParams} />;
+    } else if (searchParams.get("view") === "taxes" && isAdmin) {
+      page = <TaxesPage isAdmin={isAdmin} go={setSearchParams} />;
+    } else if (searchParams.get("view") === "banking" && isAdmin) {
+      page = (
+        <BankingPage
+          isAdmin={isAdmin}
+          go={setSearchParams}
+          accountId={searchParams.get("account")}
+          reconcile={searchParams.get("reconcile")}
+        />
+      );
+    } else if (searchParams.get("view") === "reports" && isAdmin) {
+      page = <ReportsPage isAdmin={isAdmin} go={setSearchParams} />;
+    } else if (searchParams.get("view") === "dashboard" && isAdmin) {
+      page = (
+        <ZohoDashboard
+          isAdmin={isAdmin}
+          go={setSearchParams}
+          onProductAdded={refresh}
+        />
+      );
+    } else if (searchParams.get("view") === "vendors" && isAdmin) {
+      page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
+    } else if (searchParams.get("view") === "manage" && isAdmin) {
+      page = (
+        <ManagePage
+          go={setSearchParams}
+          refreshToken={refreshToken}
+          onProductAdded={refresh}
+        />
+      );
+    } else if (searchParams.get("view") === "inventory" && isAdmin) {
+      page = (
+        <InventoryView isAdmin={isAdmin} onBack={() => setSearchParams({})} />
+      );
+    } else if (searchParams.get("view") === "users") {
+      page = <UsersAdminPage />;
+    } else if (searchParams.get("view") === "audit") {
+      page = <AuditLogPage />;
+    } else if (searchParams.get("view") === "items") {
+      page = (
+        <ItemsPage
+          isAdmin={isAdmin}
+          itemId={searchParams.get("item")}
+          fromParam={searchParams.get("from")}
+          go={setSearchParams}
+          refreshToken={refreshToken}
+          onProductAdded={refresh}
+        />
+      );
+    } else if (isAdmin && canDashboard) {
+      page = (
+        <ZohoDashboard
+          isAdmin={isAdmin}
+          go={setSearchParams}
+          onProductAdded={refresh}
+        />
+      );
+    } else if (isAdmin) {
+      page = <WelcomeHome go={setSearchParams} />;
+    } else {
+      page = <InventoryView isAdmin={isAdmin} />;
+    }
 
   return (
     <>
@@ -13259,6 +13475,8 @@ function AppShell() {
         onNewIssued={goNewIssued}
       />
       <ThemePanel />
+      <ProfileModal />
+      {!isAdmin && <FloatingSignOut />}
     </>
   );
 }
@@ -13266,12 +13484,16 @@ function AppShell() {
 // ---------- App with routes ----------
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<AppShell />} />
-      <Route path="/admin" element={<AppShell />} />
-      <Route path="/admin.html" element={<AppShell />} />
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+    <AuthProvider>
+      <AuthGate>
+        <Routes>
+          <Route path="/" element={<AppShell />} />
+          <Route path="/admin" element={<AppShell />} />
+          <Route path="/admin.html" element={<AppShell />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </AuthGate>
+    </AuthProvider>
   );
 }
 
@@ -13285,4 +13507,5 @@ function NotFound() {
       </div>
     </div>
   );
+
 }

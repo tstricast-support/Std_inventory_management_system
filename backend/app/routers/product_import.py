@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, joinedload
 from .. import models
 from ..database import get_db
 from ..imagekit_client import upload_image, delete_image
+from ..upload_checks import check_image_count, read_import_file, validate_image
 
 router = APIRouter(prefix="/api/product-import", tags=["product-import"])
 
@@ -83,11 +84,7 @@ def _to_int(v, field, allow_blank=False):
 
 def _read_rows(upload: UploadFile) -> List[dict]:
     """Returns [{'_row': excel_row_number, key: raw_value, ...}] using the header row."""
-    name = (upload.filename or "").lower()
-    data = upload.file.read()
-    if not data:
-        raise HTTPException(400, "The file is empty")
-
+    name, data = read_import_file(upload)   
     if name.endswith(".csv"):
         text = data.decode("utf-8-sig", errors="replace")
         raw = list(csv.reader(io.StringIO(text)))
@@ -326,6 +323,7 @@ def bulk_upload_images(
     replace_existing: bool = Form(False),
     db: Session = Depends(get_db),
 ):
+    check_image_count(images, bulk=True)
     products = db.query(models.Product).options(joinedload(models.Product.images)).all()
     by_sku = {p.sku.strip().lower(): p for p in products if p.sku}
     by_name = {}
@@ -349,8 +347,10 @@ def bulk_upload_images(
     cleared = set()
     for img in images:
         fname = img.filename or ""
-        if not (img.content_type or "").startswith("image/"):
-            failed.append({"file": fname, "message": "Not an image"})
+        try:
+            safe_name = validate_image(img)
+        except HTTPException as e:
+            failed.append({"file": fname, "message": e.detail})
             continue
         product = find(fname)
         if not product:
@@ -367,7 +367,7 @@ def bulk_upload_images(
                 db.flush()
                 product.images = []
                 cleared.add(product.id)
-            url, file_id = upload_image(img.file.read(), fname)
+            url, file_id = upload_image(img.file.read(), safe_name)
             has_primary = any(i.is_primary for i in product.images)
             new_img = models.ProductImage(
                 product_id=product.id, image_url=url, file_id=file_id, is_primary=not has_primary,

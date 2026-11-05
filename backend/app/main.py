@@ -1,9 +1,14 @@
-from fastapi import FastAPI
+import os
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 from app.account_types import DEFAULT_ACCOUNTS
 from app.database import Base, engine
-from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments,sales_documents,credit_notes,taxes,banking,reports,dashboard,product_import
+from app.auth import IS_PRODUCTION, require_area, validate_auth_settings
+from app.security import SecurityMiddleware
+import app.audit_events  
+from app.auth_setup import seed_system_roles, bootstrap_owner
+from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments,sales_documents,credit_notes,taxes,banking,reports,dashboard,product_import,auth,users,audit_log
 Base.metadata.create_all(bind=engine) 
 
 
@@ -98,6 +103,28 @@ def seed_tax_accounts():
 
 seed_tax_accounts()
 
+def add_created_by_columns():
+    """Login system: add a nullable created_by_id to every record type that should remember who made it."""
+    tables = [
+        "invoices", "payments", "journals", "purchase_bills", "vendor_payments",
+        "sales_documents", "credit_notes", "bills", "issued_lists",
+    ]
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in tables:
+            existing = [c["name"] for c in insp.get_columns(table)]
+            if "created_by_id" not in existing:
+                conn.execute(text(
+                    f"ALTER TABLE {table} ADD COLUMN created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL"
+                ))
+
+
+add_created_by_columns()
+
+validate_auth_settings()
+seed_system_roles()
+bootstrap_owner()
+
 
 # Category was removed in favor of QuickBooks-style "Subitem of" (parent_id).
 # Nothing in the app reads products.category_id or the categories table anymore,
@@ -110,49 +137,71 @@ seed_tax_accounts()
 # unused column is worth for a column nothing writes to or reads anymore.
 
 app = FastAPI(
-    title="STD Stock Manager API",
-    version="1.0.0"
+    title="STD OPERATIONS API",
+    version="1.0.0",
+    # no interactive API docs on the live server
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc",
+    openapi_url=None if IS_PRODUCTION else "/openapi.json",
 )
+
+# Allowed browser origins come from CORS_ORIGINS (comma separated). The localhost regex exists only outside production.
+_cors_env = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+_live_origin = "https://stdinventorymanagementsystem-production.up.railway.app"
+_cors_origins = _cors_env or ([_live_origin] if IS_PRODUCTION else [_live_origin, "http://localhost:8000"])
+
+
+
+app.add_middleware(SecurityMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://stdinventorymanagementsystem-production.up.railway.app",
-        "http://localhost:8000",
-    ],
-    # any localhost / 127.0.0.1 port (Vite moves to 5174, 5175... when 5173 is busy)
-    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
+    allow_origins=_cors_origins,
+    # any localhost / 127.0.0.1 port (Vite moves to 5174, 5175... when 5173 is busy) - development only
+    allow_origin_regex=None if IS_PRODUCTION else r"^http://(localhost|127\.0\.0\.1):\d+$",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
-app.include_router(products.router)
-app.include_router(requests.router)
-app.include_router(stock_movements.router)
-app.include_router(bills.router)
-app.include_router(issued.router)
-app.include_router(vendors.router)
-app.include_router(accounts.router)
-app.include_router(customers.router)
-app.include_router(journals.router)
-app.include_router(invoices.router)
-app.include_router(payments.router)
-app.include_router(purchase_bills.router)
-app.include_router(vendor_payments.router)
-app.include_router(sales_documents.router)
-app.include_router(credit_notes.router)
-app.include_router(taxes.router)
-app.include_router(banking.router)
-app.include_router(reports.router)
-app.include_router(dashboard.router)  
-app.include_router(product_import.router)   
+
+def guard(area: str):
+    """Every business router gets one of these. With AUTH_REQUIRED=false it lets everything through."""
+    return [Depends(require_area(area))]
+
+
+app.include_router(auth.router)   # login / refresh / logout live here and are NOT guarded by an area
+app.include_router(products.router, dependencies=guard("inventory"))
+app.include_router(product_import.router, dependencies=guard("inventory"))
+app.include_router(stock_movements.router, dependencies=guard("inventory"))
+app.include_router(requests.router, dependencies=guard("requests"))
+app.include_router(issued.router, dependencies=guard("issued"))
+app.include_router(bills.router, dependencies=guard("stock_bills"))
+app.include_router(customers.router, dependencies=guard("customers"))
+app.include_router(vendors.router, dependencies=guard("vendors"))
+app.include_router(sales_documents.router, dependencies=guard("sales_documents"))
+app.include_router(invoices.router, dependencies=guard("invoices"))
+app.include_router(credit_notes.router, dependencies=guard("credit_notes"))
+app.include_router(payments.router, dependencies=guard("payments_in"))
+app.include_router(purchase_bills.router, dependencies=guard("purchase_bills"))
+app.include_router(vendor_payments.router, dependencies=guard("payments_out"))
+app.include_router(accounts.router, dependencies=guard("chart_of_accounts"))
+app.include_router(journals.router, dependencies=guard("journals"))
+app.include_router(banking.router, dependencies=guard("banking"))
+app.include_router(taxes.router, dependencies=guard("taxes"))
+app.include_router(reports.router, dependencies=guard("reports"))
+app.include_router(dashboard.router, dependencies=guard("reports"))
+app.include_router(users.router, dependencies=guard("users"))
+app.include_router(users.roles_router, dependencies=guard("users"))
+app.include_router(audit_log.router, dependencies=guard("users"))
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
 
 @app.get("/")
 def root():
-    return {"message": "STD Stock Manager API is running"}
+    return {"message": "STD OPERATIONS API is running"}
 
 
-@app.get("/api/test")
-def test():
-    return {"message": "Backend connection successful!"}

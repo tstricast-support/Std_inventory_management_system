@@ -5,6 +5,7 @@ from typing import Optional, List
 from .. import models, schemas
 from ..database import get_db
 from ..imagekit_client import upload_image, delete_image
+from ..upload_checks import check_image_count, validate_image
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
@@ -60,6 +61,9 @@ def create_product(
     db: Session = Depends(get_db),
 ):
 
+    check_image_count(images)
+    safe_names = [validate_image(img) for img in images]   # refuse bad pictures BEFORE the item is saved
+
     if parent_id is not None:
         parent = db.query(models.Product).get(parent_id)
         if not parent:
@@ -79,7 +83,7 @@ def create_product(
 
     for idx, img in enumerate(images):
         file_bytes = img.file.read()
-        url, file_id = upload_image(file_bytes, img.filename)
+        url, file_id = upload_image(file_bytes, safe_names[idx])
         db.add(models.ProductImage(
             product_id=product.id,
             image_url=url,
@@ -174,13 +178,12 @@ def add_product_images(
 ):
     product = _load_product(db, product_id)
 
-    for img in images:
-        if not (img.content_type or "").startswith("image/"):
-            raise HTTPException(400, f'"{img.filename}" is not an image')
+    check_image_count(images)
+    safe_names = [validate_image(img) for img in images]   # real picture? small enough? checked before anything is saved
 
     has_primary = any(i.is_primary for i in product.images)
-    for img in images:
-        url, file_id = upload_image(img.file.read(), img.filename)
+    for img, safe_name in zip(images, safe_names):
+        url, file_id = upload_image(img.file.read(), safe_name)
         db.add(models.ProductImage(
             product_id=product.id,
             image_url=url,
