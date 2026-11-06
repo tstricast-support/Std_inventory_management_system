@@ -183,3 +183,23 @@ html[data-theme] [class*="1f2640"] .bg-white {
     margin: 10mm;
   }
 }
+
+/* installed desktop app: no title-bar icon/text, keep the window buttons */
+@media (display-mode: window-controls-overlay) {
+  body {
+    padding-top: env(titlebar-area-height, 0px);
+  }
+
+  /* empty strip at the top that you can drag the window by */
+  body::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: env(titlebar-area-height, 0px);
+    -webkit-app-region: drag;
+    app-region: drag;
+    z-index: 0;
+  }
+}
