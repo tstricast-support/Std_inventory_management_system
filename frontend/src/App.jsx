@@ -17100,6 +17100,7 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
   const [tab, setTab] = useState("dashboard");
   const { data, loading, error } = useReport(() => getDashboard(year), [year]);
   const [layout, updateLayout, resetLayout] = useDashboardLayout();
+  const { user } = useAuth();
   const [panelOpen, setPanelOpen] = useState(false);
 
   const tabs = [
@@ -17258,7 +17259,7 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
           </div>
           <div className="min-w-0">
             <h1 className="text-xl font-medium text-gray-900 truncate">
-              Hello, Admin
+              Hello, {user?.full_name || "Admin"}
             </h1>
             <p className="text-sm text-gray-500 truncate">STD OPERATION</p>
           </div>
