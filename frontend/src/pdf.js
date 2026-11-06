@@ -222,6 +222,15 @@ export async function downloadInvoicePdf(inv, customer, asFile = false) {
     ],
     items: lines(inv.items),
     totals: [
+      ...(Number(inv.discount_amount) > 0
+        ? [
+            ["Subtotal", money(inv.subtotal)],
+            [
+              inv.discount_type === "percent" ? `Discount (${Number(inv.discount_value)}%)` : "Discount",
+              `- ${money(inv.discount_amount)}`,
+            ],
+          ]
+        : []),
       ["Total", money(inv.total)],
       ["Paid", money(inv.amount_paid)],
       ["Balance due", money(inv.balance_due), true],

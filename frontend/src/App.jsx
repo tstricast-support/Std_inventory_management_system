@@ -8667,6 +8667,14 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
   const [notes, setNotes] = useState(
     editInvoice?.notes || fromDoc?.notes || "",
   );
+    const [discountType, setDiscountType] = useState(
+      editInvoice?.discount_type || "amount",
+    ); // "amount" (Rs) or "percent"
+    const [discountValue, setDiscountValue] = useState(
+      editInvoice && Number(editInvoice.discount_value) > 0
+        ? String(editInvoice.discount_value)
+        : "",
+    );
   const [lines, setLines] = useState(
     editInvoice && editInvoice.items.some((l) => l.product_id)
       ? editInvoice.items
@@ -8900,6 +8908,16 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
   const filled = lines.filter((l) => l.product_id);
   const lineCents = (l) => (Number(l.quantity) || 0) * toCents(l.rate);
   const totalCents = filled.reduce((s, l) => s + lineCents(l), 0);
+  const discountNum = Number(discountValue) || 0;
+  const discountCents =
+    discountType === "percent"
+      ? Math.round((totalCents * discountNum) / 100)
+      : toCents(discountValue);
+  const discountOk =
+    discountNum >= 0 &&
+    (discountType !== "percent" || discountNum <= 100) &&
+    discountCents <= totalCents;
+  const netCents = totalCents - discountCents; // what the customer owes
   const canSave =
     Boolean(customerId) &&
     filled.length > 0 &&
@@ -8909,7 +8927,8 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
         Number(l.quantity) > 0 &&
         toCents(l.rate) >= 0,
     ) &&
-    totalCents > 0 &&
+    netCents > 0 &&
+    discountOk &&
     effectiveDue >= date;
 
   const canPreview = Boolean(customerId) && filled.length > 0;
@@ -8929,9 +8948,13 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
         order_number: orderNumber.trim() || null,
         notes: notes.trim() || null,
         status: "open",
-        total: totalCents / 100,
+        subtotal: totalCents / 100,
+        discount_type: discountType,
+        discount_value: discountNum,
+        discount_amount: discountCents / 100,
+        total: netCents / 100,
         amount_paid: 0,
-        balance_due: totalCents / 100,
+        balance_due: netCents / 100,
         items: filled.map((l) => ({
           item_name: itemById[l.product_id]?.name || "",
           description: l.description.trim() || null,
@@ -8966,6 +8989,8 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
         due_date: effectiveDue,
         order_number: orderNumber.trim() || null,
         notes: notes.trim() || null,
+        discount_type: discountType,
+        discount_value: discountNum,
         items: filled.map((l) => ({
           product_id: l.product_id,
           description: l.description.trim() || null,
@@ -9235,13 +9260,54 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
             className={cls}
           />
 
-          <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
-            <span>Total</span>
-            <span>{formatRs(totalCents / 100)}</span>
+          <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-2">
+            <div className="flex justify-between text-gray-600">
+              <span>Subtotal</span>
+              <span>{formatRs(totalCents / 100)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-gray-600">Discount</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={discountValue}
+                  onChange={(e) => setDiscountValue(e.target.value)}
+                  placeholder="0"
+                  className={`w-28 border rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500 ${discountOk ? "border-gray-300" : "border-red-400"}`}
+                />
+                <select
+                  value={discountType}
+                  onChange={(e) => setDiscountType(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
+                >
+                  <option value="amount">Rs.</option>
+                  <option value="percent">%</option>
+                </select>
+              </div>
+            </div>
+            {discountCents > 0 && discountOk && (
+              <div className="flex justify-between text-gray-600">
+                <span>
+                  Discount
+                  {discountType === "percent" ? ` (${discountNum}%)` : ""}
+                </span>
+                <span>- {formatRs(discountCents / 100)}</span>
+              </div>
+            )}
+            {!discountOk && (
+              <p className="text-xs text-red-500">
+                The discount can't be more than the subtotal (or 100%).
+              </p>
+            )}
+            <div className="flex justify-between font-semibold border-t border-gray-200 pt-2">
+              <span>Total</span>
+              <span>{formatRs(netCents / 100)}</span>
+            </div>
           </div>
 
           <div className="flex gap-2 pt-2">
-
             <button
               type="button"
               onClick={handlePreview}

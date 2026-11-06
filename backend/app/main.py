@@ -74,6 +74,23 @@ def add_reconciliation_column():
 
 add_reconciliation_column()
 
+
+def add_invoice_discount_columns():
+    """Invoice discount: add the three discount columns to existing databases."""
+    existing = [c["name"] for c in inspect(engine).get_columns("invoices")]
+    new_columns = {
+        "discount_type": "VARCHAR(10) NOT NULL DEFAULT 'amount'",
+        "discount_value": "NUMERIC(12,2) NOT NULL DEFAULT 0",
+        "discount_amount": "NUMERIC(12,2) NOT NULL DEFAULT 0",
+    }
+    with engine.begin() as conn:
+        for col, ddl in new_columns.items():
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE invoices ADD COLUMN {col} {ddl}"))
+
+
+add_invoice_discount_columns()
+
 def seed_default_accounts():
     """First start after the chart-of-accounts upgrade: add Zoho-style default accounts once."""
     with engine.begin() as conn:

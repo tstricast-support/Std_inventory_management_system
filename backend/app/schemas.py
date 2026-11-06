@@ -332,6 +332,8 @@ class InvoiceCreate(BaseModel):
     order_number: Optional[str] = None
     notes: Optional[str] = None
     items: List[InvoiceItemCreate]
+    discount_type: str = "amount"        # "amount" (Rs) or "percent"
+    discount_value: float = 0
     sales_document_id: Optional[int] = None   # set when this invoice is made from a quote / sales order
 
 class InvoiceProductOut(BaseModel):
@@ -364,6 +366,10 @@ class InvoiceOut(BaseModel):
     notes: Optional[str] = None
     status: str
     total: float
+    subtotal: float
+    discount_type: str
+    discount_value: float
+    discount_amount: float
     amount_paid: float
     balance_due: float
     created_at: datetime

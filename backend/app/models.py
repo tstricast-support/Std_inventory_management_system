@@ -251,6 +251,9 @@ class Invoice(Base):
     notes = Column(Text)
     status = Column(String(20), nullable=False, default="open", server_default="open")  # open / void
     total = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    discount_type = Column(String(10), nullable=False, default="amount", server_default="amount")   # amount / percent
+    discount_value = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")          # what was typed (Rs or %)
+    discount_amount = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")         # the discount in Rs
     amount_paid = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")  # step 4 (payments) fills this
     created_at = Column(TIMESTAMP, server_default=func.now())
 
@@ -267,6 +270,10 @@ class Invoice(Base):
         if self.status == "void":
             return 0.0
         return float(self.total or 0) - float(self.amount_paid or 0)
+    
+    @property
+    def subtotal(self):
+        return float(self.total or 0) + float(self.discount_amount or 0)
 
 
 class InvoiceItem(Base):

@@ -16,6 +16,40 @@ def _money(value) -> Decimal:
     return Decimal(str(value or 0)).quantize(CENT, ROUND_HALF_UP)
 
 
+def _calc_discount(subtotal: Decimal, discount_type, discount_value):
+    """Validates the invoice discount and returns (type, value typed in, discount in money)."""
+    kind = (discount_type or "amount").strip().lower()
+    if kind not in ("amount", "percent"):
+        raise HTTPException(400, "Discount type must be 'amount' or 'percent'")
+    value = _money(discount_value)
+    if value < 0:
+        raise HTTPException(400, "The discount can't be negative")
+    if kind == "percent":
+        if value > 100:
+            raise HTTPException(400, "The discount can't be more than 100%")
+        amount = (subtotal * value / Decimal("100")).quantize(CENT, ROUND_HALF_UP)
+    else:
+        amount = value
+    if amount > subtotal:
+        raise HTTPException(400, "The discount can't be more than the invoice subtotal")
+    return kind, value, amount
+
+
+def _split_discount(income: dict[int, Decimal], discount: Decimal) -> dict[int, Decimal]:
+    """Shares the discount between the income accounts in proportion to what each one earned on this invoice."""
+    shares: dict[int, Decimal] = {}
+    gross = sum(income.values(), Decimal("0"))
+    if discount <= 0 or gross <= 0:
+        return shares
+    left = discount
+    ids = list(income)
+    for i, account_id in enumerate(ids):
+        share = left if i == len(ids) - 1 else (discount * income[account_id] / gross).quantize(CENT, ROUND_HALF_UP)
+        left -= share
+        shares[account_id] = share
+    return shares
+
+
 def _options():
     return (
         joinedload(models.Invoice.customer),
@@ -153,6 +187,10 @@ def create_invoice(payload: schemas.InvoiceCreate, db: Session = Depends(get_db)
             cogs[cogs_id] = cogs.get(cogs_id, Decimal("0")) + cost
             stock[asset_id] = stock.get(asset_id, Decimal("0")) + cost
 
+    subtotal = total
+    d_type, d_value, discount = _calc_discount(subtotal, payload.discount_type, payload.discount_value)
+    total = subtotal - discount
+
     if total <= 0:
         raise HTTPException(400, "The invoice total must be greater than 0")
 
@@ -166,6 +204,9 @@ def create_invoice(payload: schemas.InvoiceCreate, db: Session = Depends(get_db)
         notes=(payload.notes or "").strip() or None,
         status="open",
         total=total,
+        discount_type=d_type,
+        discount_value=d_value,
+        discount_amount=discount,
         amount_paid=0,
         items=invoice_lines,
     )
@@ -186,6 +227,9 @@ def create_invoice(payload: schemas.InvoiceCreate, db: Session = Depends(get_db)
     )]
     for account_id, amount in income.items():
         journal_lines.append(models.JournalLine(account_id=account_id, debit=0, credit=amount, description=f"Sales {number}"))
+    for account_id, share in _split_discount(income, discount).items():
+        if share > 0:
+            journal_lines.append(models.JournalLine(account_id=account_id, debit=share, credit=0, description=f"Discount {number}"))
     for account_id, amount in cogs.items():
         journal_lines.append(models.JournalLine(account_id=account_id, debit=amount, credit=0, description=f"Cost of sales {number}"))
     for account_id, amount in stock.items():
@@ -289,6 +333,10 @@ def update_invoice(invoice_id: int, payload: schemas.InvoiceCreate, db: Session 
             cogs[cogs_id] = cogs.get(cogs_id, Decimal("0")) + cost
             stock[asset_id] = stock.get(asset_id, Decimal("0")) + cost
 
+    subtotal = total
+    d_type, d_value, discount = _calc_discount(subtotal, payload.discount_type, payload.discount_value)
+    total = subtotal - discount
+
     if total <= 0:
         raise HTTPException(400, "The invoice total must be greater than 0")
 
@@ -312,6 +360,9 @@ def update_invoice(invoice_id: int, payload: schemas.InvoiceCreate, db: Session 
     invoice.order_number = (payload.order_number or "").strip() or None
     invoice.notes = (payload.notes or "").strip() or None
     invoice.total = total
+    invoice.discount_type = d_type
+    invoice.discount_value = d_value
+    invoice.discount_amount = discount
 
     journal_lines = [models.JournalLine(
         account_id=_receivable_account(db).id, debit=total, credit=0,
@@ -319,6 +370,9 @@ def update_invoice(invoice_id: int, payload: schemas.InvoiceCreate, db: Session 
     )]
     for account_id, amount in income.items():
         journal_lines.append(models.JournalLine(account_id=account_id, debit=0, credit=amount, description=f"Sales {number}"))
+    for account_id, share in _split_discount(income, discount).items():
+        if share > 0:
+            journal_lines.append(models.JournalLine(account_id=account_id, debit=share, credit=0, description=f"Discount {number}"))
     for account_id, amount in cogs.items():
         journal_lines.append(models.JournalLine(account_id=account_id, debit=amount, credit=0, description=f"Cost of sales {number}"))
     for account_id, amount in stock.items():
