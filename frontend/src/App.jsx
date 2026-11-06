@@ -8643,65 +8643,68 @@ function CustomersPage({ isAdmin, go }) {
 
       <main className="p-4 sm:p-6 w-full max-w-6xl flex items-start gap-6">
         <div className="flex-1 min-w-0 max-w-3xl">
-        <div className="mb-5 flex gap-3 items-center">
-          <div className="flex-1">
-            <SearchBox
-              value={search}
-              onChange={setSearch}
-              placeholder="Search customers..."
-            />
+          <div className="mb-5 flex gap-3 items-center">
+            <div className="flex-1">
+              <SearchBox
+                value={search}
+                onChange={setSearch}
+                placeholder="Search customers..."
+              />
+            </div>
+            <button
+              onClick={() => {
+                setEditing(null);
+                setFormOpen(true);
+              }}
+              className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
+            >
+              + New Customer
+            </button>
           </div>
-          <button
-            onClick={() => {
-              setEditing(null);
-              setFormOpen(true);
-            }}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
-          >
-            + New Customer
-          </button>
-        </div>
 
-        {loading ? (
-          <p className="text-gray-400 text-center py-16">Loading...</p>
-        ) : error ? (
-          <p className="text-red-500 text-center py-16">{error}</p>
-        ) : shown.length === 0 ? (
-          <p className="text-gray-400 text-center py-16">No customers yet.</p>
-        ) : (
-          <div className="space-y-2">
-            {shown.map((c) => (
-              <div
-                key={c.id}
-                className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-gray-900 truncate">
-                    {c.display_name}
-                  </p>
-                  <p className="text-xs text-gray-400 truncate">
-                    {[c.company_name, c.email, c.phone]
-                      .filter(Boolean)
-                      .join(" · ") || "No contact details"}
-                  </p>
+          {loading ? (
+            <p className="text-gray-400 text-center py-16">Loading...</p>
+          ) : error ? (
+            <p className="text-red-500 text-center py-16">{error}</p>
+          ) : shown.length === 0 ? (
+            <p className="text-gray-400 text-center py-16">No customers yet.</p>
+          ) : (
+            <div className="space-y-2 lg:space-y-1">
+              {" "}
+              {shown.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 lg:py-1 lg:px-3"
+                >
+                  <div className="flex-1 min-w-0 lg:flex lg:items-center lg:gap-4">
+                    <p className="font-medium text-gray-900 truncate lg:w-56 lg:shrink-0 lg:text-sm">
+                      {c.display_name}
+                    </p>
+                    <p className="text-xs text-gray-400 truncate lg:flex-1 lg:min-w-0">
+                      {[c.company_name, c.email, c.phone]
+                        .filter(Boolean)
+                        .join(" · ") || "No contact details"}
+                    </p>
+                  </div>
+                  <div className="text-right text-xs text-gray-500 hidden sm:block lg:flex lg:items-center lg:gap-4 lg:whitespace-nowrap">
+                    <p>{c.payment_terms}</p>
+                    <p>Opening: {formatRs(c.opening_balance)}</p>
+                  </div>
+                  <ItemActionsMenu
+                    onEdit={() => {
+                      setEditing(c);
+                      setFormOpen(true);
+                    }}
+                    onDelete={() => setDeleteTarget(c)}
+                  />
                 </div>
-                <div className="text-right text-xs text-gray-500 hidden sm:block">
-                  <p>{c.payment_terms}</p>
-                  <p>Opening: {formatRs(c.opening_balance)}</p>
-                </div>
-                <ItemActionsMenu
-                  onEdit={() => {
-                    setEditing(c);
-                    setFormOpen(true);
-                  }}
-                  onDelete={() => setDeleteTarget(c)}
-                />
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
         </div>
-        <DesktopOnly><TopBuyersPanel /></DesktopOnly>
+        <DesktopOnly>
+          <TopBuyersPanel />
+        </DesktopOnly>
       </main>
 
       {formOpen && (
