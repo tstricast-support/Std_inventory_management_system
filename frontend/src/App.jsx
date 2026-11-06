@@ -5253,7 +5253,8 @@ function ItemsPage({
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 w-full max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-6xl flex items-start gap-6">
+        <div className="flex-1 min-w-0 max-w-3xl">
         <div className="mb-5">
           <SearchBox
             value={search}
@@ -5293,6 +5294,8 @@ function ItemsPage({
             ))}
           </div>
         )}
+          </div>
+        <DesktopOnly><TopSoldItemsPanel /></DesktopOnly>
       </main>
 
       {restockingProduct && (
@@ -8435,6 +8438,152 @@ const CUSTOMER_TERMS = [
   "Net 60",
 ];
 
+// ---------- Monthly top-sellers side panels (Customers page + Items page, desktop only) ----------
+function useIsDesktop(minWidth = 1024) {
+  const query = `(min-width: ${minWidth}px)`;
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const onChange = (e) => setMatches(e.matches);
+    setMatches(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [query]);
+  return matches;
+}
+
+// renders its children only on desktop screens, so phones never even load the data
+function DesktopOnly({ children }) {
+  return useIsDesktop() ? children : null;
+}
+
+// month = "YYYY-MM"; reuses the existing sales-summary report
+const getMonthSales = (month) => {
+  const [y, m] = month.split("-").map(Number);
+  const last = String(new Date(y, m, 0).getDate()).padStart(2, "0");
+  return reportRequest(
+    `sales-summary?date_from=${month}-01&date_to=${month}-${last}&top=100`,
+    "Failed to load monthly sales",
+  );
+};
+
+function useMonthSales() {
+  const [month, setMonth] = useState(localIso().slice(0, 7));
+  const { data, loading, error } = useReport(() => getMonthSales(month), [month]);
+  return { month, setMonth, data, loading, error };
+}
+
+// rows: [{ key, name, meta, value, amount }]  (amount drives the bar length)
+function TopListPanel({ title, icon: Icon, month, onMonth, loading, error, data, rows, footer, empty }) {
+  if (error && !data) return null; // e.g. this user has no access to reports: just hide the panel
+  const max = Math.max(...rows.map((r) => r.amount), 1);
+  return (
+    <aside className="hidden lg:block w-80 shrink-0 bg-white border border-gray-200 rounded-xl p-4">
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+          <Icon size={16} className="text-blue-600" /> {title}
+        </h2>
+        <input
+          type="month"
+          value={month}
+          max={localIso().slice(0, 7)}
+          onChange={(e) => e.target.value && onMonth(e.target.value)}
+          className="border border-gray-300 rounded-lg px-2 py-1 text-xs text-gray-600"
+        />
+      </div>
+
+      {loading && !data ? (
+        <p className="text-xs text-gray-400 py-6 text-center">Loading...</p>
+      ) : rows.length === 0 ? (
+        <p className="text-xs text-gray-400 py-6 text-center">{empty}</p>
+      ) : (
+        <ol className="space-y-3">
+          {rows.map((r, i) => (
+            <li key={r.key} className="flex items-start gap-3">
+              <span
+                className={`shrink-0 w-6 h-6 rounded-full text-xs font-semibold flex items-center justify-center ${
+                  i === 0 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-500"
+                }`}
+              >
+                {i + 1}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between gap-2">
+                  <p className="text-sm font-medium text-gray-900 truncate">{r.name}</p>
+                  <p className="text-sm font-semibold text-gray-900 shrink-0">{r.value}</p>
+                </div>
+                <p className="text-xs text-gray-400">{r.meta}</p>
+                <div className="h-1.5 rounded-full bg-gray-100 mt-1.5">
+                  <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.max(4, (r.amount / max) * 100)}%` }} />
+                </div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {footer && rows.length > 0 && <p className="text-xs text-gray-500 border-t border-gray-100 mt-4 pt-3">{footer}</p>}
+    </aside>
+  );
+}
+
+function TopBuyersPanel() {
+  const { month, setMonth, data, loading, error } = useMonthSales();
+  const rows = (data?.top_customers || [])
+    .filter((c) => c.invoices > 0)
+    .slice(0, 5)
+    .map((c) => ({
+      key: c.customer_id,
+      name: c.customer_name,
+      meta: `${c.invoices} ${c.invoices === 1 ? "invoice" : "invoices"}`,
+      value: formatRs(c.sales),
+      amount: c.sales,
+    }));
+  return (
+    <TopListPanel
+      title="Top buyers"
+      icon={Users}
+      month={month}
+      onMonth={setMonth}
+      loading={loading}
+      error={error}
+      data={data}
+      rows={rows}
+      empty="No sales in this month."
+      footer={data ? `${data.totals.customer_count} customers bought · total ${formatRs(data.totals.sales)}` : ""}
+    />
+  );
+}
+
+function TopSoldItemsPanel() {
+  const { month, setMonth, data, loading, error } = useMonthSales();
+  const rows = [...(data?.top_products || [])]
+    .filter((p) => p.quantity > 0)
+    .sort((a, b) => b.quantity - a.quantity)
+    .slice(0, 5)
+    .map((p) => ({
+      key: p.product_id ?? p.item_name,
+      name: p.item_name,
+      meta: `Sales ${formatRs(p.sales)}`,
+      value: `${p.quantity} sold`,
+      amount: p.quantity,
+    }));
+  return (
+    <TopListPanel
+      title="Most sold items"
+      icon={Tag}
+      month={month}
+      onMonth={setMonth}
+      loading={loading}
+      error={error}
+      data={data}
+      rows={rows}
+      empty="No items sold in this month."
+      footer={data ? `${data.totals.items_sold} items sold in ${data.totals.invoice_count} invoices` : ""}
+    />
+  );
+}
+
 function CustomersPage({ isAdmin, go }) {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -8492,7 +8641,8 @@ function CustomersPage({ isAdmin, go }) {
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
 
-      <main className="p-4 sm:p-6 w-full max-w-3xl">
+      <main className="p-4 sm:p-6 w-full max-w-6xl flex items-start gap-6">
+        <div className="flex-1 min-w-0 max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
             <SearchBox
@@ -8550,6 +8700,8 @@ function CustomersPage({ isAdmin, go }) {
             ))}
           </div>
         )}
+        </div>
+        <DesktopOnly><TopBuyersPanel /></DesktopOnly>
       </main>
 
       {formOpen && (
