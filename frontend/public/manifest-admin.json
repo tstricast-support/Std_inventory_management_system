@@ -9,7 +9,6 @@
   "start_url": "/admin.html",
   "scope": "/admin.html",
   "display": "standalone",
-  "display_override": ["window-controls-overlay"],
   "orientation": "any",
   "background_color": "#1f2640",
   "theme_color": "#1f2640",
