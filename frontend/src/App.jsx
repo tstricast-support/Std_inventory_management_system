@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  forwardRef,
+  useImperativeHandle,
+  Fragment,
+} from "react";
 import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
 import {
   Pencil,
@@ -44,18 +51,24 @@ import {
   ShieldCheck,
   ScrollText,
   X,
+  Printer,
 } from "lucide-react";
 import "./index.css";
 import { BASE_URL, apiFetch } from "./api.js";
-import { AuthProvider, AuthGate, useAuth, Gate, SidebarUser, HeaderSignOut, FloatingSignOut, ACCOUNTING_AREAS } from "./auth.jsx";
+import {
+  AuthProvider,
+  AuthGate,
+  useAuth,
+  Gate,
+  SidebarUser,
+  HeaderSignOut,
+  FloatingSignOut,
+  ACCOUNTING_AREAS,
+} from "./auth.jsx";
 import { UsersAdminPage, ProfileModal } from "./UsersAdmin.jsx";
 import { AuditLogPage, HistoryLink } from "./AuditLogPage.jsx";
 
-
 // const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
-
-
-
 
 // ---------- API helpers ----------
 async function getProducts() {
@@ -79,7 +92,9 @@ async function createVendor(payload) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
-    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to create vendor");
+    throw new Error(
+      typeof err?.detail === "string" ? err.detail : "Failed to create vendor",
+    );
   }
   return res.json();
 }
@@ -92,7 +107,9 @@ async function updateVendor(id, payload) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
-    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to update vendor");
+    throw new Error(
+      typeof err?.detail === "string" ? err.detail : "Failed to update vendor",
+    );
   }
   return res.json();
 }
@@ -121,11 +138,14 @@ async function customerRequest(path, method, payload, failMsg) {
   }
   return res.json();
 }
-const getCustomers = () => customerRequest("", "GET", null, "Failed to fetch customers");
-const createCustomer = (payload) => customerRequest("", "POST", payload, "Failed to create customer");
-const updateCustomer = (id, payload) => customerRequest(String(id), "PUT", payload, "Failed to update customer");
-const deleteCustomer = (id) => customerRequest(String(id), "DELETE", null, "Failed to delete customer");
-
+const getCustomers = () =>
+  customerRequest("", "GET", null, "Failed to fetch customers");
+const createCustomer = (payload) =>
+  customerRequest("", "POST", payload, "Failed to create customer");
+const updateCustomer = (id, payload) =>
+  customerRequest(String(id), "PUT", payload, "Failed to update customer");
+const deleteCustomer = (id) =>
+  customerRequest(String(id), "DELETE", null, "Failed to delete customer");
 
 // ---------- Taxes ----------
 async function taxRequest(path, method, payload, failMsg) {
@@ -141,10 +161,12 @@ async function taxRequest(path, method, payload, failMsg) {
   return res.json();
 }
 const getTaxes = () => taxRequest("", "GET", null, "Failed to fetch taxes");
-const createTax = (payload) => taxRequest("", "POST", payload, "Failed to save tax");
-const updateTax = (id, payload) => taxRequest(String(id), "PUT", payload, "Failed to update tax");
-const deleteTax = (id) => taxRequest(String(id), "DELETE", null, "Failed to delete tax");
-
+const createTax = (payload) =>
+  taxRequest("", "POST", payload, "Failed to save tax");
+const updateTax = (id, payload) =>
+  taxRequest(String(id), "PUT", payload, "Failed to update tax");
+const deleteTax = (id) =>
+  taxRequest(String(id), "DELETE", null, "Failed to delete tax");
 
 // ---------- Banking ----------
 async function bankRequest(path, method, payload, failMsg) {
@@ -159,24 +181,61 @@ async function bankRequest(path, method, payload, failMsg) {
   }
   return res.json();
 }
-const getBankAccounts = () => bankRequest("accounts", "GET", null, "Failed to fetch bank accounts");
-const createBankAccount = (payload) => bankRequest("accounts", "POST", payload, "Failed to save account");
+const getBankAccounts = () =>
+  bankRequest("accounts", "GET", null, "Failed to fetch bank accounts");
+const createBankAccount = (payload) =>
+  bankRequest("accounts", "POST", payload, "Failed to save account");
 const getBankTransactions = (id, from, to) => {
   const q = new URLSearchParams();
   if (from) q.set("date_from", from);
   if (to) q.set("date_to", to);
   const qs = q.toString();
-  return bankRequest(`accounts/${id}/transactions${qs ? `?${qs}` : ""}`, "GET", null, "Failed to fetch transactions");
+  return bankRequest(
+    `accounts/${id}/transactions${qs ? `?${qs}` : ""}`,
+    "GET",
+    null,
+    "Failed to fetch transactions",
+  );
 };
-const createBankTransaction = (payload) => bankRequest("transactions", "POST", payload, "Failed to save transaction");
-const deleteBankTransaction = (journalId) => bankRequest(`transactions/${journalId}`, "DELETE", null, "Failed to delete transaction");
+const createBankTransaction = (payload) =>
+  bankRequest("transactions", "POST", payload, "Failed to save transaction");
+const deleteBankTransaction = (journalId) =>
+  bankRequest(
+    `transactions/${journalId}`,
+    "DELETE",
+    null,
+    "Failed to delete transaction",
+  );
 
 // step 8B: reconciliation
-const getReconcileLines = (id, statementDate) => bankRequest(`accounts/${id}/reconcile?statement_date=${statementDate}`, "GET", null, "Failed to load transactions");
-const finishReconciliation = (id, payload) => bankRequest(`accounts/${id}/reconcile`, "POST", payload, "Failed to save reconciliation");
-const getReconciliations = (id) => bankRequest(`accounts/${id}/reconciliations`, "GET", null, "Failed to fetch reconciliations");
-const undoReconciliation = (recId) => bankRequest(`reconciliations/${recId}`, "DELETE", null, "Failed to undo reconciliation");
-
+const getReconcileLines = (id, statementDate) =>
+  bankRequest(
+    `accounts/${id}/reconcile?statement_date=${statementDate}`,
+    "GET",
+    null,
+    "Failed to load transactions",
+  );
+const finishReconciliation = (id, payload) =>
+  bankRequest(
+    `accounts/${id}/reconcile`,
+    "POST",
+    payload,
+    "Failed to save reconciliation",
+  );
+const getReconciliations = (id) =>
+  bankRequest(
+    `accounts/${id}/reconciliations`,
+    "GET",
+    null,
+    "Failed to fetch reconciliations",
+  );
+const undoReconciliation = (recId) =>
+  bankRequest(
+    `reconciliations/${recId}`,
+    "DELETE",
+    null,
+    "Failed to undo reconciliation",
+  );
 
 // ---------- Reports ----------
 async function reportRequest(path, failMsg) {
@@ -187,14 +246,23 @@ async function reportRequest(path, failMsg) {
   }
   return res.json();
 }
-const getProfitLoss = (from, to) => reportRequest(`profit-and-loss?date_from=${from}&date_to=${to}`, "Failed to load Profit & Loss");
-const getBalanceSheet = (asOf) => reportRequest(`balance-sheet?as_of=${asOf}`, "Failed to load Balance Sheet");
+const getProfitLoss = (from, to) =>
+  reportRequest(
+    `profit-and-loss?date_from=${from}&date_to=${to}`,
+    "Failed to load Profit & Loss",
+  );
+const getBalanceSheet = (asOf) =>
+  reportRequest(`balance-sheet?as_of=${asOf}`, "Failed to load Balance Sheet");
 const getSalesSummary = (from, to) =>
   reportRequest(
     `sales-summary?date_from=${from}&date_to=${to}&top=10`,
     "Failed to load Sales Summary",
   );
-const getAgeing = (kind, asOf) => reportRequest(`${kind}-ageing?as_of=${asOf}`, "Failed to load the ageing report");
+const getAgeing = (kind, asOf) =>
+  reportRequest(
+    `${kind}-ageing?as_of=${asOf}`,
+    "Failed to load the ageing report",
+  );
 
 const getDashboard = async (year) => {
   const res = await apiFetch(
@@ -217,11 +285,14 @@ async function invoiceRequest(path, method, payload, failMsg) {
   }
   return res.json();
 }
-const getInvoices = () => invoiceRequest("", "GET", null, "Failed to fetch invoices");
-const createInvoice = (payload) => invoiceRequest("", "POST", payload, "Failed to save invoice");
+const getInvoices = () =>
+  invoiceRequest("", "GET", null, "Failed to fetch invoices");
+const createInvoice = (payload) =>
+  invoiceRequest("", "POST", payload, "Failed to save invoice");
 const updateInvoice = (id, payload) =>
   invoiceRequest(String(id), "PUT", payload, "Failed to update invoice");
-const voidInvoice = (id) => invoiceRequest(`${id}/void`, "PUT", null, "Failed to void invoice");
+const voidInvoice = (id) =>
+  invoiceRequest(`${id}/void`, "PUT", null, "Failed to void invoice");
 
 const getNextInvoiceNumber = () =>
   invoiceRequest(
@@ -235,8 +306,20 @@ const deleteInvoice = (id) =>
   invoiceRequest(String(id), "DELETE", null, "Failed to delete invoice");
 // ---------- Quotes + Sales orders (step 6: no stock or ledger effect until they become an invoice) ----------
 const SALES_DOC_INFO = {
-  quote: { title: "Quote", tab: "quotes", dateLabel: "Quote date", endLabel: "Expiry date", empty: "No quotes yet." },
-  sales_order: { title: "Sales Order", tab: "salesorders", dateLabel: "Order date", endLabel: "Expected shipment", empty: "No sales orders yet." },
+  quote: {
+    title: "Quote",
+    tab: "quotes",
+    dateLabel: "Quote date",
+    endLabel: "Expiry date",
+    empty: "No quotes yet.",
+  },
+  sales_order: {
+    title: "Sales Order",
+    tab: "salesorders",
+    dateLabel: "Order date",
+    endLabel: "Expected shipment",
+    empty: "No sales orders yet.",
+  },
 };
 
 function salesDocStatus(doc) {
@@ -247,9 +330,12 @@ function salesDocStatus(doc) {
     declined: ["Declined", "bg-red-100 text-red-700"],
     open: ["Open", "bg-blue-100 text-blue-700"],
   };
-  if (fixed[doc.status]) return { label: fixed[doc.status][0], cls: fixed[doc.status][1] };
-  if (doc.expiry_date && doc.expiry_date < toISODate(new Date())) return { label: "Expired", cls: "bg-amber-100 text-amber-700" };
-  if (doc.status === "sent") return { label: "Sent", cls: "bg-blue-100 text-blue-700" };
+  if (fixed[doc.status])
+    return { label: fixed[doc.status][0], cls: fixed[doc.status][1] };
+  if (doc.expiry_date && doc.expiry_date < toISODate(new Date()))
+    return { label: "Expired", cls: "bg-amber-100 text-amber-700" };
+  if (doc.status === "sent")
+    return { label: "Sent", cls: "bg-blue-100 text-blue-700" };
   return { label: "Draft", cls: "bg-gray-100 text-gray-500" };
 }
 
@@ -865,9 +951,12 @@ async function paymentRequest(path, method, payload, failMsg) {
   }
   return res.json();
 }
-const getPayments = () => paymentRequest("", "GET", null, "Failed to fetch payments");
-const createPayment = (payload) => paymentRequest("", "POST", payload, "Failed to save payment");
-const deletePayment = (id) => paymentRequest(String(id), "DELETE", null, "Failed to delete payment");
+const getPayments = () =>
+  paymentRequest("", "GET", null, "Failed to fetch payments");
+const createPayment = (payload) =>
+  paymentRequest("", "POST", payload, "Failed to save payment");
+const deletePayment = (id) =>
+  paymentRequest(String(id), "DELETE", null, "Failed to delete payment");
 // ---------- Purchase bills (what you owe vendors) ----------
 async function purchaseBillRequest(path, method, payload, failMsg) {
   const res = await apiFetch(`${BASE_URL}/purchase-bills/${path}`, {
@@ -881,10 +970,12 @@ async function purchaseBillRequest(path, method, payload, failMsg) {
   }
   return res.json();
 }
-const getPurchaseBills = () => purchaseBillRequest("", "GET", null, "Failed to fetch bills");
-const createPurchaseBill = (payload) => purchaseBillRequest("", "POST", payload, "Failed to save bill");
-const voidPurchaseBill = (id) => purchaseBillRequest(`${id}/void`, "PUT", null, "Failed to void bill");
-
+const getPurchaseBills = () =>
+  purchaseBillRequest("", "GET", null, "Failed to fetch bills");
+const createPurchaseBill = (payload) =>
+  purchaseBillRequest("", "POST", payload, "Failed to save bill");
+const voidPurchaseBill = (id) =>
+  purchaseBillRequest(`${id}/void`, "PUT", null, "Failed to void bill");
 
 // ---------- Vendor payments (payments made) ----------
 async function vendorPaymentRequest(path, method, payload, failMsg) {
@@ -899,10 +990,17 @@ async function vendorPaymentRequest(path, method, payload, failMsg) {
   }
   return res.json();
 }
-const getVendorPayments = () => vendorPaymentRequest("", "GET", null, "Failed to fetch vendor payments");
-const createVendorPayment = (payload) => vendorPaymentRequest("", "POST", payload, "Failed to save vendor payment");
-const deleteVendorPayment = (id) => vendorPaymentRequest(String(id), "DELETE", null, "Failed to delete vendor payment");
-
+const getVendorPayments = () =>
+  vendorPaymentRequest("", "GET", null, "Failed to fetch vendor payments");
+const createVendorPayment = (payload) =>
+  vendorPaymentRequest("", "POST", payload, "Failed to save vendor payment");
+const deleteVendorPayment = (id) =>
+  vendorPaymentRequest(
+    String(id),
+    "DELETE",
+    null,
+    "Failed to delete vendor payment",
+  );
 
 // ---------- Quotes + Sales orders ----------
 async function salesDocRequest(path, method, payload, failMsg) {
@@ -917,23 +1015,40 @@ async function salesDocRequest(path, method, payload, failMsg) {
   }
   return res.json();
 }
-const getSalesDocs = (docType) => salesDocRequest(`?doc_type=${docType}`, "GET", null, "Failed to fetch documents");
-const createSalesDoc = (payload) => salesDocRequest("", "POST", payload, "Failed to save document");
+const getSalesDocs = (docType) =>
+  salesDocRequest(
+    `?doc_type=${docType}`,
+    "GET",
+    null,
+    "Failed to fetch documents",
+  );
+const createSalesDoc = (payload) =>
+  salesDocRequest("", "POST", payload, "Failed to save document");
 const updateSalesDoc = (id, payload) =>
   salesDocRequest(String(id), "PUT", payload, "Failed to update document");
-const setSalesDocStatus = (id, status) => salesDocRequest(`${id}/status`, "PUT", { status }, "Failed to change status");
-const quoteToSalesOrder = (id) => salesDocRequest(`${id}/to-sales-order`, "POST", null, "Failed to convert quote");
-const deleteSalesDoc = (id) => salesDocRequest(String(id), "DELETE", null, "Failed to delete");
-
-
+const setSalesDocStatus = (id, status) =>
+  salesDocRequest(`${id}/status`, "PUT", { status }, "Failed to change status");
+const quoteToSalesOrder = (id) =>
+  salesDocRequest(
+    `${id}/to-sales-order`,
+    "POST",
+    null,
+    "Failed to convert quote",
+  );
+const deleteSalesDoc = (id) =>
+  salesDocRequest(String(id), "DELETE", null, "Failed to delete");
 
 // builds + downloads a PDF (the PDF code is only loaded when a button is pressed)
 async function downloadPdf(kind, record) {
   try {
-    const [pdf, customers] = await Promise.all([import("./pdf.js"), getCustomers().catch(() => [])]);
+    const [pdf, customers] = await Promise.all([
+      import("./pdf.js"),
+      getCustomers().catch(() => []),
+    ]);
     const customer = customers.find((c) => c.id === record.customer_id);
     if (kind === "invoice") await pdf.downloadInvoicePdf(record, customer);
-    else if (kind === "credit") await pdf.downloadCreditNotePdf(record, customer);
+    else if (kind === "credit")
+      await pdf.downloadCreditNotePdf(record, customer);
     else await pdf.downloadSalesDocPdf(record, customer);
   } catch (err) {
     alert(err.message || "Could not create the PDF");
@@ -958,17 +1073,27 @@ async function sendWhatsApp(kind, record) {
   const canShareFiles =
     typeof navigator.share === "function" &&
     typeof navigator.canShare === "function" &&
-    navigator.canShare({ files: [new File(["x"], "t.pdf", { type: "application/pdf" })] });
+    navigator.canShare({
+      files: [new File(["x"], "t.pdf", { type: "application/pdf" })],
+    });
   // computers: open the tab now, before the slow PDF work, so the browser doesn't block it
   const tab = canShareFiles ? null : window.open("about:blank", "_blank");
   try {
-    const [pdf, customers] = await Promise.all([import("./pdf.js"), getCustomers().catch(() => [])]);
+    const [pdf, customers] = await Promise.all([
+      import("./pdf.js"),
+      getCustomers().catch(() => []),
+    ]);
     const customer = customers.find((c) => c.id === record.customer_id);
     const file =
       kind === "invoice"
         ? await pdf.downloadInvoicePdf(record, customer, true)
         : await pdf.downloadSalesDocPdf(record, customer, true);
-    const label = kind === "invoice" ? "invoice" : record.doc_type === "quote" ? "quote" : "sales order";
+    const label =
+      kind === "invoice"
+        ? "invoice"
+        : record.doc_type === "quote"
+          ? "quote"
+          : "sales order";
     const number = record.invoice_number || record.doc_number;
     const text = `Hello ${record.customer_name}, please find your ${label} ${number}.`;
 
@@ -1018,17 +1143,29 @@ async function creditNoteRequest(path, method, payload, failMsg) {
   }
   return res.json();
 }
-const getCreditNotes = () => creditNoteRequest("", "GET", null, "Failed to fetch credit notes");
-const createCreditNote = (payload) => creditNoteRequest("", "POST", payload, "Failed to save credit note");
-const applyCreditNote = (id, payload) => creditNoteRequest(`${id}/apply`, "POST", payload, "Failed to apply credit");
-const removeCreditApplication = (id, appId) => creditNoteRequest(`${id}/applications/${appId}`, "DELETE", null, "Failed to remove credit");
-const voidCreditNote = (id) => creditNoteRequest(`${id}/void`, "PUT", null, "Failed to void credit note");
+const getCreditNotes = () =>
+  creditNoteRequest("", "GET", null, "Failed to fetch credit notes");
+const createCreditNote = (payload) =>
+  creditNoteRequest("", "POST", payload, "Failed to save credit note");
+const applyCreditNote = (id, payload) =>
+  creditNoteRequest(`${id}/apply`, "POST", payload, "Failed to apply credit");
+const removeCreditApplication = (id, appId) =>
+  creditNoteRequest(
+    `${id}/applications/${appId}`,
+    "DELETE",
+    null,
+    "Failed to remove credit",
+  );
+const voidCreditNote = (id) =>
+  creditNoteRequest(`${id}/void`, "PUT", null, "Failed to void credit note");
 const deleteCreditNote = (id) =>
   creditNoteRequest(String(id), "DELETE", null, "Failed to delete credit note");
 
 // ---------- Accounts (chart of accounts) ----------
 async function getAccounts(accountType) {
-  const url = accountType ? `${BASE_URL}/accounts/?account_type=${accountType}` : `${BASE_URL}/accounts/`;
+  const url = accountType
+    ? `${BASE_URL}/accounts/?account_type=${accountType}`
+    : `${BASE_URL}/accounts/`;
   const res = await apiFetch(url);
   if (!res.ok) throw new Error("Failed to fetch accounts");
   return res.json();
@@ -1042,7 +1179,9 @@ async function createAccount(payload) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
-    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to create account");
+    throw new Error(
+      typeof err?.detail === "string" ? err.detail : "Failed to create account",
+    );
   }
   return res.json();
 }
@@ -1055,13 +1194,17 @@ async function updateAccount(id, payload) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
-    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to update account");
+    throw new Error(
+      typeof err?.detail === "string" ? err.detail : "Failed to update account",
+    );
   }
   return res.json();
 }
 
 async function deleteAccount(id) {
-  const res = await apiFetch(`${BASE_URL}/accounts/${id}`, { method: "DELETE" });
+  const res = await apiFetch(`${BASE_URL}/accounts/${id}`, {
+    method: "DELETE",
+  });
   if (!res.ok) throw new Error("Failed to delete account");
   return res.json();
 }
@@ -1076,7 +1219,12 @@ async function getAccountsSummary() {
 // one account + the items that make up its value (Account detail page)
 async function getAccountDetail(id) {
   const res = await apiFetch(`${BASE_URL}/accounts/${id}/detail`);
-  if (!res.ok) throw new Error(res.status === 404 ? "This account no longer exists." : "Failed to fetch account");
+  if (!res.ok)
+    throw new Error(
+      res.status === 404
+        ? "This account no longer exists."
+        : "Failed to fetch account",
+    );
   return res.json();
 }
 
@@ -1093,10 +1241,14 @@ async function journalRequest(path, method, payload, failMsg) {
   }
   return res.json();
 }
-const getJournals = () => journalRequest("", "GET", null, "Failed to fetch journals");
-const createJournal = (payload) => journalRequest("", "POST", payload, "Failed to save journal");
-const deleteJournal = (id) => journalRequest(String(id), "DELETE", null, "Failed to delete journal");
-const getTrialBalance = () => journalRequest("trial-balance", "GET", null, "Failed to fetch trial balance");
+const getJournals = () =>
+  journalRequest("", "GET", null, "Failed to fetch journals");
+const createJournal = (payload) =>
+  journalRequest("", "POST", payload, "Failed to save journal");
+const deleteJournal = (id) =>
+  journalRequest(String(id), "DELETE", null, "Failed to delete journal");
+const getTrialBalance = () =>
+  journalRequest("trial-balance", "GET", null, "Failed to fetch trial balance");
 
 async function createProduct(formValues, imageFiles) {
   const formData = new FormData();
@@ -1153,13 +1305,17 @@ async function updateProduct(id, updates) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
-    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to update product");
+    throw new Error(
+      typeof err?.detail === "string" ? err.detail : "Failed to update product",
+    );
   }
   return res.json();
 }
 
 async function deleteProduct(id) {
-  const res = await apiFetch(`${BASE_URL}/products/${id}`, { method: "DELETE" });
+  const res = await apiFetch(`${BASE_URL}/products/${id}`, {
+    method: "DELETE",
+  });
   if (!res.ok) throw new Error("Failed to delete product");
   return res.json();
 }
@@ -1187,7 +1343,9 @@ async function createRequest(payload) {
 }
 
 async function approveRequest(id) {
-  const res = await apiFetch(`${BASE_URL}/requests/${id}/approve`, { method: "PUT" });
+  const res = await apiFetch(`${BASE_URL}/requests/${id}/approve`, {
+    method: "PUT",
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
     throw new Error(err?.detail || "Failed to approve request");
@@ -1196,7 +1354,9 @@ async function approveRequest(id) {
 }
 
 async function rejectRequest(id) {
-  const res = await apiFetch(`${BASE_URL}/requests/${id}/reject`, { method: "PUT" });
+  const res = await apiFetch(`${BASE_URL}/requests/${id}/reject`, {
+    method: "PUT",
+  });
   if (!res.ok) throw new Error("Failed to reject request");
   return res.json();
 }
@@ -1223,22 +1383,32 @@ async function getStockMovements() {
 async function addProductImages(id, files) {
   const formData = new FormData();
   files.forEach((file) => formData.append("images", file));
-  const res = await apiFetch(`${BASE_URL}/products/${id}/images`, { method: "POST", body: formData });
+  const res = await apiFetch(`${BASE_URL}/products/${id}/images`, {
+    method: "POST",
+    body: formData,
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
-    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to upload images");
+    throw new Error(
+      typeof err?.detail === "string" ? err.detail : "Failed to upload images",
+    );
   }
   return res.json();
 }
 
 async function setPrimaryImage(id, imageId) {
-  const res = await apiFetch(`${BASE_URL}/products/${id}/images/${imageId}/primary`, { method: "PUT" });
+  const res = await apiFetch(
+    `${BASE_URL}/products/${id}/images/${imageId}/primary`,
+    { method: "PUT" },
+  );
   if (!res.ok) throw new Error("Failed to set main image");
   return res.json();
 }
 
 async function deleteProductImage(id, imageId) {
-  const res = await apiFetch(`${BASE_URL}/products/${id}/images/${imageId}`, { method: "DELETE" });
+  const res = await apiFetch(`${BASE_URL}/products/${id}/images/${imageId}`, {
+    method: "DELETE",
+  });
   if (!res.ok) throw new Error("Failed to delete image");
   return res.json();
 }
@@ -1255,28 +1425,38 @@ async function downloadImportTemplate() {
   a.click();
   URL.revokeObjectURL(url);
 }
- 
+
 async function importProductsFile(file, { updateExisting, dryRun }) {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("update_existing", String(updateExisting));
   formData.append("dry_run", String(dryRun));
-  const res = await apiFetch(`${BASE_URL}/product-import/`, { method: "POST", body: formData });
+  const res = await apiFetch(`${BASE_URL}/product-import/`, {
+    method: "POST",
+    body: formData,
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
-    throw new Error(typeof err?.detail === "string" ? err.detail : "Import failed");
+    throw new Error(
+      typeof err?.detail === "string" ? err.detail : "Import failed",
+    );
   }
   return res.json();
 }
- 
+
 async function bulkUploadImages(files, replaceExisting) {
   const formData = new FormData();
   files.forEach((f) => formData.append("images", f));
   formData.append("replace_existing", String(replaceExisting));
-  const res = await apiFetch(`${BASE_URL}/product-import/images`, { method: "POST", body: formData });
+  const res = await apiFetch(`${BASE_URL}/product-import/images`, {
+    method: "POST",
+    body: formData,
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
-    throw new Error(typeof err?.detail === "string" ? err.detail : "Image upload failed");
+    throw new Error(
+      typeof err?.detail === "string" ? err.detail : "Image upload failed",
+    );
   }
   return res.json();
 }
@@ -1295,13 +1475,19 @@ async function createIssuedList(payload) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
-    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to save issued list");
+    throw new Error(
+      typeof err?.detail === "string"
+        ? err.detail
+        : "Failed to save issued list",
+    );
   }
   return res.json();
 }
 
 async function getReconcilableRequests(issuedDate) {
-  const res = await apiFetch(`${BASE_URL}/issued/reconcilable?issued_date=${issuedDate}`);
+  const res = await apiFetch(
+    `${BASE_URL}/issued/reconcilable?issued_date=${issuedDate}`,
+  );
   if (!res.ok) throw new Error("Failed to load approved requests");
   return res.json();
 }
@@ -1310,7 +1496,11 @@ async function deleteIssuedList(id) {
   const res = await apiFetch(`${BASE_URL}/issued/${id}`, { method: "DELETE" });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
-    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to undo issued list");
+    throw new Error(
+      typeof err?.detail === "string"
+        ? err.detail
+        : "Failed to undo issued list",
+    );
   }
   return res.json();
 }
@@ -1329,11 +1519,12 @@ async function createBill(adderName, items) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => null);
-    throw new Error(typeof err?.detail === "string" ? err.detail : "Failed to save bill");
+    throw new Error(
+      typeof err?.detail === "string" ? err.detail : "Failed to save bill",
+    );
   }
   return res.json();
 }
-
 
 async function updateBill(id, adderName, items) {
   const res = await apiFetch(`${BASE_URL}/bills/${id}`, {
@@ -1395,41 +1586,67 @@ function MonthSelect({ options, value, onChange }) {
     >
       <option value="">All months</option>
       {options.map((m) => (
-        <option key={m} value={m}>{formatMonthLabel(m)}</option>
+        <option key={m} value={m}>
+          {formatMonthLabel(m)}
+        </option>
       ))}
     </select>
   );
 }
 
 // ---------- ProductCard ----------
-function ProductCard({ product, isAdmin, onDelete, onEdit, onRequest, onRestock }) {
-  const primaryImage = product.images?.find((img) => img.is_primary) || product.images?.[0];
+function ProductCard({
+  product,
+  isAdmin,
+  onDelete,
+  onEdit,
+  onRequest,
+  onRestock,
+}) {
+  const primaryImage =
+    product.images?.find((img) => img.is_primary) || product.images?.[0];
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
       <div className="aspect-square bg-gray-100">
         {primaryImage ? (
-          <img src={primaryImage.image_url} alt={product.name} className="w-full h-full object-cover" />
+          <img
+            src={primaryImage.image_url}
+            alt={product.name}
+            className="w-full h-full object-cover"
+          />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">No image</div>
+          <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">
+            No image
+          </div>
         )}
       </div>
 
       <div className="p-4">
         <div className="flex justify-between items-start mb-1">
-          <h3 className="font-semibold text-gray-900 truncate">{product.name}</h3>
-          <span className="text-sm font-medium text-gray-600">Rs.{Number(product.price).toFixed(2)}</span>
+          <h3 className="font-semibold text-gray-900 truncate">
+            {product.name}
+          </h3>
+          <span className="text-sm font-medium text-gray-600">
+            Rs.{Number(product.price).toFixed(2)}
+          </span>
         </div>
 
-        {product.sku && <p className="text-xs text-gray-400 mb-2">SKU: {product.sku}</p>}
+        {product.sku && (
+          <p className="text-xs text-gray-400 mb-2">SKU: {product.sku}</p>
+        )}
 
         <div className="flex justify-between items-center mt-3">
           <span
             className={`text-xs px-2 py-1 rounded-full font-medium ${
-              product.quantity > 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+              product.quantity > 0
+                ? "bg-green-100 text-green-700"
+                : "bg-red-100 text-red-700"
             }`}
           >
-            {product.quantity > 0 ? `${product.quantity} in stock` : "Out of stock"}
+            {product.quantity > 0
+              ? `${product.quantity} in stock`
+              : "Out of stock"}
           </span>
 
           {isAdmin ? (
@@ -1475,9 +1692,20 @@ function ProductCard({ product, isAdmin, onDelete, onEdit, onRequest, onRestock 
 }
 
 // ---------- ProductGrid ----------
-function GroupedProductGrid({ products, isAdmin, onDelete, onEdit, onRequest, onRestock }) {
+function GroupedProductGrid({
+  products,
+  isAdmin,
+  onDelete,
+  onEdit,
+  onRequest,
+  onRestock,
+}) {
   if (products.length === 0) {
-    return <div className="text-center py-16 text-gray-400">No products match your filters.</div>;
+    return (
+      <div className="text-center py-16 text-gray-400">
+        No products match your filters.
+      </div>
+    );
   }
 
   const sorted = [...products].sort((a, b) => compareNames(a.name, b.name));
@@ -1536,11 +1764,17 @@ function RestockModal({ product, onSubmit, onClose }) {
           {product.name} — currently {product.quantity} in stock
         </p>
 
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Quantity received *</label>
+            <label className="block text-xs text-gray-500 mb-1">
+              Quantity received *
+            </label>
             <input
               type="number"
               min="1"
@@ -1553,7 +1787,9 @@ function RestockModal({ product, onSubmit, onClose }) {
           </div>
 
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Note (optional)</label>
+            <label className="block text-xs text-gray-500 mb-1">
+              Note (optional)
+            </label>
             <input
               placeholder="e.g. Supplier invoice #234"
               value={note}
@@ -1563,14 +1799,24 @@ function RestockModal({ product, onSubmit, onClose }) {
           </div>
 
           {Number(quantity) > 0 && (
-            <p className="text-xs text-gray-400">New total: {product.quantity + Number(quantity)}</p>
+            <p className="text-xs text-gray-400">
+              New total: {product.quantity + Number(quantity)}
+            </p>
           )}
 
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
               Cancel
             </button>
-            <button type="submit" disabled={submitting} className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700 disabled:opacity-50">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+            >
               {submitting ? "Adding..." : "Add Stock"}
             </button>
           </div>
@@ -1593,29 +1839,47 @@ function StockHistoryPanel({ movements }) {
     <div>
       <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
         <h2 className="text-sm font-semibold text-gray-500 uppercase">
-          Stock Additions <span className="text-gray-400 font-normal">({filtered.length})</span>
+          Stock Additions{" "}
+          <span className="text-gray-400 font-normal">({filtered.length})</span>
         </h2>
-        <MonthSelect options={monthOptions} value={selectedMonth} onChange={setSelectedMonth} />
+        <MonthSelect
+          options={monthOptions}
+          value={selectedMonth}
+          onChange={setSelectedMonth}
+        />
       </div>
 
       {filtered.length === 0 ? (
-        <p className="text-gray-400 text-sm">No stock movements found for this period.</p>
+        <p className="text-gray-400 text-sm">
+          No stock movements found for this period.
+        </p>
       ) : (
         <div className="space-y-2">
           {filtered.map((m) => (
-            <div key={m.id} className="bg-white border border-gray-200 rounded-lg p-4 flex flex-wrap justify-between items-center gap-3">
+            <div
+              key={m.id}
+              className="bg-white border border-gray-200 rounded-lg p-4 flex flex-wrap justify-between items-center gap-3"
+            >
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-full bg-green-50 text-green-600 shrink-0">
                   <PackagePlus size={16} />
                 </div>
                 <div>
-                  <p className="font-medium text-gray-900">{m.product?.name || `Product #${m.product_id}`}</p>
-                  {m.note && <p className="text-xs text-gray-400 mt-0.5">{m.note}</p>}
+                  <p className="font-medium text-gray-900">
+                    {m.product?.name || `Product #${m.product_id}`}
+                  </p>
+                  {m.note && (
+                    <p className="text-xs text-gray-400 mt-0.5">{m.note}</p>
+                  )}
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-sm font-semibold text-green-600">+{m.quantity}</p>
-                <p className="text-xs text-gray-400">{formatDateTime(m.created_at)}</p>
+                <p className="text-sm font-semibold text-green-600">
+                  +{m.quantity}
+                </p>
+                <p className="text-xs text-gray-400">
+                  {formatDateTime(m.created_at)}
+                </p>
               </div>
             </div>
           ))}
@@ -1626,7 +1890,9 @@ function StockHistoryPanel({ movements }) {
 }
 
 function RequestModal({ products, initialProductId, onSubmit, onClose }) {
-  const [items, setItems] = useState([{ product_id: initialProductId, quantity: 1 }]);
+  const [items, setItems] = useState([
+    { product_id: initialProductId, quantity: 1 },
+  ]);
   const [requestedBy, setRequestedBy] = useState("");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -1638,13 +1904,15 @@ function RequestModal({ products, initialProductId, onSubmit, onClose }) {
 
   const handleItemChange = (index, field, value) => {
     setItems((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, [field]: value } : item))
+      prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)),
     );
   };
 
   const handleAddItem = () => {
     const usedIds = items.map((i) => Number(i.product_id));
-    const nextProduct = requestableProducts.find((p) => !usedIds.includes(p.id));
+    const nextProduct = requestableProducts.find(
+      (p) => !usedIds.includes(p.id),
+    );
     setItems((prev) => [
       ...prev,
       { product_id: nextProduct ? nextProduct.id : "", quantity: 1 },
@@ -1685,7 +1953,9 @@ function RequestModal({ products, initialProductId, onSubmit, onClose }) {
     }
     const ids = items.map((i) => Number(i.product_id));
     if (new Set(ids).size !== ids.length) {
-      setError("Each product can only appear once — adjust the quantity instead");
+      setError(
+        "Each product can only appear once — adjust the quantity instead",
+      );
       return;
     }
 
@@ -1698,8 +1968,8 @@ function RequestModal({ products, initialProductId, onSubmit, onClose }) {
             quantity: Number(item.quantity),
             requested_by: requestedBy.trim(),
             note: note.trim() || null,
-          })
-        )
+          }),
+        ),
       );
       onClose();
     } catch (err) {
@@ -1713,13 +1983,21 @@ function RequestModal({ products, initialProductId, onSubmit, onClose }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
         <h2 className="text-lg font-semibold mb-1">Request Items</h2>
-        <p className="text-sm text-gray-500 mb-4">Add one or more items to your request</p>
+        <p className="text-sm text-gray-500 mb-4">
+          Add one or more items to your request
+        </p>
 
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Your name *</label>
+            <label className="block text-xs text-gray-500 mb-1">
+              Your name *
+            </label>
             <input
               required
               value={requestedBy}
@@ -1737,7 +2015,9 @@ function RequestModal({ products, initialProductId, onSubmit, onClose }) {
                   <select
                     required
                     value={item.product_id}
-                    onChange={(e) => handleItemChange(index, "product_id", e.target.value)}
+                    onChange={(e) =>
+                      handleItemChange(index, "product_id", e.target.value)
+                    }
                     className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Select product</option>
@@ -1754,7 +2034,9 @@ function RequestModal({ products, initialProductId, onSubmit, onClose }) {
                     max={selectedProduct?.quantity || undefined}
                     required
                     value={item.quantity}
-                    onChange={(e) => handleItemChange(index, "quantity", e.target.value)}
+                    onChange={(e) =>
+                      handleItemChange(index, "quantity", e.target.value)
+                    }
                     className="w-20 border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
 
@@ -1781,7 +2063,9 @@ function RequestModal({ products, initialProductId, onSubmit, onClose }) {
           </div>
 
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Note (optional)</label>
+            <label className="block text-xs text-gray-500 mb-1">
+              Note (optional)
+            </label>
             <textarea
               rows={2}
               value={note}
@@ -1791,10 +2075,18 @@ function RequestModal({ products, initialProductId, onSubmit, onClose }) {
           </div>
 
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
               Cancel
             </button>
-            <button type="submit" disabled={submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
               {submitting ? "Sending..." : "Send Request"}
             </button>
           </div>
@@ -1840,24 +2132,40 @@ function RequestsPanel({ requests, onApprove, onReject }) {
   return (
     <div className="space-y-6">
       <div className="flex justify-end">
-        <MonthSelect options={monthOptions} value={selectedMonth} onChange={setSelectedMonth} />
+        <MonthSelect
+          options={monthOptions}
+          value={selectedMonth}
+          onChange={setSelectedMonth}
+        />
       </div>
 
       <div>
-        <h2 className="text-sm font-semibold text-gray-500 uppercase mb-2">Pending ({pending.length})</h2>
+        <h2 className="text-sm font-semibold text-gray-500 uppercase mb-2">
+          Pending ({pending.length})
+        </h2>
         {pending.length === 0 ? (
-          <p className="text-gray-400 text-sm">No pending requests{selectedMonth ? " for this month" : ""}.</p>
+          <p className="text-gray-400 text-sm">
+            No pending requests{selectedMonth ? " for this month" : ""}.
+          </p>
         ) : (
           <div className="space-y-2">
             {pending.map((r) => (
-              <div key={r.id} className="bg-white border border-gray-200 rounded-lg p-4 flex flex-wrap justify-between items-center gap-3">
+              <div
+                key={r.id}
+                className="bg-white border border-gray-200 rounded-lg p-4 flex flex-wrap justify-between items-center gap-3"
+              >
                 <div>
                   <p className="font-medium text-gray-900">{r.product?.name}</p>
                   <p className="text-sm text-gray-500">
-                    {r.quantity} requested by <span className="font-medium">{r.requested_by}</span>
+                    {r.quantity} requested by{" "}
+                    <span className="font-medium">{r.requested_by}</span>
                   </p>
-                  {r.note && <p className="text-xs text-gray-400 mt-1">"{r.note}"</p>}
-                  <p className="text-xs text-gray-400 mt-1">{formatDateTime(r.created_at)}</p>
+                  {r.note && (
+                    <p className="text-xs text-gray-400 mt-1">"{r.note}"</p>
+                  )}
+                  <p className="text-xs text-gray-400 mt-1">
+                    {formatDateTime(r.created_at)}
+                  </p>
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -1882,21 +2190,38 @@ function RequestsPanel({ requests, onApprove, onReject }) {
       </div>
 
       <div>
-        <h2 className="text-sm font-semibold text-gray-500 uppercase mb-2">History</h2>
+        <h2 className="text-sm font-semibold text-gray-500 uppercase mb-2">
+          History
+        </h2>
         {resolved.length === 0 ? (
-          <p className="text-gray-400 text-sm">No resolved requests{selectedMonth ? " for this month" : " yet"}.</p>
+          <p className="text-gray-400 text-sm">
+            No resolved requests{selectedMonth ? " for this month" : " yet"}.
+          </p>
         ) : (
           <div className="space-y-2">
             {resolved.map((r) => (
-              <div key={r.id} className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex justify-between items-center gap-3">
+              <div
+                key={r.id}
+                className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex justify-between items-center gap-3"
+              >
                 <div>
-                  <p className="text-sm font-medium text-gray-700">{r.product?.name}</p>
-                  <p className="text-xs text-gray-500">{r.quantity} requested by {r.requested_by}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(r.created_at)}</p>
+                  <p className="text-sm font-medium text-gray-700">
+                    {r.product?.name}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {r.quantity} requested by {r.requested_by}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {formatDateTime(r.created_at)}
+                  </p>
                 </div>
-                <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                  r.status === "approved" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                }`}>
+                <span
+                  className={`text-xs px-2 py-1 rounded-full font-medium ${
+                    r.status === "approved"
+                      ? "bg-green-100 text-green-700"
+                      : "bg-red-100 text-red-700"
+                  }`}
+                >
                   {r.status}
                 </span>
               </div>
@@ -1912,7 +2237,9 @@ function RequestsPanel({ requests, onApprove, onReject }) {
 function ImageManager({ productId, images, onChange }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const sorted = [...images].sort((a, b) => Number(b.is_primary) - Number(a.is_primary));
+  const sorted = [...images].sort(
+    (a, b) => Number(b.is_primary) - Number(a.is_primary),
+  );
 
   const run = async (action) => {
     setBusy(true);
@@ -1941,24 +2268,39 @@ function ImageManager({ productId, images, onChange }) {
   return (
     <div>
       <label className="block text-sm text-gray-600 mb-1">Product images</label>
-      {error && <div className="bg-red-50 text-red-600 text-xs rounded-lg px-3 py-2 mb-2">{error}</div>}
+      {error && (
+        <div className="bg-red-50 text-red-600 text-xs rounded-lg px-3 py-2 mb-2">
+          {error}
+        </div>
+      )}
 
       {sorted.length === 0 ? (
         <p className="text-xs text-gray-400 mb-2">No images yet.</p>
       ) : (
         <div className="grid grid-cols-3 gap-2 mb-2">
           {sorted.map((img) => (
-            <div key={img.id} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-100">
-              <img src={img.image_url} alt="" className="w-full h-full object-cover" />
+            <div
+              key={img.id}
+              className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-100"
+            >
+              <img
+                src={img.image_url}
+                alt=""
+                className="w-full h-full object-cover"
+              />
               {img.is_primary && (
-                <span className="absolute top-1 left-1 bg-blue-600 text-white text-[10px] font-medium px-1.5 py-0.5 rounded-full">Main</span>
+                <span className="absolute top-1 left-1 bg-blue-600 text-white text-[10px] font-medium px-1.5 py-0.5 rounded-full">
+                  Main
+                </span>
               )}
               <div className="absolute bottom-1 right-1 flex gap-1">
                 {!img.is_primary && (
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => run(() => setPrimaryImage(productId, img.id))}
+                    onClick={() =>
+                      run(() => setPrimaryImage(productId, img.id))
+                    }
                     title="Make main image"
                     aria-label="Make main image"
                     className="p-1.5 rounded-full bg-white/90 text-amber-500 hover:bg-white shadow disabled:opacity-50"
@@ -1982,19 +2324,34 @@ function ImageManager({ productId, images, onChange }) {
         </div>
       )}
 
-      <label className={`inline-flex items-center gap-1 text-xs font-medium text-blue-600 ${busy ? "opacity-50" : "cursor-pointer hover:underline"}`}>
+      <label
+        className={`inline-flex items-center gap-1 text-xs font-medium text-blue-600 ${busy ? "opacity-50" : "cursor-pointer hover:underline"}`}
+      >
         <Plus size={13} />
         {busy ? "Working..." : "Add images"}
-        <input type="file" accept="image/*" multiple disabled={busy} onChange={handleFiles} className="hidden" />
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          disabled={busy}
+          onChange={handleFiles}
+          className="hidden"
+        />
       </label>
-      <p className="text-[11px] text-gray-400 mt-1">Images save straight away — no need to press Save Changes.</p>
+      <p className="text-[11px] text-gray-400 mt-1">
+        Images save straight away — no need to press Save Changes.
+      </p>
     </div>
   );
 }
 
 // ---------- ProductForm (QuickBooks-style item form; handles both Create and Edit) ----------
-const ITEM_TYPES = ["Inventory Part", "Non-Inventory Part", "Service", "Inventory Assembly"];
-
+const ITEM_TYPES = [
+  "Inventory Part",
+  "Non-Inventory Part",
+  "Service",
+  "Inventory Assembly",
+];
 
 // ---------- VendorSelect ----------
 function VendorSelect({ vendors, value, onChange, onCreateVendor }) {
@@ -2025,27 +2382,49 @@ function VendorSelect({ vendors, value, onChange, onCreateVendor }) {
           placeholder="New vendor name"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleCreate())}
+          onKeyDown={(e) =>
+            e.key === "Enter" && (e.preventDefault(), handleCreate())
+          }
           className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
-        <button type="button" onClick={handleCreate} disabled={saving} className="shrink-0 bg-blue-600 text-white px-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+        <button
+          type="button"
+          onClick={handleCreate}
+          disabled={saving}
+          className="shrink-0 bg-blue-600 text-white px-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+        >
           {saving ? "..." : "Add"}
         </button>
-        <button type="button" onClick={() => setCreating(false)} className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm hover:bg-gray-50">✕</button>
+        <button
+          type="button"
+          onClick={() => setCreating(false)}
+          className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm hover:bg-gray-50"
+        >
+          ✕
+        </button>
       </div>
     );
   }
 
   return (
     <div className="flex gap-2">
-      <select value={value} onChange={(e) => onChange(e.target.value)}
-        className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      >
         <option value="">None</option>
         {vendors.map((v) => (
-          <option key={v.id} value={v.id}>{v.name}</option>
+          <option key={v.id} value={v.id}>
+            {v.name}
+          </option>
         ))}
       </select>
-      <button type="button" onClick={() => setCreating(true)} className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap">
+      <button
+        type="button"
+        onClick={() => setCreating(true)}
+        className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap"
+      >
         + New
       </button>
     </div>
@@ -2055,7 +2434,15 @@ function VendorSelect({ vendors, value, onChange, onCreateVendor }) {
 // ---------- ParentItemSelect ("Subitem of" dropdown with a + New button) ----------
 //   onCreateParent(name) -> "+ New" shows a small name box and creates the parent right there
 //   onNew()              -> "+ New" hands over to the caller (used to open a full form)
-function ParentItemSelect({ options, value, onChange, onCreateParent, onNew, placeholder = "Select parent item...", disabled }) {
+function ParentItemSelect({
+  options,
+  value,
+  onChange,
+  onCreateParent,
+  onNew,
+  placeholder = "Select parent item...",
+  disabled,
+}) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -2083,13 +2470,26 @@ function ParentItemSelect({ options, value, onChange, onCreateParent, onNew, pla
           placeholder="New parent item name"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleCreate())}
+          onKeyDown={(e) =>
+            e.key === "Enter" && (e.preventDefault(), handleCreate())
+          }
           className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
-        <button type="button" onClick={handleCreate} disabled={saving} className="shrink-0 bg-blue-600 text-white px-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+        <button
+          type="button"
+          onClick={handleCreate}
+          disabled={saving}
+          className="shrink-0 bg-blue-600 text-white px-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+        >
           {saving ? "..." : "Add"}
         </button>
-        <button type="button" onClick={() => setCreating(false)} className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm hover:bg-gray-50">✕</button>
+        <button
+          type="button"
+          onClick={() => setCreating(false)}
+          className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm hover:bg-gray-50"
+        >
+          ✕
+        </button>
       </div>
     );
   }
@@ -2104,7 +2504,9 @@ function ParentItemSelect({ options, value, onChange, onCreateParent, onNew, pla
       >
         <option value="">{placeholder}</option>
         {options.map((p) => (
-          <option key={p.id} value={p.id}>{p.label || p.name}</option>
+          <option key={p.id} value={p.id}>
+            {p.label || p.name}
+          </option>
         ))}
       </select>
       <button
@@ -2120,7 +2522,14 @@ function ParentItemSelect({ options, value, onChange, onCreateParent, onNew, pla
 }
 
 // ---------- AccountSelect ----------
-function AccountSelect({ accounts, accountType, value, onChange, placeholder, onCreateAccount }) {
+function AccountSelect({
+  accounts,
+  accountType,
+  value,
+  onChange,
+  placeholder,
+  onCreateAccount,
+}) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -2149,27 +2558,49 @@ function AccountSelect({ accounts, accountType, value, onChange, placeholder, on
           placeholder="New account name"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleCreate())}
+          onKeyDown={(e) =>
+            e.key === "Enter" && (e.preventDefault(), handleCreate())
+          }
           className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
-        <button type="button" onClick={handleCreate} disabled={saving} className="shrink-0 bg-blue-600 text-white px-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+        <button
+          type="button"
+          onClick={handleCreate}
+          disabled={saving}
+          className="shrink-0 bg-blue-600 text-white px-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+        >
           {saving ? "..." : "Add"}
         </button>
-        <button type="button" onClick={() => setCreating(false)} className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm hover:bg-gray-50">✕</button>
+        <button
+          type="button"
+          onClick={() => setCreating(false)}
+          className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm hover:bg-gray-50"
+        >
+          ✕
+        </button>
       </div>
     );
   }
 
   return (
     <div className="flex gap-2">
-      <select value={value} onChange={(e) => onChange(e.target.value)}
-        className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      >
         <option value="">{placeholder}</option>
         {options.map((a) => (
-          <option key={a.id} value={a.id}>{a.name}</option>
+          <option key={a.id} value={a.id}>
+            {a.name}
+          </option>
         ))}
       </select>
-      <button type="button" onClick={() => setCreating(true)} className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap">
+      <button
+        type="button"
+        onClick={() => setCreating(true)}
+        className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap"
+      >
         + New
       </button>
     </div>
@@ -2195,11 +2626,11 @@ function flattenParents(items, excludeId = null, trail = []) {
       if (excludeId != null && p.id === excludeId) return; // skips its whole subtree too
       const path = [...trail, p.name];
       out.push({ ...p, label: path.join(" › ") });
-      if (p.subitems?.length) out.push(...flattenParents(p.subitems, excludeId, path));
+      if (p.subitems?.length)
+        out.push(...flattenParents(p.subitems, excludeId, path));
     });
   return out;
 }
-
 
 function filterItemTree(items, q) {
   const filterNode = (item) => {
@@ -2211,7 +2642,6 @@ function filterItemTree(items, q) {
   };
   return items.map(filterNode).filter(Boolean);
 }
-
 
 // ---------- ProductForm ----------
 // What "+ Add Product" opens: first a question (Create Item / Create Subitem), then the form.
@@ -2230,19 +2660,32 @@ function ProductKindChooser({ onPick, onClose }) {
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
         <h2 className="text-lg font-semibold mb-4">Add Product</h2>
         <div className="space-y-2">
-          <button type="button" onClick={() => onPick("item")}
-            className="w-full text-left border border-gray-300 rounded-lg px-4 py-3 hover:bg-gray-50">
+          <button
+            type="button"
+            onClick={() => onPick("item")}
+            className="w-full text-left border border-gray-300 rounded-lg px-4 py-3 hover:bg-gray-50"
+          >
             <p className="font-medium text-gray-900">+ Create Item</p>
-            <p className="text-xs text-gray-500">A normal item (optionally a subitem of one item)</p>
+            <p className="text-xs text-gray-500">
+              A normal item (optionally a subitem of one item)
+            </p>
           </button>
-          <button type="button" onClick={() => onPick("subitem")}
-            className="w-full text-left border border-gray-300 rounded-lg px-4 py-3 hover:bg-gray-50">
+          <button
+            type="button"
+            onClick={() => onPick("subitem")}
+            className="w-full text-left border border-gray-300 rounded-lg px-4 py-3 hover:bg-gray-50"
+          >
             <p className="font-medium text-gray-900">+ Create Subitem</p>
-            <p className="text-xs text-gray-500">An item that goes inside an existing subitem (e.g. inside CYAN)</p>
+            <p className="text-xs text-gray-500">
+              An item that goes inside an existing subitem (e.g. inside CYAN)
+            </p>
           </button>
         </div>
-        <button type="button" onClick={onClose}
-          className="w-full mt-3 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-full mt-3 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+        >
           Cancel
         </button>
       </div>
@@ -2254,11 +2697,16 @@ function ProductKindChooser({ onPick, onClose }) {
 //       "subitem"    -> Create Subitem (Subitem of is required, parents = existing subitems)
 //       "under-item" -> opened by "+ New" inside a subitem form (Subitem of required, parents = top-level items)
 
-
-function ProductFormBody({ initialData, onSubmit, onClose, onImagesChanged, kind = "item" }) {
+function ProductFormBody({
+  initialData,
+  onSubmit,
+  onClose,
+  onImagesChanged,
+  kind = "item",
+}) {
   const isEditMode = Boolean(initialData);
-  const parentKind = kind === "subitem" ? "sub" : "top";               // which items are offered as parents
-  const requireParent = kind === "subitem" || kind === "under-item";   // Subitem of is ticked and locked
+  const parentKind = kind === "subitem" ? "sub" : "top"; // which items are offered as parents
+  const requireParent = kind === "subitem" || kind === "under-item"; // Subitem of is ticked and locked
   const [form, setForm] = useState({
     item_type: initialData?.item_type || "Inventory Part",
     name: initialData?.name || "",
@@ -2268,14 +2716,22 @@ function ProductFormBody({ initialData, onSubmit, onClose, onImagesChanged, kind
 
     purchase_description: initialData?.purchase_description || "",
     cost: initialData?.cost ?? 0,
-    cogs_account_id: initialData?.cogs_account?.id ? String(initialData.cogs_account.id) : "",
-    preferred_vendor_id: initialData?.preferred_vendor?.id ? String(initialData.preferred_vendor.id) : "",
+    cogs_account_id: initialData?.cogs_account?.id
+      ? String(initialData.cogs_account.id)
+      : "",
+    preferred_vendor_id: initialData?.preferred_vendor?.id
+      ? String(initialData.preferred_vendor.id)
+      : "",
 
     description: initialData?.description || "",
     price: initialData?.price ?? 0,
-    income_account_id: initialData?.income_account?.id ? String(initialData.income_account.id) : "",
+    income_account_id: initialData?.income_account?.id
+      ? String(initialData.income_account.id)
+      : "",
 
-    asset_account_id: initialData?.asset_account?.id ? String(initialData.asset_account.id) : "",
+    asset_account_id: initialData?.asset_account?.id
+      ? String(initialData.asset_account.id)
+      : "",
     reorder_min: initialData?.reorder_min ?? "",
     reorder_max: initialData?.reorder_max ?? "",
     quantity: initialData?.quantity ?? 0,
@@ -2299,14 +2755,20 @@ function ProductFormBody({ initialData, onSubmit, onClose, onImagesChanged, kind
   const buildParentOptions = (tree) => {
     if (isEditMode) return flattenParents(tree, initialData.id);
     const all = flattenParents(tree);
-    return parentKind === "sub" ? all.filter((p) => p.parent_id) : all.filter((p) => !p.parent_id);
+    return parentKind === "sub"
+      ? all.filter((p) => p.parent_id)
+      : all.filter((p) => !p.parent_id);
   };
 
   // load the dropdown data the QuickBooks-style fields need (vendors, accounts, possible parents)
   useEffect(() => {
     (async () => {
       try {
-        const [v, a, p] = await Promise.all([getVendors(), getAccounts(), getProducts()]);
+        const [v, a, p] = await Promise.all([
+          getVendors(),
+          getAccounts(),
+          getProducts(),
+        ]);
         setVendors(v);
         setAccounts(a);
         setParentOptions(buildParentOptions(p));
@@ -2316,7 +2778,8 @@ function ProductFormBody({ initialData, onSubmit, onClose, onImagesChanged, kind
     })();
   }, []);
 
-  const handleChange = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+  const handleChange = (field, value) =>
+    setForm((prev) => ({ ...prev, [field]: value }));
   const handleFileChange = (e) => setImageFiles(Array.from(e.target.files));
 
   const handleCreateVendor = async (name) => {
@@ -2333,12 +2796,18 @@ function ProductFormBody({ initialData, onSubmit, onClose, onImagesChanged, kind
 
   // Create Item form: "Subitem of" -> "+ New" creates a bare parent item from just a name
   const handleCreateParent = async (name) => {
-    if (parentOptions.some((p) => p.name.trim().toLowerCase() === name.toLowerCase())) {
-      throw new Error("An item with this name already exists - select it from the list");
+    if (
+      parentOptions.some(
+        (p) => p.name.trim().toLowerCase() === name.toLowerCase(),
+      )
+    ) {
+      throw new Error(
+        "An item with this name already exists - select it from the list",
+      );
     }
     const created = await createProduct(
       { name, item_type: form.item_type },
-      []
+      [],
     );
     setParentOptions((prev) => [...prev, created]);
     return created;
@@ -2350,7 +2819,11 @@ function ProductFormBody({ initialData, onSubmit, onClose, onImagesChanged, kind
     const created = await createProduct(values, files);
     const p = await getProducts();
     setParentOptions(buildParentOptions(p));
-    setForm((prev) => ({ ...prev, is_subitem: true, parent_id: String(created.id) }));
+    setForm((prev) => ({
+      ...prev,
+      is_subitem: true,
+      parent_id: String(created.id),
+    }));
   };
 
   const handleSubmit = async (e) => {
@@ -2379,9 +2852,19 @@ function ProductFormBody({ initialData, onSubmit, onClose, onImagesChanged, kind
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">{isEditMode ? "Edit Item" : requireParent ? "New Subitem" : "New Item"}</h2>
+        <h2 className="text-lg font-semibold mb-4">
+          {isEditMode
+            ? "Edit Item"
+            : requireParent
+              ? "New Subitem"
+              : "New Item"}
+        </h2>
 
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* ---- TYPE ---- */}
@@ -2393,14 +2876,21 @@ function ProductFormBody({ initialData, onSubmit, onClose, onImagesChanged, kind
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               {ITEM_TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
+                <option key={t} value={t}>
+                  {t}
+                </option>
               ))}
             </select>
           </div>
 
           {/* ---- Item Name/Number + Subitem of ---- */}
-          <input required placeholder="Item Name/Number" value={form.name} onChange={(e) => handleChange("name", e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <input
+            required
+            placeholder="Item Name/Number"
+            value={form.name}
+            onChange={(e) => handleChange("name", e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
 
           <div className="flex items-center gap-2">
             <label className="flex items-center gap-2 text-sm text-gray-700 whitespace-nowrap cursor-pointer">
@@ -2418,94 +2908,196 @@ function ProductFormBody({ initialData, onSubmit, onClose, onImagesChanged, kind
               options={parentOptions}
               value={form.parent_id}
               onChange={(val) => handleChange("parent_id", val)}
-              placeholder={parentKind === "sub" ? "Select parent subitem..." : "Select parent item..."}
+              placeholder={
+                parentKind === "sub"
+                  ? "Select parent subitem..."
+                  : "Select parent item..."
+              }
               onCreateParent={handleCreateParent}
-              onNew={parentKind === "sub" ? () => setCreatingParent(true) : undefined}
+              onNew={
+                parentKind === "sub" ? () => setCreatingParent(true) : undefined
+              }
             />
           </div>
 
-          <input placeholder="Manufacturer's Part Number" value={form.manufacturer_part_number}
-            onChange={(e) => handleChange("manufacturer_part_number", e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <input
+            placeholder="Manufacturer's Part Number"
+            value={form.manufacturer_part_number}
+            onChange={(e) =>
+              handleChange("manufacturer_part_number", e.target.value)
+            }
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
 
           {/* ---- PURCHASE INFORMATION ---- */}
           <div className="border border-gray-200 rounded-lg p-3 space-y-2">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase">Purchase Information</h3>
-            <textarea placeholder="Description on Purchase Transactions" rows={2}
-              value={form.purchase_description} onChange={(e) => handleChange("purchase_description", e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <h3 className="text-xs font-semibold text-gray-500 uppercase">
+              Purchase Information
+            </h3>
+            <textarea
+              placeholder="Description on Purchase Transactions"
+              rows={2}
+              value={form.purchase_description}
+              onChange={(e) =>
+                handleChange("purchase_description", e.target.value)
+              }
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Cost</label>
-                <input type="number" step="0.01" min="0" value={form.cost} onChange={(e) => handleChange("cost", e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.cost}
+                  onChange={(e) => handleChange("cost", e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Preferred Vendor</label>
-                <VendorSelect vendors={vendors} value={form.preferred_vendor_id}
-                  onChange={(val) => handleChange("preferred_vendor_id", val)} onCreateVendor={handleCreateVendor} />
+                <label className="block text-xs text-gray-500 mb-1">
+                  Preferred Vendor
+                </label>
+                <VendorSelect
+                  vendors={vendors}
+                  value={form.preferred_vendor_id}
+                  onChange={(val) => handleChange("preferred_vendor_id", val)}
+                  onCreateVendor={handleCreateVendor}
+                />
               </div>
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">COGS Account</label>
-              <AccountSelect accounts={accounts} accountType="cogs" placeholder="Select COGS account..."
-                value={form.cogs_account_id} onChange={(val) => handleChange("cogs_account_id", val)} onCreateAccount={handleCreateAccount} />
+              <label className="block text-xs text-gray-500 mb-1">
+                COGS Account
+              </label>
+              <AccountSelect
+                accounts={accounts}
+                accountType="cogs"
+                placeholder="Select COGS account..."
+                value={form.cogs_account_id}
+                onChange={(val) => handleChange("cogs_account_id", val)}
+                onCreateAccount={handleCreateAccount}
+              />
             </div>
           </div>
 
           {/* ---- SALES INFORMATION ---- */}
           <div className="border border-gray-200 rounded-lg p-3 space-y-2">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase">Sales Information</h3>
-            <textarea placeholder="Description on Sales Transactions" rows={2}
-              value={form.description} onChange={(e) => handleChange("description", e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <h3 className="text-xs font-semibold text-gray-500 uppercase">
+              Sales Information
+            </h3>
+            <textarea
+              placeholder="Description on Sales Transactions"
+              rows={2}
+              value={form.description}
+              onChange={(e) => handleChange("description", e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Sales Price</label>
-              <input type="number" step="0.01" min="0" value={form.price} onChange={(e) => handleChange("price", e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <label className="block text-xs text-gray-500 mb-1">
+                Sales Price
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.price}
+                onChange={(e) => handleChange("price", e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Income Account</label>
-              <AccountSelect accounts={accounts} accountType="income" placeholder="Select income account..."
-                value={form.income_account_id} onChange={(val) => handleChange("income_account_id", val)} onCreateAccount={handleCreateAccount} />
+              <label className="block text-xs text-gray-500 mb-1">
+                Income Account
+              </label>
+              <AccountSelect
+                accounts={accounts}
+                accountType="income"
+                placeholder="Select income account..."
+                value={form.income_account_id}
+                onChange={(val) => handleChange("income_account_id", val)}
+                onCreateAccount={handleCreateAccount}
+              />
             </div>
           </div>
 
           {/* ---- INVENTORY INFORMATION ---- */}
           <div className="border border-gray-200 rounded-lg p-3 space-y-2">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase">Inventory Information</h3>
+            <h3 className="text-xs font-semibold text-gray-500 uppercase">
+              Inventory Information
+            </h3>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Asset Account</label>
-              <AccountSelect accounts={accounts} accountType="asset" placeholder="Select asset account..."
-                value={form.asset_account_id} onChange={(val) => handleChange("asset_account_id", val)} onCreateAccount={handleCreateAccount} />
+              <label className="block text-xs text-gray-500 mb-1">
+                Asset Account
+              </label>
+              <AccountSelect
+                accounts={accounts}
+                accountType="asset"
+                placeholder="Select asset account..."
+                value={form.asset_account_id}
+                onChange={(val) => handleChange("asset_account_id", val)}
+                onCreateAccount={handleCreateAccount}
+              />
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Reorder Point (Min)</label>
-                <input type="number" min="0" value={form.reorder_min} onChange={(e) => handleChange("reorder_min", e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <label className="block text-xs text-gray-500 mb-1">
+                  Reorder Point (Min)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.reorder_min}
+                  onChange={(e) => handleChange("reorder_min", e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Max</label>
-                <input type="number" min="0" value={form.reorder_max} onChange={(e) => handleChange("reorder_max", e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <input
+                  type="number"
+                  min="0"
+                  value={form.reorder_max}
+                  onChange={(e) => handleChange("reorder_max", e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">On Hand</label>
-                <input type="number" min="0" value={form.quantity} onChange={(e) => handleChange("quantity", e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <label className="block text-xs text-gray-500 mb-1">
+                  On Hand
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.quantity}
+                  onChange={(e) => handleChange("quantity", e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
             </div>
           </div>
 
           {/* ---- existing app fields: SKU ---- */}
-          <input placeholder="SKU (optional)" value={form.sku} onChange={(e) => handleChange("sku", e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <input
+            placeholder="SKU (optional)"
+            value={form.sku}
+            onChange={(e) => handleChange("sku", e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
 
           {!isEditMode && (
             <div>
-              <label className="block text-sm text-gray-600 mb-1">Product images</label>
-              <input type="file" accept="image/*" multiple onChange={handleFileChange} className="w-full text-sm" />
+              <label className="block text-sm text-gray-600 mb-1">
+                Product images
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleFileChange}
+                className="w-full text-sm"
+              />
             </div>
           )}
 
@@ -2513,22 +3105,40 @@ function ProductFormBody({ initialData, onSubmit, onClose, onImagesChanged, kind
             <ImageManager
               productId={initialData.id}
               images={images}
-              onChange={(imgs) => { setImages(imgs); onImagesChanged?.(); }}
+              onChange={(imgs) => {
+                setImages(imgs);
+                onImagesChanged?.();
+              }}
             />
           )}
 
           {isEditMode && (
             <p className="text-xs text-gray-400">
-              "On Hand" here is a manual override (use it for corrections). To receive new stock, use the "Add stock" button on the product card instead - it logs the addition with a timestamp under Stock History.
+              "On Hand" here is a manual override (use it for corrections). To
+              receive new stock, use the "Add stock" button on the product card
+              instead - it logs the addition with a timestamp under Stock
+              History.
             </p>
           )}
 
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
               Cancel
             </button>
-            <button type="submit" disabled={submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-              {submitting ? "Saving..." : isEditMode ? "Save Changes" : "Save Item"}
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {submitting
+                ? "Saving..."
+                : isEditMode
+                  ? "Save Changes"
+                  : "Save Item"}
             </button>
           </div>
         </form>
@@ -2638,7 +3248,7 @@ function InventoryView({ isAdmin, onBack }) {
     await loadData();
   };
 
-    const toggleExpanded = (id) => {
+  const toggleExpanded = (id) => {
     setExpandedIds((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
@@ -2648,8 +3258,12 @@ function InventoryView({ isAdmin, onBack }) {
 
   const pendingCount = requests.filter((r) => r.status === "pending").length;
   const q = searchTerm.trim().toLowerCase();
-  const sortedProducts = [...products].sort((a, b) => compareNames(a.name, b.name));
-  const shownProducts = q ? sortedProducts.filter((p) => p.name.toLowerCase().includes(q)) : sortedProducts;
+  const sortedProducts = [...products].sort((a, b) =>
+    compareNames(a.name, b.name),
+  );
+  const shownProducts = q
+    ? sortedProducts.filter((p) => p.name.toLowerCase().includes(q))
+    : sortedProducts;
 
   let content;
 
@@ -2664,13 +3278,19 @@ function InventoryView({ isAdmin, onBack }) {
         parentName={parentName}
         onBack={() => setItemId(null)}
         isAdmin={isAdmin}
-        onRestock={isAdmin && can("stock_bills", "create") ? (p) => setRestockingProduct(p) : undefined}
+        onRestock={
+          isAdmin && can("stock_bills", "create")
+            ? (p) => setRestockingProduct(p)
+            : undefined
+        }
         onRequest={!isAdmin ? (p) => setRequestingProduct(p) : undefined}
       />
     ) : (
       <div className="min-h-screen bg-gray-50">
         <SubHeader title="Item details" onBack={() => setItemId(null)} />
-        <p className="text-gray-400 text-center py-16">This item no longer exists.</p>
+        <p className="text-gray-400 text-center py-16">
+          This item no longer exists.
+        </p>
       </div>
     );
   } else {
@@ -2680,21 +3300,31 @@ function InventoryView({ isAdmin, onBack }) {
           <div className="flex flex-wrap gap-3 justify-between items-center mb-3">
             <div className="flex items-center gap-3">
               {onBack && (
-                <button onClick={onBack} aria-label="Back"
-                  className="p-2 -ml-2 rounded-full text-gray-500 hover:bg-gray-100">
+                <button
+                  onClick={onBack}
+                  aria-label="Back"
+                  className="p-2 -ml-2 rounded-full text-gray-500 hover:bg-gray-100"
+                >
                   <ArrowLeft size={20} />
                 </button>
               )}
               <div>
                 <h1 className="text-xl font-bold text-gray-900">Inventory</h1>
-                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isAdmin ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}>
+                <span
+                  className={`text-xs font-medium px-2 py-0.5 rounded-full ${isAdmin ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}
+                >
                   {isAdmin ? "Admin" : "Employee (Read Only)"}
                 </span>
               </div>
             </div>
             {isAdmin && activeTab === "products" && (
-              <button onClick={() => { setEditingProduct(null); setShowForm(true); }}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
+              <button
+                onClick={() => {
+                  setEditingProduct(null);
+                  setShowForm(true);
+                }}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700"
+              >
                 + Add Product
               </button>
             )}
@@ -2702,12 +3332,16 @@ function InventoryView({ isAdmin, onBack }) {
 
           {isAdmin && (
             <div className="flex gap-4 border-b border-gray-100 -mb-4">
-              <button onClick={() => setActiveTab("products")}
-                className={`pb-2 text-sm font-medium border-b-2 ${activeTab === "products" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
+              <button
+                onClick={() => setActiveTab("products")}
+                className={`pb-2 text-sm font-medium border-b-2 ${activeTab === "products" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+              >
                 Products
               </button>
-              <button onClick={() => setActiveTab("requests")}
-                className={`pb-2 text-sm font-medium border-b-2 flex items-center gap-1.5 ${activeTab === "requests" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
+              <button
+                onClick={() => setActiveTab("requests")}
+                className={`pb-2 text-sm font-medium border-b-2 flex items-center gap-1.5 ${activeTab === "requests" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+              >
                 Requests
                 {pendingCount > 0 && (
                   <span className="bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center">
@@ -2715,8 +3349,10 @@ function InventoryView({ isAdmin, onBack }) {
                   </span>
                 )}
               </button>
-              <button onClick={() => setActiveTab("history")}
-                className={`pb-2 text-sm font-medium border-b-2 flex items-center gap-1.5 ${activeTab === "history" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
+              <button
+                onClick={() => setActiveTab("history")}
+                className={`pb-2 text-sm font-medium border-b-2 flex items-center gap-1.5 ${activeTab === "history" ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+              >
                 <History size={14} />
                 Stock History
               </button>
@@ -2728,21 +3364,35 @@ function InventoryView({ isAdmin, onBack }) {
           {loading ? (
             <p className="text-gray-400 text-center py-16">Loading...</p>
           ) : activeTab === "requests" ? (
-            <RequestsPanel requests={requests} onApprove={handleApprove} onReject={handleReject} />
+            <RequestsPanel
+              requests={requests}
+              onApprove={handleApprove}
+              onReject={handleReject}
+            />
           ) : activeTab === "history" ? (
             <StockHistoryPanel movements={stockMovements} />
           ) : (
             <>
               <div className="mb-5">
-                <SearchBox value={searchTerm} onChange={setSearchTerm} placeholder="Search items..." />
+                <SearchBox
+                  value={searchTerm}
+                  onChange={setSearchTerm}
+                  placeholder="Search items..."
+                />
                 {isAdmin && (
-                  <p className="text-xs text-gray-400 mt-1.5">Hold an item to add stock</p>
+                  <p className="text-xs text-gray-400 mt-1.5">
+                    Hold an item to add stock
+                  </p>
                 )}
               </div>
               {products.length === 0 ? (
-                <p className="text-gray-400 text-center py-16">No products yet.</p>
+                <p className="text-gray-400 text-center py-16">
+                  No products yet.
+                </p>
               ) : shownProducts.length === 0 ? (
-                <p className="text-gray-400 text-center py-16">No items match your search.</p>
+                <p className="text-gray-400 text-center py-16">
+                  No items match your search.
+                </p>
               ) : (
                 <div className="space-y-2 max-w-2xl">
                   {shownProducts.map((item) => (
@@ -2773,7 +3423,10 @@ function InventoryView({ isAdmin, onBack }) {
         <ProductForm
           initialData={editingProduct}
           onSubmit={editingProduct ? handleUpdate : handleCreate}
-          onClose={() => { setShowForm(false); setEditingProduct(null); }}
+          onClose={() => {
+            setShowForm(false);
+            setEditingProduct(null);
+          }}
           onImagesChanged={() => loadData(true)}
         />
       )}
@@ -2803,26 +3456,28 @@ function ImportItemsModal({ onClose, onDone }) {
   const [tab, setTab] = useState("excel"); // "excel" | "images"
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
- 
+
   // --- Excel tab ---
   const [file, setFile] = useState(null);
   const [updateExisting, setUpdateExisting] = useState(false);
   const [check, setCheck] = useState(null); // result of the dry run
   const [imported, setImported] = useState(null); // result of the real import
- 
+
   // --- Images tab ---
   const [imageFiles, setImageFiles] = useState([]);
   const [replaceImages, setReplaceImages] = useState(false);
   const [imgProgress, setImgProgress] = useState(null);
   const [imgResult, setImgResult] = useState(null);
- 
+
   const runCheck = async (f, upd) => {
     if (!f) return;
     setBusy(true);
     setError(null);
     setImported(null);
     try {
-      setCheck(await importProductsFile(f, { updateExisting: upd, dryRun: true }));
+      setCheck(
+        await importProductsFile(f, { updateExisting: upd, dryRun: true }),
+      );
     } catch (err) {
       setCheck(null);
       setError(err.message);
@@ -2830,7 +3485,7 @@ function ImportItemsModal({ onClose, onDone }) {
       setBusy(false);
     }
   };
- 
+
   const handleFile = (e) => {
     const f = e.target.files[0] || null;
     e.target.value = "";
@@ -2838,12 +3493,15 @@ function ImportItemsModal({ onClose, onDone }) {
     setCheck(null);
     runCheck(f, updateExisting);
   };
- 
+
   const handleImport = async () => {
     setBusy(true);
     setError(null);
     try {
-      const result = await importProductsFile(file, { updateExisting, dryRun: false });
+      const result = await importProductsFile(file, {
+        updateExisting,
+        dryRun: false,
+      });
       setImported(result);
       if (result.saved) onDone?.();
     } catch (err) {
@@ -2852,7 +3510,7 @@ function ImportItemsModal({ onClose, onDone }) {
       setBusy(false);
     }
   };
- 
+
   const handleImages = async () => {
     setBusy(true);
     setError(null);
@@ -2861,7 +3519,11 @@ function ImportItemsModal({ onClose, onDone }) {
     try {
       // Group files that belong to the same item (PP-1.jpg, PP-1_2.jpg) so they always travel in the
       // same batch - otherwise "Replace existing images" could delete photos uploaded a moment earlier.
-      const keyOf = (f) => f.name.replace(/\.[^.]+$/, "").replace(/[\s_-]+\d+$/, "").toLowerCase();
+      const keyOf = (f) =>
+        f.name
+          .replace(/\.[^.]+$/, "")
+          .replace(/[\s_-]+\d+$/, "")
+          .toLowerCase();
       const groups = new Map();
       imageFiles.forEach((f) => {
         const k = keyOf(f);
@@ -2870,17 +3532,20 @@ function ImportItemsModal({ onClose, onDone }) {
       const batches = [];
       let current = [];
       for (const g of groups.values()) {
-        if (current.length && current.length + g.length > 6) { // small batches so big uploads don't time out
+        if (current.length && current.length + g.length > 6) {
+          // small batches so big uploads don't time out
           batches.push(current);
           current = [];
         }
         current.push(...g);
       }
       if (current.length) batches.push(current);
- 
+
       let done = 0;
       for (const batch of batches) {
-        setImgProgress(`Uploading ${done + batch.length} of ${imageFiles.length}...`);
+        setImgProgress(
+          `Uploading ${done + batch.length} of ${imageFiles.length}...`,
+        );
         const r = await bulkUploadImages(batch, replaceImages);
         done += batch.length;
         total.matched.push(...r.matched);
@@ -2897,134 +3562,258 @@ function ImportItemsModal({ onClose, onDone }) {
       setBusy(false);
     }
   };
- 
+
   const tabCls = (t) =>
     `pb-2 text-sm font-medium border-b-2 ${tab === t ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`;
- 
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold">Import items</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none" aria-label="Close">×</button>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+            aria-label="Close"
+          >
+            ×
+          </button>
         </div>
- 
+
         <div className="flex gap-4 border-b border-gray-100 mb-4">
-          <button onClick={() => { setTab("excel"); setError(null); }} className={tabCls("excel")}>1. Excel file</button>
-          <button onClick={() => { setTab("images"); setError(null); }} className={tabCls("images")}>2. Bulk images</button>
+          <button
+            onClick={() => {
+              setTab("excel");
+              setError(null);
+            }}
+            className={tabCls("excel")}
+          >
+            1. Excel file
+          </button>
+          <button
+            onClick={() => {
+              setTab("images");
+              setError(null);
+            }}
+            className={tabCls("images")}
+          >
+            2. Bulk images
+          </button>
         </div>
- 
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">{error}</div>}
- 
+
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">
+            {error}
+          </div>
+        )}
+
         {tab === "excel" && (
           <div className="space-y-3">
             <button
               type="button"
-              onClick={() => downloadImportTemplate().catch((err) => setError(err.message))}
+              onClick={() =>
+                downloadImportTemplate().catch((err) => setError(err.message))
+              }
               className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline"
             >
               <Download size={14} /> Download Excel template
             </button>
- 
+
             <label className="block border-2 border-dashed border-gray-300 rounded-lg px-4 py-6 text-center text-sm text-gray-500 cursor-pointer hover:bg-gray-50">
-              <input type="file" accept=".xlsx,.xlsm,.csv" onChange={handleFile} disabled={busy} className="hidden" />
+              <input
+                type="file"
+                accept=".xlsx,.xlsm,.csv"
+                onChange={handleFile}
+                disabled={busy}
+                className="hidden"
+              />
               {file ? file.name : "Click to choose an .xlsx or .csv file"}
             </label>
- 
+
             <label className="flex items-center gap-2 text-sm text-gray-600">
               <input
                 type="checkbox"
                 checked={updateExisting}
                 disabled={busy}
-                onChange={(e) => { setUpdateExisting(e.target.checked); runCheck(file, e.target.checked); }}
+                onChange={(e) => {
+                  setUpdateExisting(e.target.checked);
+                  runCheck(file, e.target.checked);
+                }}
               />
-              Update existing items that have the same SKU (stock quantity is never changed)
+              Update existing items that have the same SKU (stock quantity is
+              never changed)
             </label>
- 
-            {busy && !imported && <p className="text-sm text-gray-400">Checking file...</p>}
- 
+
+            {busy && !imported && (
+              <p className="text-sm text-gray-400">Checking file...</p>
+            )}
+
             {check && !imported && (
               <div className="text-sm border border-gray-200 rounded-lg p-3 space-y-2">
                 <p className="text-gray-700">
-                  {check.total_rows} rows: <b className="text-green-600">{check.created} new</b>
-                  {check.updated > 0 && <>, <b className="text-blue-600">{check.updated} updated</b></>}
-                  {check.skipped > 0 && <>, <b className="text-gray-500">{check.skipped} skipped (SKU exists)</b></>}
-                  {check.errors.length > 0 && <>, <b className="text-red-600">{check.errors.length} with errors</b></>}
+                  {check.total_rows} rows:{" "}
+                  <b className="text-green-600">{check.created} new</b>
+                  {check.updated > 0 && (
+                    <>
+                      , <b className="text-blue-600">{check.updated} updated</b>
+                    </>
+                  )}
+                  {check.skipped > 0 && (
+                    <>
+                      ,{" "}
+                      <b className="text-gray-500">
+                        {check.skipped} skipped (SKU exists)
+                      </b>
+                    </>
+                  )}
+                  {check.errors.length > 0 && (
+                    <>
+                      ,{" "}
+                      <b className="text-red-600">
+                        {check.errors.length} with errors
+                      </b>
+                    </>
+                  )}
                 </p>
                 {check.errors.length > 0 && (
                   <div className="max-h-40 overflow-y-auto bg-red-50 rounded p-2 text-xs text-red-700 space-y-0.5">
                     {check.errors.map((er, i) => (
-                      <p key={i}>Row {er.row}{er.name ? ` (${er.name})` : ""}: {er.message}</p>
+                      <p key={i}>
+                        Row {er.row}
+                        {er.name ? ` (${er.name})` : ""}: {er.message}
+                      </p>
                     ))}
-                    <p className="pt-1 font-medium">Nothing is imported until every row is fixed. Correct the file and choose it again.</p>
+                    <p className="pt-1 font-medium">
+                      Nothing is imported until every row is fixed. Correct the
+                      file and choose it again.
+                    </p>
                   </div>
                 )}
               </div>
             )}
- 
+
             {imported?.saved && (
               <div className="bg-green-50 text-green-700 text-sm rounded-lg px-3 py-2">
-                Done: {imported.created} created, {imported.updated} updated, {imported.skipped} skipped.
-                {" "}Now open the <b>Bulk images</b> tab to add pictures.
+                Done: {imported.created} created, {imported.updated} updated,{" "}
+                {imported.skipped} skipped. Now open the <b>Bulk images</b> tab
+                to add pictures.
               </div>
             )}
- 
+
             <div className="flex justify-end gap-2 pt-1">
-              <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Close</button>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
+              >
+                Close
+              </button>
               <button
                 onClick={handleImport}
-                disabled={busy || !check || check.errors.length > 0 || (check.created + check.updated === 0) || imported?.saved}
+                disabled={
+                  busy ||
+                  !check ||
+                  check.errors.length > 0 ||
+                  check.created + check.updated === 0 ||
+                  imported?.saved
+                }
                 className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
               >
-                {busy && check ? "Importing..." : `Import ${check ? check.created + check.updated : ""} items`}
+                {busy && check
+                  ? "Importing..."
+                  : `Import ${check ? check.created + check.updated : ""} items`}
               </button>
             </div>
           </div>
         )}
- 
+
         {tab === "images" && (
           <div className="space-y-3">
             <p className="text-sm text-gray-500">
-              Select many pictures at once. Each file name must match the item's <b>SKU</b> (or exact item name),
-              e.g. <code className="bg-gray-100 px-1 rounded">PP-A4-001.jpg</code>. For extra photos of the same
-              item use <code className="bg-gray-100 px-1 rounded">PP-A4-001_2.jpg</code>.
+              Select many pictures at once. Each file name must match the item's{" "}
+              <b>SKU</b> (or exact item name), e.g.{" "}
+              <code className="bg-gray-100 px-1 rounded">PP-A4-001.jpg</code>.
+              For extra photos of the same item use{" "}
+              <code className="bg-gray-100 px-1 rounded">PP-A4-001_2.jpg</code>.
               The first picture becomes the main image.
             </p>
- 
+
             <label className="block border-2 border-dashed border-gray-300 rounded-lg px-4 py-6 text-center text-sm text-gray-500 cursor-pointer hover:bg-gray-50">
               <input
-                type="file" accept="image/*" multiple disabled={busy} className="hidden"
-                onChange={(e) => { setImageFiles(Array.from(e.target.files)); setImgResult(null); e.target.value = ""; }}
+                type="file"
+                accept="image/*"
+                multiple
+                disabled={busy}
+                className="hidden"
+                onChange={(e) => {
+                  setImageFiles(Array.from(e.target.files));
+                  setImgResult(null);
+                  e.target.value = "";
+                }}
               />
-              {imageFiles.length ? `${imageFiles.length} image(s) selected` : "Click to choose images"}
+              {imageFiles.length
+                ? `${imageFiles.length} image(s) selected`
+                : "Click to choose images"}
             </label>
- 
+
             <label className="flex items-center gap-2 text-sm text-gray-600">
-              <input type="checkbox" checked={replaceImages} disabled={busy} onChange={(e) => setReplaceImages(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={replaceImages}
+                disabled={busy}
+                onChange={(e) => setReplaceImages(e.target.checked)}
+              />
               Replace the item's existing images
             </label>
- 
-            {imgProgress && <p className="text-sm text-gray-400">{imgProgress}</p>}
- 
+
+            {imgProgress && (
+              <p className="text-sm text-gray-400">{imgProgress}</p>
+            )}
+
             {imgResult && (
               <div className="text-sm border border-gray-200 rounded-lg p-3 space-y-2">
-                <p><b className="text-green-600">{imgResult.matched.length} uploaded</b>
-                  {imgResult.unmatched.length > 0 && <>, <b className="text-amber-600">{imgResult.unmatched.length} no matching item</b></>}
-                  {imgResult.failed.length > 0 && <>, <b className="text-red-600">{imgResult.failed.length} failed</b></>}
+                <p>
+                  <b className="text-green-600">
+                    {imgResult.matched.length} uploaded
+                  </b>
+                  {imgResult.unmatched.length > 0 && (
+                    <>
+                      ,{" "}
+                      <b className="text-amber-600">
+                        {imgResult.unmatched.length} no matching item
+                      </b>
+                    </>
+                  )}
+                  {imgResult.failed.length > 0 && (
+                    <>
+                      ,{" "}
+                      <b className="text-red-600">
+                        {imgResult.failed.length} failed
+                      </b>
+                    </>
+                  )}
                 </p>
                 {imgResult.unmatched.length > 0 && (
-                  <p className="text-xs text-amber-700 max-h-24 overflow-y-auto">No match: {imgResult.unmatched.join(", ")}</p>
+                  <p className="text-xs text-amber-700 max-h-24 overflow-y-auto">
+                    No match: {imgResult.unmatched.join(", ")}
+                  </p>
                 )}
                 {imgResult.failed.length > 0 && (
                   <p className="text-xs text-red-700 max-h-24 overflow-y-auto">
-                    {imgResult.failed.map((f) => `${f.file} (${f.message})`).join(", ")}
+                    {imgResult.failed
+                      .map((f) => `${f.file} (${f.message})`)
+                      .join(", ")}
                   </p>
                 )}
               </div>
             )}
- 
+
             <div className="flex justify-end gap-2 pt-1">
-              <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Close</button>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
+              >
+                Close
+              </button>
               <button
                 onClick={handleImages}
                 disabled={busy || imageFiles.length === 0}
@@ -3190,9 +3979,27 @@ function LowStockBell() {
 // The colours themselves live in src/index.css (html[data-theme=...] rules); this only picks + remembers them.
 const APP_THEME_KEY = "app_theme_v1";
 const APP_THEMES = [
-  { id: "light", name: "Light", note: "Default look", swatch: ["#f9fafb", "#ffffff", "#1f2640"], accent: "blue" },
-  { id: "dark", name: "Dark", note: "Easy on the eyes", swatch: ["#0f172a", "#1e293b", "#0b1220"], accent: "blue" },
-  { id: "quickbooks", name: "QuickBooks", note: "Blue-grey with green accent", swatch: ["#dfe7ef", "#ffffff", "#0f3a5f"], accent: "green" },
+  {
+    id: "light",
+    name: "Light",
+    note: "Default look",
+    swatch: ["#f9fafb", "#ffffff", "#1f2640"],
+    accent: "blue",
+  },
+  {
+    id: "dark",
+    name: "Dark",
+    note: "Easy on the eyes",
+    swatch: ["#0f172a", "#1e293b", "#0b1220"],
+    accent: "blue",
+  },
+  {
+    id: "quickbooks",
+    name: "QuickBooks",
+    note: "Blue-grey with green accent",
+    swatch: ["#dfe7ef", "#ffffff", "#0f3a5f"],
+    accent: "green",
+  },
 ];
 const APP_ACCENTS = [
   { id: "blue", name: "Blue", color: "#2563eb" },
@@ -3202,7 +4009,11 @@ const APP_ACCENTS = [
   { id: "teal", name: "Teal", color: "#0d9488" },
   { id: "rose", name: "Rose", color: "#e11d48" },
 ];
-const APP_SIZES = [["small", "Small"], ["normal", "Normal"], ["large", "Large"]];
+const APP_SIZES = [
+  ["small", "Small"],
+  ["normal", "Normal"],
+  ["large", "Large"],
+];
 const APP_THEME_DEFAULT = { theme: "light", accent: "blue", size: "normal" };
 
 function loadAppTheme() {
@@ -3210,12 +4021,20 @@ function loadAppTheme() {
     const s = JSON.parse(localStorage.getItem(APP_THEME_KEY) || "null");
     if (s && typeof s === "object") {
       return {
-        theme: APP_THEMES.some((t) => t.id === s.theme) ? s.theme : APP_THEME_DEFAULT.theme,
-        accent: APP_ACCENTS.some((a) => a.id === s.accent) ? s.accent : APP_THEME_DEFAULT.accent,
-        size: APP_SIZES.some(([id]) => id === s.size) ? s.size : APP_THEME_DEFAULT.size,
+        theme: APP_THEMES.some((t) => t.id === s.theme)
+          ? s.theme
+          : APP_THEME_DEFAULT.theme,
+        accent: APP_ACCENTS.some((a) => a.id === s.accent)
+          ? s.accent
+          : APP_THEME_DEFAULT.accent,
+        size: APP_SIZES.some(([id]) => id === s.size)
+          ? s.size
+          : APP_THEME_DEFAULT.size,
       };
     }
-  } catch (e) { /* broken saved data: use defaults */ }
+  } catch (e) {
+    /* broken saved data: use defaults */
+  }
   return APP_THEME_DEFAULT;
 }
 
@@ -3242,21 +4061,34 @@ function ThemePanel() {
     const next = { ...s, ...patch };
     setS(next);
     applyAppTheme(next);
-    try { localStorage.setItem(APP_THEME_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked */ }
+    try {
+      localStorage.setItem(APP_THEME_KEY, JSON.stringify(next));
+    } catch (e) {
+      /* storage blocked */
+    }
   };
 
   if (!open) return null;
 
   const label = "text-xs font-semibold text-gray-500 uppercase mb-2";
   return (
-    <div className="fixed inset-0 z-[60] flex justify-end bg-black/40" onClick={() => setOpen(false)}>
+    <div
+      className="fixed inset-0 z-[60] flex justify-end bg-black/40"
+      onClick={() => setOpen(false)}
+    >
       <div
         className="w-full max-w-sm h-full overflow-y-auto bg-white text-gray-900 p-5 space-y-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Appearance</h2>
-          <button type="button" onClick={() => setOpen(false)} className="text-gray-500 hover:text-gray-900 text-xl leading-none">✕</button>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="text-gray-500 hover:text-gray-900 text-xl leading-none"
+          >
+            ✕
+          </button>
         </div>
 
         <section>
@@ -3268,11 +4100,19 @@ function ThemePanel() {
                 type="button"
                 onClick={() => change({ theme: t.id, accent: t.accent })}
                 className={`w-full flex items-center gap-3 border rounded-lg px-3 py-2.5 text-left ${
-                  s.theme === t.id ? "border-blue-600 ring-1 ring-blue-600" : "border-gray-300 hover:bg-gray-50"
+                  s.theme === t.id
+                    ? "border-blue-600 ring-1 ring-blue-600"
+                    : "border-gray-300 hover:bg-gray-50"
                 }`}
               >
                 <span className="flex shrink-0">
-                  {t.swatch.map((c) => <span key={c} className="w-6 h-6 border border-gray-300" style={{ background: c }} />)}
+                  {t.swatch.map((c) => (
+                    <span
+                      key={c}
+                      className="w-6 h-6 border border-gray-300"
+                      style={{ background: c }}
+                    />
+                  ))}
                 </span>
                 <span className="flex-1 min-w-0">
                   <span className="block text-sm font-medium">{t.name}</span>
@@ -3314,7 +4154,9 @@ function ThemePanel() {
                 type="button"
                 onClick={() => change({ size: id })}
                 className={`flex-1 px-3 py-1.5 text-sm border ${
-                  s.size === id ? "bg-blue-600 border-blue-600 text-white" : "border-gray-300 text-gray-700 hover:bg-gray-50"
+                  s.size === id
+                    ? "bg-blue-600 border-blue-600 text-white"
+                    : "border-gray-300 text-gray-700 hover:bg-gray-50"
                 }`}
               >
                 {name}
@@ -3324,14 +4166,24 @@ function ThemePanel() {
         </section>
 
         <div className="flex gap-2 pt-2">
-          <button type="button" onClick={() => change(APP_THEME_DEFAULT)} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+          <button
+            type="button"
+            onClick={() => change(APP_THEME_DEFAULT)}
+            className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
             Reset
           </button>
-          <button type="button" onClick={() => setOpen(false)} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700">
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700"
+          >
             Done
           </button>
         </div>
-        <p className="text-xs text-gray-400">Applies to every page. Saved automatically on this device.</p>
+        <p className="text-xs text-gray-400">
+          Applies to every page. Saved automatically on this device.
+        </p>
       </div>
     </div>
   );
@@ -3695,7 +4547,10 @@ function AppHeader({
 }
 
 // ---------- Shared helpers for the home tabs / items browser ----------
-const nameCollator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+const nameCollator = new Intl.Collator(undefined, {
+  sensitivity: "base",
+  numeric: true,
+});
 const compareNames = (a, b) => nameCollator.compare(a, b); // A-Z, ignores upper/lower case
 const getDepartment = (slug) => DEPARTMENTS.find((d) => d.slug === slug);
 
@@ -3716,7 +4571,9 @@ function HomeTabs({ active, onChange, isAdmin }) {
       key={id}
       onClick={() => onChange(id)}
       className={`pb-2 text-sm font-medium border-b-2 flex items-center gap-1.5 ${
-        active === id ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"
+        active === id
+          ? "border-blue-600 text-blue-600"
+          : "border-transparent text-gray-500 hover:text-gray-700"
       }`}
     >
       <Icon size={14} />
@@ -3752,7 +4609,10 @@ function HomeTabs({ active, onChange, isAdmin }) {
 function SearchBox({ value, onChange, placeholder, onFocus }) {
   return (
     <div className="relative">
-      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+      <Search
+        size={16}
+        className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+      />
       <input
         type="text"
         value={value}
@@ -3794,8 +4654,8 @@ function StockBadge({ quantity, lowStock }) {
     quantity <= 0
       ? "bg-red-100 text-red-700"
       : lowStock
-      ? "bg-amber-100 text-amber-700"
-      : "bg-green-100 text-green-700";
+        ? "bg-amber-100 text-amber-700"
+        : "bg-green-100 text-green-700";
   const label =
     quantity < 0
       ? `Out of stock (${quantity})`
@@ -3804,7 +4664,13 @@ function StockBadge({ quantity, lowStock }) {
         : lowStock
           ? `${quantity} · Low stock`
           : `${quantity} in stock`;
-  return <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${colorClass}`}>{label}</span>;
+  return (
+    <span
+      className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${colorClass}`}
+    >
+      {label}
+    </span>
+  );
 }
 
 function ItemRow({ item, onClick, expanded, onToggle, isAdmin, onLongPress }) {
@@ -3900,15 +4766,28 @@ function DetailRow({ label, value }) {
   return (
     <div className="flex justify-between gap-4">
       <dt className="text-gray-500">{label}</dt>
-      <dd className="text-gray-900 font-medium text-right break-words">{value}</dd>
+      <dd className="text-gray-900 font-medium text-right break-words">
+        {value}
+      </dd>
     </div>
   );
 }
 
 // ---------- Full item card ----------
-function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRestock, onRequest }) {
+function ItemDetail({
+  item,
+  parentName,
+  onBack,
+  isAdmin,
+  onEdit,
+  onDelete,
+  onRestock,
+  onRequest,
+}) {
   const [imageIndex, setImageIndex] = useState(0);
-  const images = [...(item.images || [])].sort((a, b) => Number(b.is_primary) - Number(a.is_primary));
+  const images = [...(item.images || [])].sort(
+    (a, b) => Number(b.is_primary) - Number(a.is_primary),
+  );
   const current = images[Math.min(imageIndex, images.length - 1)];
   return (
     <div className="min-h-screen bg-gray-50">
@@ -3917,9 +4796,15 @@ function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRes
         <div className="max-w-md mx-auto bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="aspect-square bg-gray-100">
             {current ? (
-              <img src={current.image_url} alt={item.name} className="w-full h-full object-cover" />
+              <img
+                src={current.image_url}
+                alt={item.name}
+                className="w-full h-full object-cover"
+              />
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">No image</div>
+              <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">
+                No image
+              </div>
             )}
           </div>
 
@@ -3931,10 +4816,16 @@ function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRes
                   onClick={() => setImageIndex(i)}
                   aria-label={`Show image ${i + 1}`}
                   className={`w-14 h-14 shrink-0 rounded-lg overflow-hidden border-2 ${
-                    img.id === current.id ? "border-blue-600" : "border-transparent"
+                    img.id === current.id
+                      ? "border-blue-600"
+                      : "border-transparent"
                   }`}
                 >
-                  <img src={img.image_url} alt="" className="w-full h-full object-cover" />
+                  <img
+                    src={img.image_url}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
                 </button>
               ))}
             </div>
@@ -3942,64 +4833,105 @@ function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRes
 
           <div className="p-5">
             <div className="flex justify-between items-start gap-3">
-              <h2 className="text-lg font-semibold text-gray-900">{item.name}</h2>
+              <h2 className="text-lg font-semibold text-gray-900">
+                {item.name}
+              </h2>
               <span className="text-sm font-medium text-gray-600 whitespace-nowrap">
                 Rs.{Number(item.price).toFixed(2)}
               </span>
             </div>
             <div className="mt-2 flex items-center gap-2">
-              <StockBadge quantity={item.quantity} lowStock={isLowStock(item)} />
+              <StockBadge
+                quantity={item.quantity}
+                lowStock={isLowStock(item)}
+              />
               {isAdmin ? (
                 <div className="ml-auto flex items-center gap-1">
                   {onRestock && (
-                    <button onClick={() => onRestock(item)} title="Add stock" aria-label="Add stock"
-                      className="p-2 rounded-full text-green-600 hover:bg-green-50 transition-colors">
+                    <button
+                      onClick={() => onRestock(item)}
+                      title="Add stock"
+                      aria-label="Add stock"
+                      className="p-2 rounded-full text-green-600 hover:bg-green-50 transition-colors"
+                    >
                       <PackagePlus size={18} />
                     </button>
                   )}
                   {onEdit && (
-                    <button onClick={() => onEdit(item)} title="Edit product" aria-label="Edit product"
-                      className="p-2 rounded-full text-blue-600 hover:bg-blue-50 transition-colors">
+                    <button
+                      onClick={() => onEdit(item)}
+                      title="Edit product"
+                      aria-label="Edit product"
+                      className="p-2 rounded-full text-blue-600 hover:bg-blue-50 transition-colors"
+                    >
                       <Pencil size={18} />
                     </button>
                   )}
                   {onDelete && (
-                    <button onClick={() => onDelete(item.id)} title="Delete product" aria-label="Delete product"
-                      className="p-2 rounded-full text-red-500 hover:bg-red-50 transition-colors">
+                    <button
+                      onClick={() => onDelete(item.id)}
+                      title="Delete product"
+                      aria-label="Delete product"
+                      className="p-2 rounded-full text-red-500 hover:bg-red-50 transition-colors"
+                    >
                       <Trash2 size={18} />
                     </button>
                   )}
                 </div>
               ) : (
                 onRequest && (
-                  <button onClick={() => onRequest(item)} disabled={item.quantity === 0}
-                    className="ml-auto text-xs bg-blue-600 text-white px-3 py-1.5 rounded-full font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                  <button
+                    onClick={() => onRequest(item)}
+                    disabled={item.quantity === 0}
+                    className="ml-auto text-xs bg-blue-600 text-white px-3 py-1.5 rounded-full font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
                     Request
                   </button>
                 )
               )}
-              </div>
+            </div>
 
             {isLowStock(item) && (
               <p className="mt-3 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                Stock is at or below the reorder point ({item.reorder_min}). Consider restocking.
+                Stock is at or below the reorder point ({item.reorder_min}).
+                Consider restocking.
               </p>
             )}
 
             <dl className="mt-4 space-y-3 text-sm">
               <DetailRow label="SKU" value={item.sku || "—"} />
-              {parentName && <DetailRow label="Subitem of" value={parentName} />}
+              {parentName && (
+                <DetailRow label="Subitem of" value={parentName} />
+              )}
               {isAdmin && (
                 <>
                   <DetailRow label="Type" value={item.item_type || "—"} />
                   {item.manufacturer_part_number && (
-                    <DetailRow label="Mfr. Part #" value={item.manufacturer_part_number} />
+                    <DetailRow
+                      label="Mfr. Part #"
+                      value={item.manufacturer_part_number}
+                    />
                   )}
-                  <DetailRow label="Cost" value={`Rs.${Number(item.cost).toFixed(2)}`} />
-                  <DetailRow label="COGS Account" value={item.cogs_account?.name || "—"} />
-                  <DetailRow label="Income Account" value={item.income_account?.name || "—"} />
-                  <DetailRow label="Asset Account" value={item.asset_account?.name || "—"} />
-                  <DetailRow label="Preferred Vendor" value={item.preferred_vendor?.name || "—"} />
+                  <DetailRow
+                    label="Cost"
+                    value={`Rs.${Number(item.cost).toFixed(2)}`}
+                  />
+                  <DetailRow
+                    label="COGS Account"
+                    value={item.cogs_account?.name || "—"}
+                  />
+                  <DetailRow
+                    label="Income Account"
+                    value={item.income_account?.name || "—"}
+                  />
+                  <DetailRow
+                    label="Asset Account"
+                    value={item.asset_account?.name || "—"}
+                  />
+                  <DetailRow
+                    label="Preferred Vendor"
+                    value={item.preferred_vendor?.name || "—"}
+                  />
                   {(item.reorder_min != null || item.reorder_max != null) && (
                     <DetailRow
                       label="Reorder Point"
@@ -4017,7 +4949,9 @@ function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRes
               {item.description && (
                 <div>
                   <dt className="text-gray-500 mb-1">Description</dt>
-                  <dd className="text-gray-900 whitespace-pre-line">{item.description}</dd>
+                  <dd className="text-gray-900 whitespace-pre-line">
+                    {item.description}
+                  </dd>
                 </div>
               )}
             </dl>
@@ -4028,7 +4962,14 @@ function ItemDetail({ item, parentName, onBack, isAdmin, onEdit, onDelete, onRes
   );
 }
 
-function SubitemRow({ item, onClick, expanded, onToggle, isAdmin, onLongPress }) {
+function SubitemRow({
+  item,
+  onClick,
+  expanded,
+  onToggle,
+  isAdmin,
+  onLongPress,
+}) {
   const image = item.images?.find((i) => i.is_primary) || item.images?.[0];
   const low = isLowStock(item);
   const hasSubitems = (item.subitems?.length ?? 0) > 0;
@@ -4046,10 +4987,16 @@ function SubitemRow({ item, onClick, expanded, onToggle, isAdmin, onLongPress })
     }, 550);
   };
   const cancelLongPress = () => {
-    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
   };
   const handleClick = () => {
-    if (longPressTriggered.current) { longPressTriggered.current = false; return; }
+    if (longPressTriggered.current) {
+      longPressTriggered.current = false;
+      return;
+    }
     (hasSubitems ? onToggle : onClick)();
   };
 
@@ -4120,15 +5067,31 @@ function SubitemRow({ item, onClick, expanded, onToggle, isAdmin, onLongPress })
 
 function SubitemBranch({ item, onSelect, forceOpen, isAdmin, onLongPress }) {
   const [open, setOpen] = useState(false);
-  const kids = [...(item.subitems || [])].sort((a, b) => compareNames(a.name, b.name));
+  const kids = [...(item.subitems || [])].sort((a, b) =>
+    compareNames(a.name, b.name),
+  );
   const isOpen = forceOpen || open;
   return (
     <div className="space-y-1.5">
-      <SubitemRow item={item} onClick={() => onSelect(item.id)} expanded={isOpen} onToggle={() => setOpen((o) => !o)} isAdmin={isAdmin} onLongPress={onLongPress} />
+      <SubitemRow
+        item={item}
+        onClick={() => onSelect(item.id)}
+        expanded={isOpen}
+        onToggle={() => setOpen((o) => !o)}
+        isAdmin={isAdmin}
+        onLongPress={onLongPress}
+      />
       {kids.length > 0 && isOpen && (
         <div className="ml-6 space-y-1.5">
           {kids.map((k) => (
-            <SubitemBranch key={k.id} item={k} onSelect={onSelect} forceOpen={forceOpen} isAdmin={isAdmin} onLongPress={onLongPress} />
+            <SubitemBranch
+              key={k.id}
+              item={k}
+              onSelect={onSelect}
+              forceOpen={forceOpen}
+              isAdmin={isAdmin}
+              onLongPress={onLongPress}
+            />
           ))}
         </div>
       )}
@@ -4136,18 +5099,40 @@ function SubitemBranch({ item, onSelect, forceOpen, isAdmin, onLongPress }) {
   );
 }
 
-function ItemRowWithSubitems({ item, expanded, onToggle, onSelect, forceOpen, isAdmin, onLongPress }) {
+function ItemRowWithSubitems({
+  item,
+  expanded,
+  onToggle,
+  onSelect,
+  forceOpen,
+  isAdmin,
+  onLongPress,
+}) {
   const subitems = item.subitems || [];
   const sorted = [...subitems].sort((a, b) => compareNames(a.name, b.name));
   const isOpen = forceOpen || expanded;
 
   return (
     <div className="space-y-1.5">
-      <ItemRow item={item} onClick={() => onSelect(item.id)} expanded={isOpen} onToggle={onToggle} isAdmin={isAdmin} onLongPress={onLongPress} />
+      <ItemRow
+        item={item}
+        onClick={() => onSelect(item.id)}
+        expanded={isOpen}
+        onToggle={onToggle}
+        isAdmin={isAdmin}
+        onLongPress={onLongPress}
+      />
       {sorted.length > 0 && isOpen && (
         <div className="ml-6 space-y-1.5">
           {sorted.map((sub) => (
-            <SubitemBranch key={sub.id} item={sub} onSelect={onSelect} forceOpen={forceOpen} isAdmin={isAdmin} onLongPress={onLongPress} />
+            <SubitemBranch
+              key={sub.id}
+              item={sub}
+              onSelect={onSelect}
+              forceOpen={forceOpen}
+              isAdmin={isAdmin}
+              onLongPress={onLongPress}
+            />
           ))}
         </div>
       )}
@@ -4156,7 +5141,14 @@ function ItemRowWithSubitems({ item, expanded, onToggle, onSelect, forceOpen, is
 }
 
 // ---------- Items page: flat A-Z item list (with subitems nested) -> full item card ----------
-function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdded }) {
+function ItemsPage({
+  isAdmin,
+  itemId,
+  fromParam,
+  go,
+  refreshToken,
+  onProductAdded,
+}) {
   const { can } = useAuth();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -4164,13 +5156,13 @@ function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdde
   const [search, setSearch] = useState("");
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [restockingProduct, setRestockingProduct] = useState(null);
-  
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       if (document.hidden) return;
       try {
-        const data = await getProducts(); 
+        const data = await getProducts();
         if (cancelled) return;
         setProducts(data);
         setError(null);
@@ -4182,7 +5174,9 @@ function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdde
     };
     load();
     const interval = setInterval(load, 10000);
-    const onVisible = () => { if (!document.hidden) load(); };
+    const onVisible = () => {
+      if (!document.hidden) load();
+    };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
@@ -4218,7 +5212,11 @@ function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdde
             parentName={parentName}
             onBack={back}
             isAdmin={isAdmin}
-            onRestock={isAdmin && can("stock_bills", "create") ? (p) => setRestockingProduct(p) : undefined}
+            onRestock={
+              isAdmin && can("stock_bills", "create")
+                ? (p) => setRestockingProduct(p)
+                : undefined
+            }
           />
           {restockingProduct && (
             <RestockModal
@@ -4233,14 +5231,18 @@ function ItemsPage({ isAdmin, itemId, fromParam, go, refreshToken, onProductAdde
     return (
       <div className="min-h-screen bg-gray-50">
         <SubHeader title="Item details" onBack={back} />
-        <p className="text-gray-400 text-center py-16">{loading ? "Loading..." : "This item no longer exists."}</p>
+        <p className="text-gray-400 text-center py-16">
+          {loading ? "Loading..." : "This item no longer exists."}
+        </p>
       </div>
     );
   }
 
   // flat A-Z list of top-level items, each with its subitems nested underneath
   const q = search.trim().toLowerCase();
-  const sortedProducts = [...products].sort((a, b) => compareNames(a.name, b.name));
+  const sortedProducts = [...products].sort((a, b) =>
+    compareNames(a.name, b.name),
+  );
   const shownProducts = q ? filterItemTree(sortedProducts, q) : sortedProducts;
   return (
     <div className="min-h-screen bg-gray-50">
@@ -4321,13 +5323,19 @@ function ItemActionsMenu({ onEdit, onDelete }) {
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[130px]">
             <button
-              onClick={() => { setOpen(false); onEdit(); }}
+              onClick={() => {
+                setOpen(false);
+                onEdit();
+              }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
             >
               <Pencil size={14} /> Edit
             </button>
             <button
-              onClick={() => { setOpen(false); onDelete(); }}
+              onClick={() => {
+                setOpen(false);
+                onDelete();
+              }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
             >
               <Trash2 size={14} /> Delete
@@ -4380,7 +5388,9 @@ function ManageItemRow({ item, expanded, onToggle, onEdit, onDelete }) {
 
 function ManageSubitemBranch({ item, onEdit, onDelete }) {
   const [open, setOpen] = useState(false);
-  const kids = [...(item.subitems || [])].sort((a, b) => compareNames(a.name, b.name));
+  const kids = [...(item.subitems || [])].sort((a, b) =>
+    compareNames(a.name, b.name),
+  );
   const hasSubitems = kids.length > 0;
   const image = item.images?.find((i) => i.is_primary) || item.images?.[0];
   return (
@@ -4391,23 +5401,46 @@ function ManageSubitemBranch({ item, onEdit, onDelete }) {
       >
         <CornerDownRight size={14} className="text-gray-300 shrink-0" />
         <div className="w-9 h-9 shrink-0 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center">
-          {image ? <img src={image.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-[8px] text-gray-400">No image</span>}
+          {image ? (
+            <img
+              src={image.image_url}
+              alt=""
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <span className="text-[8px] text-gray-400">No image</span>
+          )}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
+          <p className="text-sm font-medium text-gray-900 truncate">
+            {item.name}
+          </p>
           {hasSubitems && (
             <p className="text-xs text-blue-600 font-medium">
               {kids.length} {kids.length === 1 ? "subitem" : "subitems"}
             </p>
           )}
         </div>
-        {hasSubitems && (open ? <ChevronDown size={16} className="text-gray-400 shrink-0" /> : <ChevronRight size={16} className="text-gray-400 shrink-0" />)}
-        <ItemActionsMenu onEdit={() => onEdit(item)} onDelete={() => onDelete(item.id)} />
+        {hasSubitems &&
+          (open ? (
+            <ChevronDown size={16} className="text-gray-400 shrink-0" />
+          ) : (
+            <ChevronRight size={16} className="text-gray-400 shrink-0" />
+          ))}
+        <ItemActionsMenu
+          onEdit={() => onEdit(item)}
+          onDelete={() => onDelete(item.id)}
+        />
       </div>
       {hasSubitems && open && (
         <div className="ml-6 space-y-1.5">
           {kids.map((k) => (
-            <ManageSubitemBranch key={k.id} item={k} onEdit={onEdit} onDelete={onDelete} />
+            <ManageSubitemBranch
+              key={k.id}
+              item={k}
+              onEdit={onEdit}
+              onDelete={onDelete}
+            />
           ))}
         </div>
       )}
@@ -4434,7 +5467,11 @@ function ManagePage({ go, refreshToken, onProductAdded }) {
 
   const load = async () => {
     try {
-      const [productList, vendorList, accountList] = await Promise.all([getProducts(), getVendors(), getAccounts()]);
+      const [productList, vendorList, accountList] = await Promise.all([
+        getProducts(),
+        getVendors(),
+        getAccounts(),
+      ]);
       setProducts(productList);
       setVendors(vendorList);
       setAccounts(accountList);
@@ -4446,7 +5483,9 @@ function ManagePage({ go, refreshToken, onProductAdded }) {
     }
   };
 
-  useEffect(() => { load(); }, [refreshToken]);
+  useEffect(() => {
+    load();
+  }, [refreshToken]);
 
   const toggleExpanded = (id) => {
     setExpandedIds((prev) => {
@@ -4501,23 +5540,44 @@ function ManagePage({ go, refreshToken, onProductAdded }) {
     }
   };
 
-const q = search.trim().toLowerCase();
-const sortedProducts = [...products].sort((a, b) => compareNames(a.name, b.name));
-const shownProducts = q ? sortedProducts.filter((p) => p.name.toLowerCase().includes(q)) : sortedProducts;
+  const q = search.trim().toLowerCase();
+  const sortedProducts = [...products].sort((a, b) =>
+    compareNames(a.name, b.name),
+  );
+  const shownProducts = q
+    ? sortedProducts.filter((p) => p.name.toLowerCase().includes(q))
+    : sortedProducts;
 
-const sortedVendors = [...vendors].sort((a, b) => compareNames(a.name, b.name));
-const shownVendors = q ? sortedVendors.filter((v) => v.name.toLowerCase().includes(q)) : sortedVendors;
+  const sortedVendors = [...vendors].sort((a, b) =>
+    compareNames(a.name, b.name),
+  );
+  const shownVendors = q
+    ? sortedVendors.filter((v) => v.name.toLowerCase().includes(q))
+    : sortedVendors;
 
-const sortedAccounts = [...accounts].sort((a, b) => compareNames(a.name, b.name));
-const shownAccounts = q ? sortedAccounts.filter((a) => a.name.toLowerCase().includes(q)) : sortedAccounts;
+  const sortedAccounts = [...accounts].sort((a, b) =>
+    compareNames(a.name, b.name),
+  );
+  const shownAccounts = q
+    ? sortedAccounts.filter((a) => a.name.toLowerCase().includes(q))
+    : sortedAccounts;
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={true} active="manage" onProductAdded={onProductAdded} onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <AppHeader
+        isAdmin={true}
+        active="manage"
+        onProductAdded={onProductAdded}
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
 
       <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5">
-          <SearchBox value={search} onChange={setSearch} placeholder="Search Items / Vendors / Acc..." />
+          <SearchBox
+            value={search}
+            onChange={setSearch}
+            placeholder="Search Items / Vendors / Acc..."
+          />
         </div>
 
         {loading ? (
@@ -4529,14 +5589,19 @@ const shownAccounts = q ? sortedAccounts.filter((a) => a.name.toLowerCase().incl
         ) : (
           <div className="space-y-2">
             {shownProducts.map((item) => {
-              const sortedSubs = [...(item.subitems || [])].sort((a, b) => compareNames(a.name, b.name));
+              const sortedSubs = [...(item.subitems || [])].sort((a, b) =>
+                compareNames(a.name, b.name),
+              );
               return (
                 <div key={item.id} className="space-y-1.5">
                   <ManageItemRow
                     item={item}
                     expanded={expandedIds.has(item.id)}
                     onToggle={() => toggleExpanded(item.id)}
-                    onEdit={() => { setEditingProduct(item); setShowForm(true); }}
+                    onEdit={() => {
+                      setEditingProduct(item);
+                      setShowForm(true);
+                    }}
                     onDelete={() => handleDelete(item.id)}
                   />
                   {sortedSubs.length > 0 && expandedIds.has(item.id) && (
@@ -4545,7 +5610,10 @@ const shownAccounts = q ? sortedAccounts.filter((a) => a.name.toLowerCase().incl
                         <ManageSubitemBranch
                           key={sub.id}
                           item={sub}
-                          onEdit={(p) => { setEditingProduct(p); setShowForm(true); }}
+                          onEdit={(p) => {
+                            setEditingProduct(p);
+                            setShowForm(true);
+                          }}
                           onDelete={handleDelete}
                         />
                       ))}
@@ -4559,18 +5627,30 @@ const shownAccounts = q ? sortedAccounts.filter((a) => a.name.toLowerCase().incl
 
         {shownVendors.length > 0 && (
           <div className="mt-8">
-            <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">Vendors</h2>
+            <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">
+              Vendors
+            </h2>
             <div className="space-y-2">
               {shownVendors.map((v) => (
-                <div key={v.id} className="w-full flex items-center gap-3 border rounded-xl p-3 bg-white border-gray-200">
+                <div
+                  key={v.id}
+                  className="w-full flex items-center gap-3 border rounded-xl p-3 bg-white border-gray-200"
+                >
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-900 truncate">{v.name}</p>
+                    <p className="font-medium text-gray-900 truncate">
+                      {v.name}
+                    </p>
                     <p className="text-xs text-gray-400 truncate">
-                      {[v.contact_person, v.phone, v.email].filter(Boolean).join(" · ") || "No contact details"}
+                      {[v.contact_person, v.phone, v.email]
+                        .filter(Boolean)
+                        .join(" · ") || "No contact details"}
                     </p>
                   </div>
                   <ItemActionsMenu
-                    onEdit={() => { setEditingVendor(v); setShowVendorForm(true); }}
+                    onEdit={() => {
+                      setEditingVendor(v);
+                      setShowVendorForm(true);
+                    }}
                     onDelete={() => setDeleteVendorTarget(v)}
                   />
                 </div>
@@ -4581,16 +5661,28 @@ const shownAccounts = q ? sortedAccounts.filter((a) => a.name.toLowerCase().incl
 
         {shownAccounts.length > 0 && (
           <div className="mt-8">
-            <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">Accounts</h2>
+            <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2">
+              Accounts
+            </h2>
             <div className="space-y-2">
               {shownAccounts.map((a) => (
-                <div key={a.id} className="w-full flex items-center gap-3 border rounded-xl p-3 bg-white border-gray-200">
+                <div
+                  key={a.id}
+                  className="w-full flex items-center gap-3 border rounded-xl p-3 bg-white border-gray-200"
+                >
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-900 truncate">{a.name}</p>
-                    <p className="text-xs text-gray-400 truncate">{ACCOUNT_TYPE_NAMES[a.account_type] || a.account_type}</p>
+                    <p className="font-medium text-gray-900 truncate">
+                      {a.name}
+                    </p>
+                    <p className="text-xs text-gray-400 truncate">
+                      {ACCOUNT_TYPE_NAMES[a.account_type] || a.account_type}
+                    </p>
                   </div>
                   <ItemActionsMenu
-                    onEdit={() => { setEditingAccount(a); setShowAccountForm(true); }}
+                    onEdit={() => {
+                      setEditingAccount(a);
+                      setShowAccountForm(true);
+                    }}
                     onDelete={() => setDeleteAccountTarget(a)}
                   />
                 </div>
@@ -4604,7 +5696,10 @@ const shownAccounts = q ? sortedAccounts.filter((a) => a.name.toLowerCase().incl
         <ProductForm
           initialData={editingProduct}
           onSubmit={handleUpdate}
-          onClose={() => { setShowForm(false); setEditingProduct(null); }}
+          onClose={() => {
+            setShowForm(false);
+            setEditingProduct(null);
+          }}
         />
       )}
 
@@ -4612,7 +5707,10 @@ const shownAccounts = q ? sortedAccounts.filter((a) => a.name.toLowerCase().incl
         <VendorForm
           initialData={editingVendor}
           onSubmit={handleUpdateVendor}
-          onClose={() => { setShowVendorForm(false); setEditingVendor(null); }}
+          onClose={() => {
+            setShowVendorForm(false);
+            setEditingVendor(null);
+          }}
         />
       )}
 
@@ -4628,7 +5726,10 @@ const shownAccounts = q ? sortedAccounts.filter((a) => a.name.toLowerCase().incl
         <AccountForm
           initialData={editingAccount}
           onSubmit={handleUpdateAccount}
-          onClose={() => { setShowAccountForm(false); setEditingAccount(null); }}
+          onClose={() => {
+            setShowAccountForm(false);
+            setEditingAccount(null);
+          }}
         />
       )}
 
@@ -4643,9 +5744,14 @@ const shownAccounts = q ? sortedAccounts.filter((a) => a.name.toLowerCase().incl
   );
 }
 
-
 // ---------- Department home screen ----------
-function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded }) {
+function DepartmentHome({
+  isAdmin,
+  onSelect,
+  onTab,
+  refreshToken,
+  onProductAdded,
+}) {
   const [itemCounts, setItemCounts] = useState({});
   const [pendingCounts, setPendingCounts] = useState({});
 
@@ -4660,7 +5766,9 @@ function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded
         ]);
         if (cancelled) return;
         const items = {};
-        products.forEach((p) => { items[p.department] = (items[p.department] || 0) + 1; });
+        products.forEach((p) => {
+          items[p.department] = (items[p.department] || 0) + 1;
+        });
         const waiting = {};
         pending.forEach((r) => {
           const d = r.product?.department;
@@ -4674,7 +5782,9 @@ function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded
     };
     load();
     const interval = setInterval(load, 10000);
-    const onVisible = () => { if (!document.hidden) load(); };
+    const onVisible = () => {
+      if (!document.hidden) load();
+    };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
@@ -4685,7 +5795,12 @@ function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="home" onTab={onTab} onProductAdded={onProductAdded} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="home"
+        onTab={onTab}
+        onProductAdded={onProductAdded}
+      />
 
       <main className="p-4 sm:p-6">
         <p className="text-sm text-gray-500 mb-4">Select a department</p>
@@ -4701,17 +5816,29 @@ function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded
               >
                 <div className="flex items-center gap-3 flex-1 min-w-0">
                   <div className="w-14 h-14 shrink-0 rounded-xl border border-gray-200 bg-white flex items-center justify-center overflow-hidden p-1.5">
-                    <img src={d.logo} alt="" className="max-w-full max-h-full object-contain" />
+                    <img
+                      src={d.logo}
+                      alt=""
+                      className="max-w-full max-h-full object-contain"
+                    />
                   </div>
-                  <p className="font-semibold text-gray-900 uppercase truncate">{d.name}</p>
+                  <p className="font-semibold text-gray-900 uppercase truncate">
+                    {d.name}
+                  </p>
 
                   {d.extraLogo && (
                     <>
                       <span className="text-gray-300">|</span>
                       <div className="w-14 h-14 shrink-0 rounded-xl border border-gray-200 bg-white flex items-center justify-center overflow-hidden p-1.5">
-                        <img src={d.extraLogo} alt="" className="max-w-full max-h-full object-contain" />
+                        <img
+                          src={d.extraLogo}
+                          alt=""
+                          className="max-w-full max-h-full object-contain"
+                        />
                       </div>
-                      <p className="font-semibold text-gray-900 uppercase truncate">{d.extraName}</p>
+                      <p className="font-semibold text-gray-900 uppercase truncate">
+                        {d.extraName}
+                      </p>
                     </>
                   )}
                 </div>
@@ -4738,7 +5865,6 @@ function DepartmentHome({ isAdmin, onSelect, onTab, refreshToken, onProductAdded
   );
 }
 
-
 // ---------- Vendors (admin only) ----------
 function VendorsPage({ isAdmin, go }) {
   const [vendors, setVendors] = useState([]);
@@ -4758,7 +5884,9 @@ function VendorsPage({ isAdmin, go }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const handleDelete = async (id) => {
     if (!confirm("Delete this vendor?")) return;
@@ -4782,7 +5910,10 @@ function VendorsPage({ isAdmin, go }) {
 
       <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex justify-end">
-          <button onClick={() => setFormOpen(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
+          <button
+            onClick={() => setFormOpen(true)}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700"
+          >
             + Add Vendor
           </button>
         </div>
@@ -4795,11 +5926,16 @@ function VendorsPage({ isAdmin, go }) {
         ) : (
           <div className="space-y-2">
             {sorted.map((v) => (
-              <div key={v.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3">
+              <div
+                key={v.id}
+                className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3"
+              >
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-gray-900 truncate">{v.name}</p>
                   <p className="text-xs text-gray-400 truncate">
-                    {[v.contact_person, v.phone, v.email].filter(Boolean).join(" · ") || "No contact details"}
+                    {[v.contact_person, v.phone, v.email]
+                      .filter(Boolean)
+                      .join(" · ") || "No contact details"}
                   </p>
                 </div>
               </div>
@@ -4811,7 +5947,10 @@ function VendorsPage({ isAdmin, go }) {
       {formOpen && (
         <VendorForm
           onClose={() => setFormOpen(false)}
-          onSubmit={async (payload) => { await createVendor(payload); await load(); }}
+          onSubmit={async (payload) => {
+            await createVendor(payload);
+            await load();
+          }}
         />
       )}
     </div>
@@ -4829,7 +5968,8 @@ function VendorForm({ initialData, onClose, onSubmit }) {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const handleChange = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+  const handleChange = (field, value) =>
+    setForm((prev) => ({ ...prev, [field]: value }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -4852,26 +5992,62 @@ function VendorForm({ initialData, onClose, onSubmit }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">{isEditMode ? "Edit Vendor" : "Add Vendor"}</h2>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <input required placeholder="Vendor name" value={form.name} onChange={(e) => handleChange("name", e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          <input placeholder="Contact person" value={form.contact_person} onChange={(e) => handleChange("contact_person", e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          <div className="grid grid-cols-2 gap-3">
-            <input placeholder="Phone" value={form.phone} onChange={(e) => handleChange("phone", e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            <input placeholder="Email" value={form.email} onChange={(e) => handleChange("email", e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        <h2 className="text-lg font-semibold mb-4">
+          {isEditMode ? "Edit Vendor" : "Add Vendor"}
+        </h2>
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
           </div>
-          <textarea placeholder="Address" value={form.address} onChange={(e) => handleChange("address", e.target.value)} rows={2}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        )}
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <input
+            required
+            placeholder="Vendor name"
+            value={form.name}
+            onChange={(e) => handleChange("name", e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <input
+            placeholder="Contact person"
+            value={form.contact_person}
+            onChange={(e) => handleChange("contact_person", e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              placeholder="Phone"
+              value={form.phone}
+              onChange={(e) => handleChange("phone", e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <input
+              placeholder="Email"
+              value={form.email}
+              onChange={(e) => handleChange("email", e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <textarea
+            placeholder="Address"
+            value={form.address}
+            onChange={(e) => handleChange("address", e.target.value)}
+            rows={2}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
               Cancel
             </button>
-            <button type="submit" disabled={submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
               {submitting ? "Saving..." : "Save Vendor"}
             </button>
           </div>
@@ -4882,7 +6058,8 @@ function VendorForm({ initialData, onClose, onSubmit }) {
 }
 
 // ---------- Taxes (admin only) ----------
-const formatRate = (r) => `${Number(r || 0).toLocaleString(undefined, { maximumFractionDigits: 3 })}%`;
+const formatRate = (r) =>
+  `${Number(r || 0).toLocaleString(undefined, { maximumFractionDigits: 3 })}%`;
 
 function TaxesPage({ isAdmin, go }) {
   const [taxes, setTaxes] = useState([]);
@@ -4890,7 +6067,10 @@ function TaxesPage({ isAdmin, go }) {
   const [error, setError] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
-  useQuickNew(() => { setEditing(null); setFormOpen(true); });
+  useQuickNew(() => {
+    setEditing(null);
+    setFormOpen(true);
+  });
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const load = async () => {
@@ -4904,7 +6084,9 @@ function TaxesPage({ isAdmin, go }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const handleDelete = async () => {
     try {
@@ -4919,15 +6101,23 @@ function TaxesPage({ isAdmin, go }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="taxes" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="taxes"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
 
       <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <p className="flex-1 text-sm text-gray-500">
-            Tax rates you can add to invoice and bill lines. The default one is pre-selected on new lines.
+            Tax rates you can add to invoice and bill lines. The default one is
+            pre-selected on new lines.
           </p>
           <button
-            onClick={() => { setEditing(null); setFormOpen(true); }}
+            onClick={() => {
+              setEditing(null);
+              setFormOpen(true);
+            }}
             className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
           >
             + New Tax
@@ -4939,25 +6129,39 @@ function TaxesPage({ isAdmin, go }) {
         ) : error ? (
           <p className="text-red-500 text-center py-16">{error}</p>
         ) : taxes.length === 0 ? (
-          <p className="text-gray-400 text-center py-16">No taxes yet. Add one, for example VAT 18%.</p>
+          <p className="text-gray-400 text-center py-16">
+            No taxes yet. Add one, for example VAT 18%.
+          </p>
         ) : (
           <div className="space-y-2">
             {taxes.map((t) => (
-              <div key={t.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3">
+              <div
+                key={t.id}
+                className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3"
+              >
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-gray-900 truncate">{t.name}</p>
                   <div className="flex gap-1.5 mt-0.5">
                     {t.is_default && (
-                      <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Default</span>
+                      <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                        Default
+                      </span>
                     )}
                     {!t.is_active && (
-                      <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Inactive</span>
+                      <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
+                        Inactive
+                      </span>
                     )}
                   </div>
                 </div>
-                <p className="font-semibold text-gray-900 shrink-0">{formatRate(t.rate)}</p>
+                <p className="font-semibold text-gray-900 shrink-0">
+                  {formatRate(t.rate)}
+                </p>
                 <ItemActionsMenu
-                  onEdit={() => { setEditing(t); setFormOpen(true); }}
+                  onEdit={() => {
+                    setEditing(t);
+                    setFormOpen(true);
+                  }}
                   onDelete={() => setDeleteTarget(t)}
                 />
               </div>
@@ -4969,7 +6173,10 @@ function TaxesPage({ isAdmin, go }) {
       {formOpen && (
         <TaxForm
           initialData={editing}
-          onClose={() => { setFormOpen(false); setEditing(null); }}
+          onClose={() => {
+            setFormOpen(false);
+            setEditing(null);
+          }}
           onSubmit={async (id, payload) => {
             if (id) await updateTax(id, payload);
             else await createTax(payload);
@@ -4999,9 +6206,12 @@ function TaxForm({ initialData, onClose, onSubmit }) {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const set = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
-  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
-  const rateOk = form.rate !== "" && Number(form.rate) >= 0 && Number(form.rate) <= 100;
+  const set = (field, value) =>
+    setForm((prev) => ({ ...prev, [field]: value }));
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const rateOk =
+    form.rate !== "" && Number(form.rate) >= 0 && Number(form.rate) <= 100;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -5025,26 +6235,70 @@ function TaxForm({ initialData, onClose, onSubmit }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-        <h2 className="text-lg font-semibold mb-4">{isEditMode ? "Edit Tax" : "New Tax"}</h2>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <h2 className="text-lg font-semibold mb-4">
+          {isEditMode ? "Edit Tax" : "New Tax"}
+        </h2>
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-3">
-          <input required placeholder="Tax name * (e.g. VAT)" value={form.name} onChange={(e) => set("name", e.target.value)} className={cls} />
+          <input
+            required
+            placeholder="Tax name * (e.g. VAT)"
+            value={form.name}
+            onChange={(e) => set("name", e.target.value)}
+            className={cls}
+          />
           <label className="text-xs text-gray-500 block">
             Rate (%) *
-            <input required type="number" min="0" max="100" step="0.001" value={form.rate} onChange={(e) => set("rate", e.target.value)} className={cls + " mt-1"} />
+            <input
+              required
+              type="number"
+              min="0"
+              max="100"
+              step="0.001"
+              value={form.rate}
+              onChange={(e) => set("rate", e.target.value)}
+              className={cls + " mt-1"}
+            />
           </label>
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={form.is_active} onChange={(e) => set("is_active", e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={form.is_active}
+              onChange={(e) => set("is_active", e.target.checked)}
+            />
             Active
           </label>
-          <label className={`flex items-center gap-2 text-sm ${form.is_active ? "" : "text-gray-400"}`}>
-            <input type="checkbox" disabled={!form.is_active} checked={form.is_active && form.is_default} onChange={(e) => set("is_default", e.target.checked)} />
+          <label
+            className={`flex items-center gap-2 text-sm ${form.is_active ? "" : "text-gray-400"}`}
+          >
+            <input
+              type="checkbox"
+              disabled={!form.is_active}
+              checked={form.is_active && form.is_default}
+              onChange={(e) => set("is_default", e.target.checked)}
+            />
             Make this the default tax
           </label>
-          <p className="text-xs text-gray-400">Changing a rate later never changes invoices that already used it.</p>
+          <p className="text-xs text-gray-400">
+            Changing a rate later never changes invoices that already used it.
+          </p>
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
-            <button type="submit" disabled={submitting || !form.name.trim() || !rateOk} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting || !form.name.trim() || !rateOk}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
               {submitting ? "Saving..." : "Save Tax"}
             </button>
           </div>
@@ -5132,18 +6386,28 @@ function useReport(fetcher, deps) {
 }
 
 function ReportBody({ loading, error, data, children }) {
-  if (loading && !data) return <p className="text-gray-400 text-center py-16">Loading...</p>;
+  if (loading && !data)
+    return <p className="text-gray-400 text-center py-16">Loading...</p>;
   if (error) return <p className="text-red-500 text-center py-16">{error}</p>;
   if (!data) return null;
   return children;
 }
 
 function ReportLine({ label, amount, bold = false, indent = false, tone }) {
-  const color = tone === "good" ? "text-green-700" : tone === "bad" ? "text-red-600" : "text-gray-900";
+  const color =
+    tone === "good"
+      ? "text-green-700"
+      : tone === "bad"
+        ? "text-red-600"
+        : "text-gray-900";
   return (
-    <div className={`flex justify-between gap-3 py-1.5 text-sm ${indent ? "pl-4" : ""} ${bold ? "font-semibold" : ""}`}>
+    <div
+      className={`flex justify-between gap-3 py-1.5 text-sm ${indent ? "pl-4" : ""} ${bold ? "font-semibold" : ""}`}
+    >
       <span className={bold ? "text-gray-900" : "text-gray-600"}>{label}</span>
-      <span className={`shrink-0 ${bold ? color : "text-gray-900"}`}>{formatRs(amount)}</span>
+      <span className={`shrink-0 ${bold ? color : "text-gray-900"}`}>
+        {formatRs(amount)}
+      </span>
     </div>
   );
 }
@@ -5151,124 +6415,258 @@ function ReportLine({ label, amount, bold = false, indent = false, tone }) {
 function ReportCard({ title, children }) {
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
-      {title && <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">{title}</h2>}
+      {title && (
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">
+          {title}
+        </h2>
+      )}
       {children}
     </div>
   );
 }
 
-const dateInputCls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1";
+const dateInputCls =
+  "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1";
+
+// ---------- Profit & Loss: table with current vs previous period ----------
+const isoToDate = (iso) => new Date(`${iso}T00:00:00`);
+const addDays = (iso, n) => {
+  const d = isoToDate(iso);
+  d.setDate(d.getDate() + n);
+  return localIso(d);
+};
+// previous period = same number of days, ending the day before "from"
+function previousPeriod(from, to) {
+  const len = Math.round((isoToDate(to) - isoToDate(from)) / 86400000) + 1;
+  const prevTo = addDays(from, -1);
+  return [addDays(prevTo, -(len - 1)), prevTo];
+}
+
+const PL_DECIMALS = 2; // set to 0 to show whole rupees
+const plNum = (n) => {
+  const v = Number(n || 0);
+  if (v === 0) return "-";
+  const s = Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: PL_DECIMALS, maximumFractionDigits: PL_DECIMALS });
+  return v < 0 ? `(${s})` : s;
+};
+const plPct = (cur, prev) => {
+  if (!prev) return cur ? "-" : "0.0%";
+  const p = ((cur - prev) / Math.abs(prev)) * 100;
+  return p < 0 ? `(${Math.abs(p).toFixed(1)}%)` : `${p.toFixed(1)}%`;
+};
+
+function buildPL(cur, prev) {
+  const sec = (d, key) => (d.sections || []).find((s) => s.key === key) || { accounts: [], total: 0, title: key };
+  const group = (key) => {
+    const c = sec(cur, key);
+    const p = sec(prev, key);
+    const map = new Map();
+    (c.accounts || []).forEach((a) => map.set(a.id, { id: a.id, name: a.name, cur: a.amount, prev: 0 }));
+    (p.accounts || []).forEach((a) => {
+      const r = map.get(a.id);
+      if (r) r.prev = a.amount;
+      else map.set(a.id, { id: a.id, name: a.name, cur: 0, prev: a.amount });
+    });
+    return { key, title: c.title || p.title, rows: [...map.values()], cur: c.total || 0, prev: p.total || 0 };
+  };
+  const block = (keys) => {
+    const groups = keys.map(group);
+    return {
+      groups,
+      cur: groups.reduce((s, g) => s + g.cur, 0),
+      prev: groups.reduce((s, g) => s + g.prev, 0),
+    };
+  };
+  return {
+    revenue: block(["income", "other_income"]),
+    expenses: block(["cogs", "expense", "other_expense"]),
+    gross: { cur: cur.gross_profit, prev: prev.gross_profit },
+    operating: { cur: cur.operating_profit, prev: prev.operating_profit },
+    net: { cur: cur.net_profit, prev: prev.net_profit },
+  };
+}
+
+const PL_NAVY = "bg-[#0a2a5e] text-[#fff]";
+const PL_BAND = "bg-[#dbe8fb] text-[#0a2a5e]";
+
+// kind = item | total | grand
+function PLRow({ label, cur, prev, kind = "item" }) {
+  const num = "px-3 py-1.5 text-sm text-right whitespace-nowrap tabular-nums";
+  const rowCls =
+    kind === "grand"
+      ? `${PL_NAVY} font-bold`
+      : kind === "total"
+      ? `${PL_BAND} font-bold`
+      : "border-b border-[#dbe4f3] text-[#0f172a]";
+  return (
+    <tr className={rowCls}>
+      <td className={`px-3 py-1.5 text-sm ${kind === "item" ? "pl-6" : ""}`}>{label}</td>
+      <td className={num}>{plNum(cur)}</td>
+      <td className={num}>{plNum(prev)}</td>
+      <td className={num}>{plNum(cur - prev)}</td>
+      <td className={num}>{plPct(cur, prev)}</td>
+    </tr>
+  );
+}
+
+function PLBand({ children }) {
+  return (
+    <tr className={PL_BAND}>
+      <td colSpan={5} className="px-3 py-1.5 text-sm font-bold">{children}</td>
+    </tr>
+  );
+}
 
 function ProfitLossReport() {
   const [from, setFrom] = useState(`${new Date().getFullYear()}-01-01`);
   const [to, setTo] = useState(localIso());
+  const [prevFrom, prevTo] = previousPeriod(from, to);
 
   const { data, loading, error } = useReport(
-    () => getProfitLoss(from, to),
+    async () => {
+      const [cur, prev] = await Promise.all([getProfitLoss(from, to), getProfitLoss(prevFrom, prevTo)]);
+      return { cur, prev };
+    },
     [from, to],
   );
 
-  const subtotals = data
-    ? {
-        cogs: ["Gross Profit", data.gross_profit],
-        expense: ["Operating Profit", data.operating_profit],
-      }
-    : {};
+  const pl = data ? buildPL(data.cur, data.prev) : null;
+
+  const renderGroups = (blk) =>
+    blk.groups
+      .filter((g) => g.rows.length > 0)
+      .map((g) => (
+        <Fragment key={g.key}>
+          <tr>
+            <td colSpan={5} className="px-3 pt-2 pb-0.5 text-xs font-semibold uppercase tracking-wide text-[#64748b]">
+              {g.title}
+            </td>
+          </tr>
+          {g.rows.map((r) => (
+            <PLRow key={`${g.key}-${r.id}`} label={r.name} cur={r.cur} prev={r.prev} />
+          ))}
+        </Fragment>
+      ));
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 mb-4 max-w-sm">
-        <label className="text-xs text-gray-500">
-          From
-          <input
-            type="date"
-            value={from}
-            max={to}
-            onChange={(e) => e.target.value && setFrom(e.target.value)}
-            className={dateInputCls}
-          />
-        </label>
-
-        <label className="text-xs text-gray-500">
-          To
-          <input
-            type="date"
-            value={to}
-            min={from}
-            onChange={(e) => e.target.value && setTo(e.target.value)}
-            className={dateInputCls}
-          />
-        </label>
+      <div className="flex flex-wrap items-end gap-3 mb-4 print:hidden">
+        <div className="grid grid-cols-2 gap-3 max-w-sm flex-1">
+          <label className="text-xs text-gray-500">
+            From
+            <input
+              type="date"
+              value={from}
+              max={to}
+              onChange={(e) => e.target.value && setFrom(e.target.value)}
+              className={dateInputCls}
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            To
+            <input
+              type="date"
+              value={to}
+              min={from}
+              onChange={(e) => e.target.value && setTo(e.target.value)}
+              className={dateInputCls}
+            />
+          </label>
+        </div>
+        <button
+          onClick={() => window.print()}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+        >
+          <Printer size={16} /> Print / Save PDF
+        </button>
       </div>
 
       <ReportBody loading={loading} error={error} data={data}>
-        {data && (
-          <ReportCard>
-            <p className="text-xs text-gray-400 mb-2">
-              Accrual basis · {formatJournalDate(data.date_from)} to{" "}
-              {formatJournalDate(data.date_to)}
+        {pl && (
+          <div className="pl-statement bg-[#fff] text-[#0f172a] rounded-xl border border-[#dbe4f3] p-4">
+            <p className="text-xs text-[#64748b] mb-3">
+              Accrual basis · {formatJournalDate(from)} to{" "}
+              {formatJournalDate(to)} · compared with{" "}
+              {formatJournalDate(prevFrom)} to {formatJournalDate(prevTo)}
             </p>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] border-collapse">
+                <thead>
+                  <tr className={PL_NAVY}>
+                    <th className="px-3 py-2.5 text-left text-sm font-semibold rounded-tl-lg">
+                      Particulars
+                    </th>
+                    <th className="px-3 py-2.5 text-right text-sm font-semibold">
+                      Current Period
+                      <br />
+                      (Rs.)
+                    </th>
+                    <th className="px-3 py-2.5 text-right text-sm font-semibold">
+                      Previous Period
+                      <br />
+                      (Rs.)
+                    </th>
+                    <th className="px-3 py-2.5 text-right text-sm font-semibold">
+                      Variance
+                      <br />
+                      (Rs.)
+                    </th>
+                    <th className="px-3 py-2.5 text-right text-sm font-semibold rounded-tr-lg">
+                      Variance %
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <PLBand>Revenue</PLBand>
+                  {renderGroups(pl.revenue)}
+                  <PLRow
+                    kind="total"
+                    label="Total Revenue"
+                    cur={pl.revenue.cur}
+                    prev={pl.revenue.prev}
+                  />
 
-            {(data.sections || []).map((s) => {
-              if (
-                (s.key === "other_income" || s.key === "other_expense") &&
-                (!s.accounts || s.accounts.length === 0)
-              ) {
-                return null;
-              }
+                  <tr>
+                    <td colSpan={5} className="h-3" />
+                  </tr>
 
-              return (
-                <div key={s.key}>
-                  <p className="text-sm font-semibold text-gray-900 mt-3">
-                    {s.title}
-                  </p>
+                  <PLBand>Expenses</PLBand>
+                  {renderGroups(pl.expenses)}
+                  <PLRow
+                    kind="total"
+                    label="Total Expenses"
+                    cur={pl.expenses.cur}
+                    prev={pl.expenses.prev}
+                  />
 
-                  {(!s.accounts || s.accounts.length === 0) && (
-                    <p className="text-xs text-gray-400 pl-4 py-1">
-                      No entries in this period
-                    </p>
-                  )}
+                  <tr>
+                    <td colSpan={5} className="h-3" />
+                  </tr>
 
-                  {(s.accounts || []).map((a) => (
-                    <ReportLine
-                      key={a.id}
-                      label={a.name}
-                      amount={a.amount}
-                      indent
-                    />
-                  ))}
+                  <PLRow
+                    label="Gross Profit"
+                    cur={pl.gross.cur}
+                    prev={pl.gross.prev}
+                  />
+                  <PLRow
+                    label="Operating Profit"
+                    cur={pl.operating.cur}
+                    prev={pl.operating.prev}
+                  />
 
-                  <div className="border-t border-gray-100 mt-1">
-                    <ReportLine
-                      label={`Total ${s.title}`}
-                      amount={s.total}
-                      bold
-                    />
-                  </div>
-
-                  {subtotals[s.key] && (
-                    <div className="bg-gray-50 rounded-lg px-2 mt-2">
-                      <ReportLine
-                        label={subtotals[s.key][0]}
-                        amount={subtotals[s.key][1]}
-                        bold
-                        tone={subtotals[s.key][1] < 0 ? "bad" : "good"}
-                      />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-
-            <div className="bg-gray-100 rounded-lg px-2 mt-4">
-              <ReportLine
-                label="Net Profit / Loss"
-                amount={data.net_profit}
-                bold
-                tone={data.net_profit < 0 ? "bad" : "good"}
-              />
+                  <tr>
+                    <td colSpan={5} className="h-2" />
+                  </tr>
+                  <PLRow
+                    kind="grand"
+                    label="Net Profit / (Loss)"
+                    cur={pl.net.cur}
+                    prev={pl.net.prev}
+                  />
+                </tbody>
+              </table>
             </div>
-          </ReportCard>
+          </div>
         )}
       </ReportBody>
     </>
@@ -5290,7 +6688,7 @@ function SalesSummaryReport() {
   const now = new Date();
   const [mode, setMode] = useState("month");
   const [day, setDay] = useState(localIso());
-  const [monthVal, setMonthVal] = useState(localIso().slice(0, 7));   // "YYYY-MM"
+  const [monthVal, setMonthVal] = useState(localIso().slice(0, 7)); // "YYYY-MM"
   const [yearVal, setYearVal] = useState(String(now.getFullYear()));
   const [customFrom, setCustomFrom] = useState(`${now.getFullYear()}-01-01`);
   const [customTo, setCustomTo] = useState(localIso());
@@ -5300,10 +6698,14 @@ function SalesSummaryReport() {
     const y = now.getFullYear();
     const m = now.getMonth();
     if (mode === "today") return [localIso(), localIso()];
-    if (mode === "month") return [localIso(new Date(y, m, 1)), localIso(new Date(y, m + 1, 0))];
-    if (mode === "lastMonth") return [localIso(new Date(y, m - 1, 1)), localIso(new Date(y, m, 0))];
+    if (mode === "month")
+      return [localIso(new Date(y, m, 1)), localIso(new Date(y, m + 1, 0))];
+    if (mode === "lastMonth")
+      return [localIso(new Date(y, m - 1, 1)), localIso(new Date(y, m, 0))];
     if (mode === "pickMonth") {
-      const [py, pm] = (monthVal || localIso().slice(0, 7)).split("-").map(Number);
+      const [py, pm] = (monthVal || localIso().slice(0, 7))
+        .split("-")
+        .map(Number);
       return [localIso(new Date(py, pm - 1, 1)), localIso(new Date(py, pm, 0))];
     }
     if (mode === "pickDay") return [day, day];
@@ -5314,12 +6716,17 @@ function SalesSummaryReport() {
     return [customFrom, customTo];
   })();
 
-  const { data, loading, error } = useReport(() => getSalesSummary(from, to), [from, to]);
+  const { data, loading, error } = useReport(
+    () => getSalesSummary(from, to),
+    [from, to],
+  );
 
   const stat = (label, value, tone) => (
     <div className="bg-white border border-gray-200 rounded-xl p-3">
       <p className="text-xs text-gray-400">{label}</p>
-      <p className={`text-lg font-bold mt-0.5 ${tone === "bad" ? "text-red-600" : tone === "good" ? "text-green-700" : "text-gray-900"}`}>
+      <p
+        className={`text-lg font-bold mt-0.5 ${tone === "bad" ? "text-red-600" : tone === "good" ? "text-green-700" : "text-gray-900"}`}
+      >
         {value}
       </p>
     </div>
@@ -5336,7 +6743,9 @@ function SalesSummaryReport() {
             key={key}
             onClick={() => setMode(key)}
             className={`px-3 py-1 rounded-lg text-xs font-medium border ${
-              mode === key ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+              mode === key
+                ? "bg-gray-800 text-white border-gray-800"
+                : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
             }`}
           >
             {label}
@@ -5348,13 +6757,23 @@ function SalesSummaryReport() {
         {mode === "pickDay" && (
           <label className="text-xs text-gray-500 flex-1 min-w-[140px]">
             Day
-            <input type="date" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} className={dateInputCls} />
+            <input
+              type="date"
+              value={day}
+              onChange={(e) => e.target.value && setDay(e.target.value)}
+              className={dateInputCls}
+            />
           </label>
         )}
         {mode === "pickMonth" && (
           <label className="text-xs text-gray-500 flex-1 min-w-[140px]">
             Month
-            <input type="month" value={monthVal} onChange={(e) => e.target.value && setMonthVal(e.target.value)} className={dateInputCls} />
+            <input
+              type="month"
+              value={monthVal}
+              onChange={(e) => e.target.value && setMonthVal(e.target.value)}
+              className={dateInputCls}
+            />
           </label>
         )}
         {mode === "year" && (
@@ -5374,11 +6793,25 @@ function SalesSummaryReport() {
           <>
             <label className="text-xs text-gray-500 flex-1 min-w-[140px]">
               Start date
-              <input type="date" value={customFrom} max={customTo} onChange={(e) => e.target.value && setCustomFrom(e.target.value)} className={dateInputCls} />
+              <input
+                type="date"
+                value={customFrom}
+                max={customTo}
+                onChange={(e) =>
+                  e.target.value && setCustomFrom(e.target.value)
+                }
+                className={dateInputCls}
+              />
             </label>
             <label className="text-xs text-gray-500 flex-1 min-w-[140px]">
               End date
-              <input type="date" value={customTo} min={customFrom} onChange={(e) => e.target.value && setCustomTo(e.target.value)} className={dateInputCls} />
+              <input
+                type="date"
+                value={customTo}
+                min={customFrom}
+                onChange={(e) => e.target.value && setCustomTo(e.target.value)}
+                className={dateInputCls}
+              />
             </label>
           </>
         )}
@@ -5388,30 +6821,57 @@ function SalesSummaryReport() {
         {data && (
           <>
             <p className="text-xs text-gray-400 mb-3">
-              {formatJournalDate(data.date_from)} to {formatJournalDate(data.date_to)} · void invoices are not counted
+              {formatJournalDate(data.date_from)} to{" "}
+              {formatJournalDate(data.date_to)} · void invoices are not counted
             </p>
 
             {/* ---- most buyer customer ---- */}
             {data.top_customer ? (
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-blue-500">Most buying customer</p>
-                <p className="text-lg font-bold text-gray-900">{data.top_customer.customer_name}</p>
-                <p className="text-sm text-gray-600">{formatRs(data.top_customer.sales)} in this period</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-500">
+                  Most buying customer
+                </p>
+                <p className="text-lg font-bold text-gray-900">
+                  {data.top_customer.customer_name}
+                </p>
+                <p className="text-sm text-gray-600">
+                  {formatRs(data.top_customer.sales)} in this period
+                </p>
               </div>
             ) : (
-              <p className="text-sm text-gray-400 mb-4">No sales in this period.</p>
+              <p className="text-sm text-gray-400 mb-4">
+                No sales in this period.
+              </p>
             )}
 
             {/* ---- totals ---- */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
               {stat("Total sales", formatRs(data.totals.sales))}
-              {stat("Credit notes (returns)", formatRs(data.totals.returns), data.totals.returns > 0 ? "bad" : undefined)}
+              {stat(
+                "Credit notes (returns)",
+                formatRs(data.totals.returns),
+                data.totals.returns > 0 ? "bad" : undefined,
+              )}
               {stat("Net sales", formatRs(data.totals.net_sales), "good")}
-              {stat("Gross profit (sales - item cost)", formatRs(data.totals.gross_profit), data.totals.gross_profit < 0 ? "bad" : "good")}
+              {stat(
+                "Gross profit (sales - item cost)",
+                formatRs(data.totals.gross_profit),
+                data.totals.gross_profit < 0 ? "bad" : "good",
+              )}
               {stat("Payments received", formatRs(data.totals.collected))}
-              {stat("Still unpaid (this period's invoices)", formatRs(data.totals.outstanding), data.totals.outstanding > 0 ? "bad" : undefined)}
-              {stat("Invoices / Customers", `${data.totals.invoice_count} / ${data.totals.customer_count}`)}
-              {stat("Items sold · Avg invoice", `${data.totals.items_sold} · ${formatRs(data.totals.average_invoice)}`)}
+              {stat(
+                "Still unpaid (this period's invoices)",
+                formatRs(data.totals.outstanding),
+                data.totals.outstanding > 0 ? "bad" : undefined,
+              )}
+              {stat(
+                "Invoices / Customers",
+                `${data.totals.invoice_count} / ${data.totals.customer_count}`,
+              )}
+              {stat(
+                "Items sold · Avg invoice",
+                `${data.totals.items_sold} · ${formatRs(data.totals.average_invoice)}`,
+              )}
             </div>
 
             {/* ---- sales trend ---- */}
@@ -5419,12 +6879,24 @@ function SalesSummaryReport() {
               <ReportCard title={`Sales by ${data.group_by}`}>
                 <div className="space-y-1.5 max-h-72 overflow-y-auto">
                   {data.trend.map((t) => (
-                    <div key={t.label} className="flex items-center gap-2 text-xs">
-                      <span className="w-20 shrink-0 text-gray-500">{t.label}</span>
+                    <div
+                      key={t.label}
+                      className="flex items-center gap-2 text-xs"
+                    >
+                      <span className="w-20 shrink-0 text-gray-500">
+                        {t.label}
+                      </span>
                       <div className="flex-1 bg-gray-100 rounded h-4 overflow-hidden">
-                        <div className="bg-blue-500 h-4" style={{ width: `${Math.max((t.sales / maxTrend) * 100, 1)}%` }} />
+                        <div
+                          className="bg-blue-500 h-4"
+                          style={{
+                            width: `${Math.max((t.sales / maxTrend) * 100, 1)}%`,
+                          }}
+                        />
                       </div>
-                      <span className="w-28 shrink-0 text-right text-gray-900">{formatRs(t.sales)}</span>
+                      <span className="w-28 shrink-0 text-right text-gray-900">
+                        {formatRs(t.sales)}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -5452,15 +6924,34 @@ function SalesSummaryReport() {
                     </thead>
                     <tbody>
                       {data.top_customers.map((c, i) => (
-                        <tr key={c.customer_id} className={`border-b border-gray-50 ${i === 0 ? "font-semibold" : ""}`}>
+                        <tr
+                          key={c.customer_id}
+                          className={`border-b border-gray-50 ${i === 0 ? "font-semibold" : ""}`}
+                        >
                           <td className="py-1.5 pr-2 text-gray-400">{i + 1}</td>
-                          <td className="py-1.5 pr-2 text-gray-900">{c.customer_name}</td>
-                          <td className="py-1.5 pr-2 text-right">{c.invoices}</td>
-                          <td className="py-1.5 pr-2 text-right">{c.quantity}</td>
-                          <td className="py-1.5 pr-2 text-right">{formatRs(c.sales)}</td>
-                          <td className="py-1.5 pr-2 text-right">{formatRs(c.returns)}</td>
-                          <td className="py-1.5 pr-2 text-right">{formatRs(c.paid)}</td>
-                          <td className={`py-1.5 text-right ${c.balance > 0 ? "text-red-600" : ""}`}>{formatRs(c.balance)}</td>
+                          <td className="py-1.5 pr-2 text-gray-900">
+                            {c.customer_name}
+                          </td>
+                          <td className="py-1.5 pr-2 text-right">
+                            {c.invoices}
+                          </td>
+                          <td className="py-1.5 pr-2 text-right">
+                            {c.quantity}
+                          </td>
+                          <td className="py-1.5 pr-2 text-right">
+                            {formatRs(c.sales)}
+                          </td>
+                          <td className="py-1.5 pr-2 text-right">
+                            {formatRs(c.returns)}
+                          </td>
+                          <td className="py-1.5 pr-2 text-right">
+                            {formatRs(c.paid)}
+                          </td>
+                          <td
+                            className={`py-1.5 text-right ${c.balance > 0 ? "text-red-600" : ""}`}
+                          >
+                            {formatRs(c.balance)}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -5488,13 +6979,28 @@ function SalesSummaryReport() {
                     </thead>
                     <tbody>
                       {data.top_products.map((p, i) => (
-                        <tr key={p.product_id ?? p.item_name} className="border-b border-gray-50">
+                        <tr
+                          key={p.product_id ?? p.item_name}
+                          className="border-b border-gray-50"
+                        >
                           <td className="py-1.5 pr-2 text-gray-400">{i + 1}</td>
-                          <td className="py-1.5 pr-2 text-gray-900">{p.item_name}</td>
-                          <td className="py-1.5 pr-2 text-right">{p.quantity}</td>
-                          <td className="py-1.5 pr-2 text-right">{formatRs(p.sales)}</td>
-                          <td className="py-1.5 pr-2 text-right">{formatRs(p.cost)}</td>
-                          <td className={`py-1.5 text-right ${p.profit < 0 ? "text-red-600" : "text-green-700"}`}>{formatRs(p.profit)}</td>
+                          <td className="py-1.5 pr-2 text-gray-900">
+                            {p.item_name}
+                          </td>
+                          <td className="py-1.5 pr-2 text-right">
+                            {p.quantity}
+                          </td>
+                          <td className="py-1.5 pr-2 text-right">
+                            {formatRs(p.sales)}
+                          </td>
+                          <td className="py-1.5 pr-2 text-right">
+                            {formatRs(p.cost)}
+                          </td>
+                          <td
+                            className={`py-1.5 text-right ${p.profit < 0 ? "text-red-600" : "text-green-700"}`}
+                          >
+                            {formatRs(p.profit)}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -5757,7 +7263,9 @@ function AgeingReport({ kind }) {
 // ---------- Step 10: Dashboard (admin only) ----------
 function DashboardPage({ isAdmin, go }) {
   const { data, loading, error } = useReport(() => getDashboard(), []);
-  const max = data ? Math.max(1, ...data.chart.flatMap((m) => [m.income, m.expense])) : 1;
+  const max = data
+    ? Math.max(1, ...data.chart.flatMap((m) => [m.income, m.expense]))
+    : 1;
   const barH = (v) => (v > 0 ? `${Math.max(2, (v / max) * 100)}%` : "0%");
 
   const stat = (label, value, sub, onClick, tone) => (
@@ -5766,38 +7274,80 @@ function DashboardPage({ isAdmin, go }) {
       className={`bg-white border border-gray-200 rounded-xl p-4 ${onClick ? "cursor-pointer hover:bg-gray-50" : ""}`}
     >
       <p className="text-xs text-gray-400">{label}</p>
-      <p className={`text-lg font-bold mt-1 ${tone || "text-gray-900"}`}>{formatRs(value)}</p>
+      <p className={`text-lg font-bold mt-1 ${tone || "text-gray-900"}`}>
+        {formatRs(value)}
+      </p>
       {sub && <p className="text-xs text-gray-500 mt-1">{sub}</p>}
     </div>
   );
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="dashboard" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="dashboard"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
       <main className="p-4 sm:p-6 w-full max-w-3xl">
         <h1 className="text-xl font-bold text-gray-900 mb-3">Dashboard</h1>
         <ReportBody loading={loading} error={error} data={data}>
           {data && (
             <>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-                {stat("Cash & bank", data.cash_total, `${data.cash_accounts.length} account(s)`, () => go({ view: "banking" }), data.cash_total < 0 ? "text-red-600" : undefined)}
-                {stat("Receivables", data.receivables, data.receivables_overdue > 0 ? `${formatRs(data.receivables_overdue)} overdue` : "Nothing overdue", () => go({ view: "reports" }))}
-                {stat("Payables", data.payables, data.payables_overdue > 0 ? `${formatRs(data.payables_overdue)} overdue` : "Nothing overdue", () => go({ view: "reports" }))}
+                {stat(
+                  "Cash & bank",
+                  data.cash_total,
+                  `${data.cash_accounts.length} account(s)`,
+                  () => go({ view: "banking" }),
+                  data.cash_total < 0 ? "text-red-600" : undefined,
+                )}
+                {stat(
+                  "Receivables",
+                  data.receivables,
+                  data.receivables_overdue > 0
+                    ? `${formatRs(data.receivables_overdue)} overdue`
+                    : "Nothing overdue",
+                  () => go({ view: "reports" }),
+                )}
+                {stat(
+                  "Payables",
+                  data.payables,
+                  data.payables_overdue > 0
+                    ? `${formatRs(data.payables_overdue)} overdue`
+                    : "Nothing overdue",
+                  () => go({ view: "reports" }),
+                )}
               </div>
 
               <ReportCard title="Income and expense, last 6 months">
                 <div className="flex gap-4 text-xs text-gray-500 mb-2">
-                  <span><span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1" />Income {formatRs(data.income_6m)}</span>
-                  <span><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1" />Expense {formatRs(data.expense_6m)}</span>
+                  <span>
+                    <span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1" />
+                    Income {formatRs(data.income_6m)}
+                  </span>
+                  <span>
+                    <span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1" />
+                    Expense {formatRs(data.expense_6m)}
+                  </span>
                 </div>
                 <div className="flex gap-2 h-36 items-stretch">
                   {data.chart.map((m) => (
                     <div key={m.month} className="flex-1 flex flex-col">
                       <div className="flex-1 flex items-end justify-center gap-1">
-                        <div className="w-3 sm:w-5 bg-green-500 rounded-t" style={{ height: barH(m.income) }} title={`Income ${formatRs(m.income)}`} />
-                        <div className="w-3 sm:w-5 bg-red-400 rounded-t" style={{ height: barH(m.expense) }} title={`Expense ${formatRs(m.expense)}`} />
+                        <div
+                          className="w-3 sm:w-5 bg-green-500 rounded-t"
+                          style={{ height: barH(m.income) }}
+                          title={`Income ${formatRs(m.income)}`}
+                        />
+                        <div
+                          className="w-3 sm:w-5 bg-red-400 rounded-t"
+                          style={{ height: barH(m.expense) }}
+                          title={`Expense ${formatRs(m.expense)}`}
+                        />
                       </div>
-                      <p className="text-[10px] text-gray-400 text-center mt-1">{m.month}</p>
+                      <p className="text-[10px] text-gray-400 text-center mt-1">
+                        {m.month}
+                      </p>
                     </div>
                   ))}
                 </div>
@@ -5805,24 +7355,45 @@ function DashboardPage({ isAdmin, go }) {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <ReportCard title="Top expenses this year">
-                  {data.top_expenses.length === 0 && <p className="text-xs text-gray-400 py-1">No expenses yet</p>}
-                  {data.top_expenses.map((a) => <ReportLine key={a.id} label={a.name} amount={a.amount} />)}
+                  {data.top_expenses.length === 0 && (
+                    <p className="text-xs text-gray-400 py-1">
+                      No expenses yet
+                    </p>
+                  )}
+                  {data.top_expenses.map((a) => (
+                    <ReportLine key={a.id} label={a.name} amount={a.amount} />
+                  ))}
                 </ReportCard>
 
                 <ReportCard title={`Low stock (${data.low_stock_count})`}>
-                  {data.low_stock.length === 0 && <p className="text-xs text-gray-400 py-1">All items are above their reorder level</p>}
+                  {data.low_stock.length === 0 && (
+                    <p className="text-xs text-gray-400 py-1">
+                      All items are above their reorder level
+                    </p>
+                  )}
                   {data.low_stock.map((p) => (
-                    <div key={p.id} className="flex justify-between gap-3 py-1.5 text-sm">
+                    <div
+                      key={p.id}
+                      className="flex justify-between gap-3 py-1.5 text-sm"
+                    >
                       <span className="text-gray-600 truncate">{p.name}</span>
-                      <span className="shrink-0 text-red-600">{p.quantity} / min {p.reorder_min}</span>
+                      <span className="shrink-0 text-red-600">
+                        {p.quantity} / min {p.reorder_min}
+                      </span>
                     </div>
                   ))}
                 </ReportCard>
               </div>
 
               <ReportCard title="Cash & bank accounts">
-                {data.cash_accounts.length === 0 && <p className="text-xs text-gray-400 py-1">No cash or bank accounts yet</p>}
-                {data.cash_accounts.map((a) => <ReportLine key={a.id} label={a.name} amount={a.balance} />)}
+                {data.cash_accounts.length === 0 && (
+                  <p className="text-xs text-gray-400 py-1">
+                    No cash or bank accounts yet
+                  </p>
+                )}
+                {data.cash_accounts.map((a) => (
+                  <ReportLine key={a.id} label={a.name} amount={a.balance} />
+                ))}
               </ReportCard>
             </>
           )}
@@ -5865,19 +7436,29 @@ function BankAccountsList({ isAdmin, go }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const total = accounts.reduce((s, a) => s + a.balance, 0);
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="banking" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="banking"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
 
       <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex flex-wrap gap-2 items-center">
           <div className="flex-1 min-w-[10rem]">
-            <p className="text-xs text-gray-400">Total in bank and cash accounts</p>
-            <p className="text-2xl font-bold text-gray-900">{formatRs(total)}</p>
+            <p className="text-xs text-gray-400">
+              Total in bank and cash accounts
+            </p>
+            <p className="text-2xl font-bold text-gray-900">
+              {formatRs(total)}
+            </p>
           </div>
           {accounts.length >= 2 && (
             <button
@@ -5900,7 +7481,9 @@ function BankAccountsList({ isAdmin, go }) {
         ) : error ? (
           <p className="text-red-500 text-center py-16">{error}</p>
         ) : accounts.length === 0 ? (
-          <p className="text-gray-400 text-center py-16">No bank or cash accounts yet.</p>
+          <p className="text-gray-400 text-center py-16">
+            No bank or cash accounts yet.
+          </p>
         ) : (
           <div className="space-y-2">
             {accounts.map((a) => (
@@ -5916,11 +7499,19 @@ function BankAccountsList({ isAdmin, go }) {
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-gray-900 truncate">{a.name}</p>
                   <p className="text-xs text-gray-400">
-                    {a.account_type === "bank" ? "Bank account" : "Cash account"}
-                    {a.account_code && ` · ${a.account_code}`} · {a.transaction_count} transaction{a.transaction_count === 1 ? "" : "s"}
+                    {a.account_type === "bank"
+                      ? "Bank account"
+                      : "Cash account"}
+                    {a.account_code && ` · ${a.account_code}`} ·{" "}
+                    {a.transaction_count} transaction
+                    {a.transaction_count === 1 ? "" : "s"}
                   </p>
                 </div>
-                <p className={`font-semibold shrink-0 ${a.balance < 0 ? "text-red-600" : "text-gray-900"}`}>{formatRs(a.balance)}</p>
+                <p
+                  className={`font-semibold shrink-0 ${a.balance < 0 ? "text-red-600" : "text-gray-900"}`}
+                >
+                  {formatRs(a.balance)}
+                </p>
                 <ChevronRight size={16} className="text-gray-400" />
               </button>
             ))}
@@ -5928,9 +7519,16 @@ function BankAccountsList({ isAdmin, go }) {
         )}
       </main>
 
-      {addOpen && <BankAccountForm onClose={() => setAddOpen(false)} onSaved={load} />}
+      {addOpen && (
+        <BankAccountForm onClose={() => setAddOpen(false)} onSaved={load} />
+      )}
       {transferOpen && (
-        <BankTxnForm type="transfer" bankAccounts={accounts} onClose={() => setTransferOpen(false)} onSaved={load} />
+        <BankTxnForm
+          type="transfer"
+          bankAccounts={accounts}
+          onClose={() => setTransferOpen(false)}
+          onSaved={load}
+        />
       )}
     </div>
   );
@@ -5946,8 +7544,10 @@ function BankAccountForm({ onClose, onSaved }) {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const set = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
-  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const set = (field, value) =>
+    setForm((prev) => ({ ...prev, [field]: value }));
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -5974,32 +7574,78 @@ function BankAccountForm({ onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
         <h2 className="text-lg font-semibold mb-4">Add Bank / Cash Account</h2>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="flex gap-4 text-sm">
-            {[["bank", "Bank account"], ["cash", "Cash account"]].map(([k, label]) => (
+            {[
+              ["bank", "Bank account"],
+              ["cash", "Cash account"],
+            ].map(([k, label]) => (
               <label key={k} className="flex items-center gap-1.5">
-                <input type="radio" checked={form.account_type === k} onChange={() => set("account_type", k)} />
+                <input
+                  type="radio"
+                  checked={form.account_type === k}
+                  onChange={() => set("account_type", k)}
+                />
                 {label}
               </label>
             ))}
           </div>
-          <input required placeholder="Account name * (e.g. BOC Current)" value={form.name} onChange={(e) => set("name", e.target.value)} className={cls} />
-          <input placeholder="Account number / code (optional)" value={form.account_code} onChange={(e) => set("account_code", e.target.value)} className={cls} />
+          <input
+            required
+            placeholder="Account name * (e.g. BOC Current)"
+            value={form.name}
+            onChange={(e) => set("name", e.target.value)}
+            className={cls}
+          />
+          <input
+            placeholder="Account number / code (optional)"
+            value={form.account_code}
+            onChange={(e) => set("account_code", e.target.value)}
+            className={cls}
+          />
           <div className="grid grid-cols-2 gap-3">
             <label className="text-xs text-gray-500">
               Opening balance (Rs.)
-              <input type="number" step="0.01" value={form.opening_balance} onChange={(e) => set("opening_balance", e.target.value)} className={cls + " mt-1"} />
+              <input
+                type="number"
+                step="0.01"
+                value={form.opening_balance}
+                onChange={(e) => set("opening_balance", e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               As of
-              <input type="date" value={form.opening_date} onChange={(e) => set("opening_date", e.target.value)} className={cls + " mt-1"} />
+              <input
+                type="date"
+                value={form.opening_date}
+                onChange={(e) => set("opening_date", e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
           </div>
-          <p className="text-xs text-gray-400">Leave the opening balance empty if the account starts at zero. A negative number means overdrawn.</p>
+          <p className="text-xs text-gray-400">
+            Leave the opening balance empty if the account starts at zero. A
+            negative number means overdrawn.
+          </p>
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
-            <button type="submit" disabled={submitting || !form.name.trim()} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting || !form.name.trim()}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
               {submitting ? "Saving..." : "Save Account"}
             </button>
           </div>
@@ -6233,7 +7879,10 @@ function BankReconcile({ isAdmin, go, accountId }) {
 
   const loadBase = async () => {
     try {
-      const [accs, recs] = await Promise.all([getBankAccounts(), getReconciliations(accountId)]);
+      const [accs, recs] = await Promise.all([
+        getBankAccounts(),
+        getReconciliations(accountId),
+      ]);
       setAccount(accs.find((a) => a.id === accountId) || null);
       setHistory(recs);
       setError(null);
@@ -6244,10 +7893,15 @@ function BankReconcile({ isAdmin, go, accountId }) {
     }
   };
 
-  useEffect(() => { loadBase(); }, [accountId]);
+  useEffect(() => {
+    loadBase();
+  }, [accountId]);
 
   const start = async () => {
-    if (stmtBalance === "" || isNaN(Number(stmtBalance))) { setError("Enter the ending balance shown on your bank statement"); return; }
+    if (stmtBalance === "" || isNaN(Number(stmtBalance))) {
+      setError("Enter the ending balance shown on your bank statement");
+      return;
+    }
     setBusy(true);
     setError(null);
     setDone(null);
@@ -6261,21 +7915,25 @@ function BankReconcile({ isAdmin, go, accountId }) {
     }
   };
 
-  const toggle = (id) => setTicked((prev) => {
-    const next = new Set(prev);
-    next.has(id) ? next.delete(id) : next.add(id);
-    return next;
-  });
+  const toggle = (id) =>
+    setTicked((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   // work in whole cents so 0.1 + 0.2 style rounding never blocks "Finish"
   const cents = (n) => Math.round(Number(n || 0) * 100);
-  const tickedRows = session ? session.lines.filter((l) => ticked.has(l.line_id)) : [];
+  const tickedRows = session
+    ? session.lines.filter((l) => ticked.has(l.line_id))
+    : [];
   const moneyInC = tickedRows.reduce((s, l) => s + cents(l.money_in), 0);
   const moneyOutC = tickedRows.reduce((s, l) => s + cents(l.money_out), 0);
   const openingC = session ? cents(session.opening_balance) : 0;
   const clearedC = openingC + moneyInC - moneyOutC;
   const differenceC = cents(stmtBalance) - clearedC;
-  const canFinish = session && tickedRows.length > 0 && differenceC === 0 && !busy;
+  const canFinish =
+    session && tickedRows.length > 0 && differenceC === 0 && !busy;
 
   const finish = async () => {
     setBusy(true);
@@ -6299,7 +7957,12 @@ function BankReconcile({ isAdmin, go, accountId }) {
   };
 
   const undo = async (rec) => {
-    if (!window.confirm(`Undo the reconciliation of ${formatJournalDate(rec.statement_date)}? Its ${rec.cleared_count} transactions become un-reconciled again.`)) return;
+    if (
+      !window.confirm(
+        `Undo the reconciliation of ${formatJournalDate(rec.statement_date)}? Its ${rec.cleared_count} transactions become un-reconciled again.`,
+      )
+    )
+      return;
     try {
       await undoReconciliation(rec.id);
       setDone(null);
@@ -6309,25 +7972,47 @@ function BankReconcile({ isAdmin, go, accountId }) {
     }
   };
 
-  const allTicked = session && session.lines.length > 0 && ticked.size === session.lines.length;
-  const toggleAll = () => setTicked(allTicked ? new Set() : new Set(session.lines.map((l) => l.line_id)));
-  const inputCls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1";
+  const allTicked =
+    session && session.lines.length > 0 && ticked.size === session.lines.length;
+  const toggleAll = () =>
+    setTicked(
+      allTicked ? new Set() : new Set(session.lines.map((l) => l.line_id)),
+    );
+  const inputCls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1";
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="banking" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="banking"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
 
       <main className="p-4 sm:p-6 w-full max-w-3xl">
-        <button onClick={() => go({ view: "banking", account: accountId })} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3">
+        <button
+          onClick={() => go({ view: "banking", account: accountId })}
+          className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3"
+        >
           <ArrowLeft size={16} /> Back to {account?.name || "account"}
         </button>
-        <h1 className="text-xl font-bold text-gray-900 mb-1">Reconcile {account?.name || ""}</h1>
-        <p className="text-xs text-gray-400 mb-4">Tick the transactions that appear on your bank statement. You can finish when the difference is 0.00.</p>
+        <h1 className="text-xl font-bold text-gray-900 mb-1">
+          Reconcile {account?.name || ""}
+        </h1>
+        <p className="text-xs text-gray-400 mb-4">
+          Tick the transactions that appear on your bank statement. You can
+          finish when the difference is 0.00.
+        </p>
 
-        {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">{error}</p>}
+        {error && (
+          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
+            {error}
+          </p>
+        )}
         {done && (
           <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2 mb-3">
-            Reconciled {done.cleared_count} transactions up to {formatJournalDate(done.statement_date)}.
+            Reconciled {done.cleared_count} transactions up to{" "}
+            {formatJournalDate(done.statement_date)}.
           </p>
         )}
 
@@ -6339,34 +8024,69 @@ function BankReconcile({ isAdmin, go, accountId }) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="text-xs text-gray-500">
                   Statement end date
-                  <input type="date" value={stmtDate} onChange={(e) => setStmtDate(e.target.value)} className={inputCls} />
+                  <input
+                    type="date"
+                    value={stmtDate}
+                    onChange={(e) => setStmtDate(e.target.value)}
+                    className={inputCls}
+                  />
                 </label>
                 <label className="text-xs text-gray-500">
                   Ending balance on the statement (Rs.)
-                  <input type="number" step="0.01" value={stmtBalance} onChange={(e) => setStmtBalance(e.target.value)} className={inputCls} placeholder="0.00" />
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={stmtBalance}
+                    onChange={(e) => setStmtBalance(e.target.value)}
+                    className={inputCls}
+                    placeholder="0.00"
+                  />
                 </label>
               </div>
               {history[0] && (
-                <p className="text-xs text-gray-400 mt-3">Last reconciled up to {formatJournalDate(history[0].statement_date)} (statement balance {formatRs(history[0].statement_balance)}).</p>
+                <p className="text-xs text-gray-400 mt-3">
+                  Last reconciled up to{" "}
+                  {formatJournalDate(history[0].statement_date)} (statement
+                  balance {formatRs(history[0].statement_balance)}).
+                </p>
               )}
-              <button onClick={start} disabled={busy || !stmtDate} className="mt-4 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+              <button
+                onClick={start}
+                disabled={busy || !stmtDate}
+                className="mt-4 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
                 {busy ? "Loading..." : "Start reconciling"}
               </button>
             </div>
 
-            <h2 className="text-sm font-semibold text-gray-700 mb-2">Reconciliation history</h2>
+            <h2 className="text-sm font-semibold text-gray-700 mb-2">
+              Reconciliation history
+            </h2>
             {history.length === 0 ? (
               <p className="text-sm text-gray-400">Nothing reconciled yet.</p>
             ) : (
               <div className="space-y-2">
                 {history.map((h) => (
-                  <div key={h.id} className="bg-white border border-gray-200 rounded-xl p-3 flex items-center gap-3">
+                  <div
+                    key={h.id}
+                    className="bg-white border border-gray-200 rounded-xl p-3 flex items-center gap-3"
+                  >
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900">Statement of {formatJournalDate(h.statement_date)}</p>
-                      <p className="text-xs text-gray-400">{h.cleared_count} transactions · ending balance {formatRs(h.statement_balance)}</p>
+                      <p className="text-sm font-medium text-gray-900">
+                        Statement of {formatJournalDate(h.statement_date)}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        {h.cleared_count} transactions · ending balance{" "}
+                        {formatRs(h.statement_balance)}
+                      </p>
                     </div>
                     {h.can_undo && (
-                      <button onClick={() => undo(h)} className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-600 hover:bg-gray-50">Undo</button>
+                      <button
+                        onClick={() => undo(h)}
+                        className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-600 hover:bg-gray-50"
+                      >
+                        Undo
+                      </button>
                     )}
                   </div>
                 ))}
@@ -6376,37 +8096,99 @@ function BankReconcile({ isAdmin, go, accountId }) {
         ) : (
           <>
             <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4 text-sm sticky top-0 z-10">
-              <div className="flex justify-between"><span className="text-gray-500">Statement ending balance ({formatJournalDate(stmtDate)})</span><span className="font-medium">{formatRs(Number(stmtBalance))}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Already reconciled balance</span><span>{formatRs(openingC / 100)}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">+ Money in ticked</span><span className="text-green-700">{formatRs(moneyInC / 100)}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">- Money out ticked</span><span className="text-red-600">{formatRs(moneyOutC / 100)}</span></div>
-              <div className="flex justify-between border-t border-gray-100 mt-2 pt-2"><span className="text-gray-500">Cleared balance</span><span className="font-medium">{formatRs(clearedC / 100)}</span></div>
-              <div className="flex justify-between"><span className="font-semibold">Difference</span>
-                <span className={`font-bold ${differenceC === 0 ? "text-green-700" : "text-red-600"}`}>{formatRs(differenceC / 100)}</span>
+              <div className="flex justify-between">
+                <span className="text-gray-500">
+                  Statement ending balance ({formatJournalDate(stmtDate)})
+                </span>
+                <span className="font-medium">
+                  {formatRs(Number(stmtBalance))}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">
+                  Already reconciled balance
+                </span>
+                <span>{formatRs(openingC / 100)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">+ Money in ticked</span>
+                <span className="text-green-700">
+                  {formatRs(moneyInC / 100)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">- Money out ticked</span>
+                <span className="text-red-600">
+                  {formatRs(moneyOutC / 100)}
+                </span>
+              </div>
+              <div className="flex justify-between border-t border-gray-100 mt-2 pt-2">
+                <span className="text-gray-500">Cleared balance</span>
+                <span className="font-medium">{formatRs(clearedC / 100)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="font-semibold">Difference</span>
+                <span
+                  className={`font-bold ${differenceC === 0 ? "text-green-700" : "text-red-600"}`}
+                >
+                  {formatRs(differenceC / 100)}
+                </span>
               </div>
               <div className="flex gap-2 mt-3">
-                <button onClick={finish} disabled={!canFinish} className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-40">
+                <button
+                  onClick={finish}
+                  disabled={!canFinish}
+                  className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-40"
+                >
                   {busy ? "Saving..." : "Finish reconciliation"}
                 </button>
-                <button onClick={() => { setSession(null); setTicked(new Set()); setError(null); }} className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+                <button
+                  onClick={() => {
+                    setSession(null);
+                    setTicked(new Set());
+                    setError(null);
+                  }}
+                  className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
 
             {session.lines.length === 0 ? (
-              <p className="text-gray-400 text-center py-12">No un-reconciled transactions up to this date.</p>
+              <p className="text-gray-400 text-center py-12">
+                No un-reconciled transactions up to this date.
+              </p>
             ) : (
               <>
                 <label className="flex items-center gap-2 text-sm text-gray-600 mb-2 cursor-pointer">
-                  <input type="checkbox" checked={allTicked} onChange={toggleAll} /> Select all ({session.lines.length})
+                  <input
+                    type="checkbox"
+                    checked={allTicked}
+                    onChange={toggleAll}
+                  />{" "}
+                  Select all ({session.lines.length})
                 </label>
                 <div className="space-y-2">
                   {session.lines.map((l) => (
-                    <label key={l.line_id} className={`border rounded-xl p-3 flex items-center gap-3 cursor-pointer ${ticked.has(l.line_id) ? "bg-green-50 border-green-200" : "bg-white border-gray-200"}`}>
-                      <input type="checkbox" checked={ticked.has(l.line_id)} onChange={() => toggle(l.line_id)} />
+                    <label
+                      key={l.line_id}
+                      className={`border rounded-xl p-3 flex items-center gap-3 cursor-pointer ${ticked.has(l.line_id) ? "bg-green-50 border-green-200" : "bg-white border-gray-200"}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={ticked.has(l.line_id)}
+                        onChange={() => toggle(l.line_id)}
+                      />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-900 truncate">
                           {l.kind}
-                          {l.other_accounts && <span className="text-gray-400 font-normal"> · {l.other_accounts}</span>}
+                          {l.other_accounts && (
+                            <span className="text-gray-400 font-normal">
+                              {" "}
+                              · {l.other_accounts}
+                            </span>
+                          )}
                         </p>
                         <p className="text-xs text-gray-400 truncate">
                           {formatJournalDate(l.date)} · {l.journal_number}
@@ -6414,8 +8196,11 @@ function BankReconcile({ isAdmin, go, accountId }) {
                           {l.description && ` · ${l.description}`}
                         </p>
                       </div>
-                      <p className={`text-sm font-semibold shrink-0 ${l.money_in > 0 ? "text-green-700" : "text-red-600"}`}>
-                        {l.money_in > 0 ? "+" : "-"}{formatRs(l.money_in > 0 ? l.money_in : l.money_out)}
+                      <p
+                        className={`text-sm font-semibold shrink-0 ${l.money_in > 0 ? "text-green-700" : "text-red-600"}`}
+                      >
+                        {l.money_in > 0 ? "+" : "-"}
+                        {formatRs(l.money_in > 0 ? l.money_in : l.money_out)}
                       </p>
                     </label>
                   ))}
@@ -6430,7 +8215,13 @@ function BankReconcile({ isAdmin, go, accountId }) {
 }
 
 // type: "deposit" | "withdrawal" | "transfer".  fromAccount: the open account (leave out on the list page's Transfer button)
-function BankTxnForm({ type, fromAccount = null, bankAccounts, onClose, onSaved }) {
+function BankTxnForm({
+  type,
+  fromAccount = null,
+  bankAccounts,
+  onClose,
+  onSaved,
+}) {
   const [accounts, setAccounts] = useState([]);
   const [accountId, setAccountId] = useState(fromAccount ? fromAccount.id : "");
   const [otherId, setOtherId] = useState("");
@@ -6440,25 +8231,48 @@ function BankTxnForm({ type, fromAccount = null, bankAccounts, onClose, onSaved 
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   useEffect(() => {
-    if (type !== "transfer") getAccounts().then(setAccounts).catch((err) => setError(err.message));
+    if (type !== "transfer")
+      getAccounts()
+        .then(setAccounts)
+        .catch((err) => setError(err.message));
   }, [type]);
 
-  const title = { deposit: "New Deposit", withdrawal: "New Withdrawal", transfer: "Transfer Between Accounts" }[type];
-  const otherLabel = { deposit: "Deposit from (account)", withdrawal: "Paid to (account)", transfer: "Transfer to" }[type];
+  const title = {
+    deposit: "New Deposit",
+    withdrawal: "New Withdrawal",
+    transfer: "Transfer Between Accounts",
+  }[type];
+  const otherLabel = {
+    deposit: "Deposit from (account)",
+    withdrawal: "Paid to (account)",
+    transfer: "Transfer to",
+  }[type];
 
   // deposit -> income / equity first; withdrawal -> expenses first. Receivable / payable only move through invoices and bills.
-  const groupOrder = type === "withdrawal"
-    ? ["Expense", "Liability", "Equity", "Asset", "Income"]
-    : ["Income", "Equity", "Liability", "Asset", "Expense"];
-  const otherChoices = type === "transfer"
-    ? []
-    : accounts.filter((a) => !["accounts_receivable", "accounts_payable"].includes(a.account_type) && a.id !== Number(accountId));
+  const groupOrder =
+    type === "withdrawal"
+      ? ["Expense", "Liability", "Equity", "Asset", "Income"]
+      : ["Income", "Equity", "Liability", "Asset", "Expense"];
+  const otherChoices =
+    type === "transfer"
+      ? []
+      : accounts.filter(
+          (a) =>
+            !["accounts_receivable", "accounts_payable"].includes(
+              a.account_type,
+            ) && a.id !== Number(accountId),
+        );
   const bankChoices = bankAccounts.filter((a) => a.id !== Number(accountId));
 
-  const canSave = Boolean(accountId) && Boolean(otherId) && Number(amount) > 0 && Boolean(date);
+  const canSave =
+    Boolean(accountId) &&
+    Boolean(otherId) &&
+    Number(amount) > 0 &&
+    Boolean(date);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -6487,31 +8301,65 @@ function BankTxnForm({ type, fromAccount = null, bankAccounts, onClose, onSaved 
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[92vh] overflow-y-auto">
         <h2 className="text-lg font-semibold mb-4">{title}</h2>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-3">
           {type === "transfer" ? (
             <label className="text-xs text-gray-500 block">
               Transfer from
-              <select value={accountId} onChange={(e) => { setAccountId(e.target.value); setOtherId(""); }} className={cls + " mt-1"}>
+              <select
+                value={accountId}
+                onChange={(e) => {
+                  setAccountId(e.target.value);
+                  setOtherId("");
+                }}
+                className={cls + " mt-1"}
+              >
                 <option value="">Select an account...</option>
-                {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.name} ({formatRs(a.balance)})</option>)}
+                {bankAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({formatRs(a.balance)})
+                  </option>
+                ))}
               </select>
             </label>
           ) : (
-            <p className="text-sm text-gray-600">Account: <span className="font-medium text-gray-900">{fromAccount?.name}</span></p>
+            <p className="text-sm text-gray-600">
+              Account:{" "}
+              <span className="font-medium text-gray-900">
+                {fromAccount?.name}
+              </span>
+            </p>
           )}
 
           <label className="text-xs text-gray-500 block">
             {otherLabel}
-            <select value={otherId} onChange={(e) => setOtherId(e.target.value)} className={cls + " mt-1"}>
+            <select
+              value={otherId}
+              onChange={(e) => setOtherId(e.target.value)}
+              className={cls + " mt-1"}
+            >
               <option value="">Select an account...</option>
               {type === "transfer"
-                ? bankChoices.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)
+                ? bankChoices.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))
                 : groupOrder.map((g) => {
-                    const inGroup = otherChoices.filter((a) => ACCOUNT_GROUP_OF[a.account_type] === g);
+                    const inGroup = otherChoices.filter(
+                      (a) => ACCOUNT_GROUP_OF[a.account_type] === g,
+                    );
                     return inGroup.length === 0 ? null : (
                       <optgroup key={g} label={g}>
-                        {inGroup.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        {inGroup.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
                       </optgroup>
                     );
                   })}
@@ -6521,19 +8369,54 @@ function BankTxnForm({ type, fromAccount = null, bankAccounts, onClose, onSaved 
           <div className="grid grid-cols-2 gap-3">
             <label className="text-xs text-gray-500">
               Date
-              <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1"} />
+              <input
+                required
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               Amount (Rs.)
-              <input required type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className={cls + " mt-1"} />
+              <input
+                required
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
           </div>
-          <input placeholder="Reference # (cheque no., slip no.)" value={reference} onChange={(e) => setReference(e.target.value)} className={cls} />
-          <textarea rows={2} placeholder="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} className={cls} />
+          <input
+            placeholder="Reference # (cheque no., slip no.)"
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+            className={cls}
+          />
+          <textarea
+            rows={2}
+            placeholder="Description (optional)"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className={cls}
+          />
 
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
-            <button type="submit" disabled={!canSave || submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!canSave || submitting}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
               {submitting ? "Saving..." : "Save"}
             </button>
           </div>
@@ -6544,7 +8427,13 @@ function BankTxnForm({ type, fromAccount = null, bankAccounts, onClose, onSaved 
 }
 
 // ---------- Customers (admin only) ----------
-const CUSTOMER_TERMS = ["Due on Receipt", "Net 15", "Net 30", "Net 45", "Net 60"];
+const CUSTOMER_TERMS = [
+  "Due on Receipt",
+  "Net 15",
+  "Net 30",
+  "Net 45",
+  "Net 60",
+];
 
 function CustomersPage({ isAdmin, go }) {
   const [customers, setCustomers] = useState([]);
@@ -6553,10 +8442,10 @@ function CustomersPage({ isAdmin, go }) {
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
-    useQuickNew(() => {
-      setEditing(null);
-      setFormOpen(true);
-    });
+  useQuickNew(() => {
+    setEditing(null);
+    setFormOpen(true);
+  });
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const load = async () => {
@@ -6570,7 +8459,9 @@ function CustomersPage({ isAdmin, go }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const handleDelete = async () => {
     try {
@@ -6585,19 +8476,36 @@ function CustomersPage({ isAdmin, go }) {
   const q = search.trim().toLowerCase();
   const shown = [...customers]
     .sort((a, b) => compareNames(a.display_name, b.display_name))
-    .filter((c) => !q || [c.display_name, c.company_name, c.email, c.phone].some((v) => (v || "").toLowerCase().includes(q)));
+    .filter(
+      (c) =>
+        !q ||
+        [c.display_name, c.company_name, c.email, c.phone].some((v) =>
+          (v || "").toLowerCase().includes(q),
+        ),
+    );
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="customers" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="customers"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
 
       <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
-            <SearchBox value={search} onChange={setSearch} placeholder="Search customers..." />
+            <SearchBox
+              value={search}
+              onChange={setSearch}
+              placeholder="Search customers..."
+            />
           </div>
           <button
-            onClick={() => { setEditing(null); setFormOpen(true); }}
+            onClick={() => {
+              setEditing(null);
+              setFormOpen(true);
+            }}
             className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
           >
             + New Customer
@@ -6613,11 +8521,18 @@ function CustomersPage({ isAdmin, go }) {
         ) : (
           <div className="space-y-2">
             {shown.map((c) => (
-              <div key={c.id} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3">
+              <div
+                key={c.id}
+                className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3"
+              >
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-gray-900 truncate">{c.display_name}</p>
+                  <p className="font-medium text-gray-900 truncate">
+                    {c.display_name}
+                  </p>
                   <p className="text-xs text-gray-400 truncate">
-                    {[c.company_name, c.email, c.phone].filter(Boolean).join(" · ") || "No contact details"}
+                    {[c.company_name, c.email, c.phone]
+                      .filter(Boolean)
+                      .join(" · ") || "No contact details"}
                   </p>
                 </div>
                 <div className="text-right text-xs text-gray-500 hidden sm:block">
@@ -6625,7 +8540,10 @@ function CustomersPage({ isAdmin, go }) {
                   <p>Opening: {formatRs(c.opening_balance)}</p>
                 </div>
                 <ItemActionsMenu
-                  onEdit={() => { setEditing(c); setFormOpen(true); }}
+                  onEdit={() => {
+                    setEditing(c);
+                    setFormOpen(true);
+                  }}
                   onDelete={() => setDeleteTarget(c)}
                 />
               </div>
@@ -6637,7 +8555,10 @@ function CustomersPage({ isAdmin, go }) {
       {formOpen && (
         <CustomerForm
           initialData={editing}
-          onClose={() => { setFormOpen(false); setEditing(null); }}
+          onClose={() => {
+            setFormOpen(false);
+            setEditing(null);
+          }}
           onSubmit={async (id, payload) => {
             if (id) await updateCustomer(id, payload);
             else await createCustomer(payload);
@@ -6675,15 +8596,20 @@ function CustomerForm({ initialData, onClose, onSubmit }) {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const set = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
-  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const set = (field, value) =>
+    setForm((prev) => ({ ...prev, [field]: value }));
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(isEditMode ? initialData.id : null, { ...form, opening_balance: Number(form.opening_balance) || 0 });
+      await onSubmit(isEditMode ? initialData.id : null, {
+        ...form,
+        opening_balance: Number(form.opening_balance) || 0,
+      });
       onClose();
     } catch (err) {
       setError(err.message);
@@ -6695,48 +8621,129 @@ function CustomerForm({ initialData, onClose, onSubmit }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">{isEditMode ? "Edit Customer" : "New Customer"}</h2>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <h2 className="text-lg font-semibold mb-4">
+          {isEditMode ? "Edit Customer" : "New Customer"}
+        </h2>
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="flex gap-4 text-sm">
             {["Business", "Individual"].map((t) => (
               <label key={t} className="flex items-center gap-1.5">
-                <input type="radio" checked={form.customer_type === t} onChange={() => set("customer_type", t)} />
+                <input
+                  type="radio"
+                  checked={form.customer_type === t}
+                  onChange={() => set("customer_type", t)}
+                />
                 {t}
               </label>
             ))}
           </div>
-          <input required placeholder="Customer display name *" value={form.display_name} onChange={(e) => set("display_name", e.target.value)} className={cls} />
+          <input
+            required
+            placeholder="Customer display name *"
+            value={form.display_name}
+            onChange={(e) => set("display_name", e.target.value)}
+            className={cls}
+          />
           <div className="grid grid-cols-2 gap-3">
-            <input placeholder="Company name" value={form.company_name} onChange={(e) => set("company_name", e.target.value)} className={cls} />
-            <input placeholder="Contact person" value={form.contact_person} onChange={(e) => set("contact_person", e.target.value)} className={cls} />
+            <input
+              placeholder="Company name"
+              value={form.company_name}
+              onChange={(e) => set("company_name", e.target.value)}
+              className={cls}
+            />
+            <input
+              placeholder="Contact person"
+              value={form.contact_person}
+              onChange={(e) => set("contact_person", e.target.value)}
+              className={cls}
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <input type="email" placeholder="Email" value={form.email} onChange={(e) => set("email", e.target.value)} className={cls} />
-            <input placeholder="Phone" value={form.phone} onChange={(e) => set("phone", e.target.value)} className={cls} />
+            <input
+              type="email"
+              placeholder="Email"
+              value={form.email}
+              onChange={(e) => set("email", e.target.value)}
+              className={cls}
+            />
+            <input
+              placeholder="Phone"
+              value={form.phone}
+              onChange={(e) => set("phone", e.target.value)}
+              className={cls}
+            />
           </div>
-          <textarea rows={2} placeholder="Billing address" value={form.billing_address} onChange={(e) => set("billing_address", e.target.value)} className={cls} />
-          <textarea rows={2} placeholder="Shipping address" value={form.shipping_address} onChange={(e) => set("shipping_address", e.target.value)} className={cls} />
+          <textarea
+            rows={2}
+            placeholder="Billing address"
+            value={form.billing_address}
+            onChange={(e) => set("billing_address", e.target.value)}
+            className={cls}
+          />
+          <textarea
+            rows={2}
+            placeholder="Shipping address"
+            value={form.shipping_address}
+            onChange={(e) => set("shipping_address", e.target.value)}
+            className={cls}
+          />
           <div className="grid grid-cols-2 gap-3">
             <label className="text-xs text-gray-500">
               Payment terms
-              <select value={form.payment_terms} onChange={(e) => set("payment_terms", e.target.value)} className={cls + " mt-1"}>
-                {CUSTOMER_TERMS.map((t) => <option key={t}>{t}</option>)}
+              <select
+                value={form.payment_terms}
+                onChange={(e) => set("payment_terms", e.target.value)}
+                className={cls + " mt-1"}
+              >
+                {CUSTOMER_TERMS.map((t) => (
+                  <option key={t}>{t}</option>
+                ))}
               </select>
             </label>
             <label className="text-xs text-gray-500">
               Opening balance (Rs.)
-              <input type="number" step="0.01" value={form.opening_balance} onChange={(e) => set("opening_balance", e.target.value)} className={cls + " mt-1"} />
+              <input
+                type="number"
+                step="0.01"
+                value={form.opening_balance}
+                onChange={(e) => set("opening_balance", e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
           </div>
-          <textarea rows={2} placeholder="Notes" value={form.notes} onChange={(e) => set("notes", e.target.value)} className={cls} />
+          <textarea
+            rows={2}
+            placeholder="Notes"
+            value={form.notes}
+            onChange={(e) => set("notes", e.target.value)}
+            className={cls}
+          />
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={form.is_active} onChange={(e) => set("is_active", e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={form.is_active}
+              onChange={(e) => set("is_active", e.target.checked)}
+            />
             Active
           </label>
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
-            <button type="submit" disabled={submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
               {submitting ? "Saving..." : "Save Customer"}
             </button>
           </div>
@@ -6752,31 +8759,99 @@ function CustomerForm({ initialData, onClose, onSubmit }) {
 const ACCOUNT_TYPES = [
   { key: "cash", label: "Cash Accounts", name: "Cash account", group: "Asset" },
   { key: "bank", label: "Bank Accounts", name: "Bank account", group: "Asset" },
-  { key: "accounts_receivable", label: "Accounts Receivable", name: "Accounts receivable", group: "Asset" },
-  { key: "other_current_asset", label: "Other Current Assets", name: "Other current asset", group: "Asset" },
-  { key: "asset", label: "Asset Accounts", name: "Asset account", group: "Asset" },
-  { key: "fixed_asset", label: "Fixed Assets", name: "Fixed asset", group: "Asset" },
-  { key: "accounts_payable", label: "Accounts Payable", name: "Accounts payable", group: "Liability" },
-  { key: "credit_card", label: "Credit Cards", name: "Credit card", group: "Liability" },
-  { key: "current_liability", label: "Other Current Liabilities", name: "Other current liability", group: "Liability" },
-  { key: "long_term_liability", label: "Long Term Liabilities", name: "Long term liability", group: "Liability" },
+  {
+    key: "accounts_receivable",
+    label: "Accounts Receivable",
+    name: "Accounts receivable",
+    group: "Asset",
+  },
+  {
+    key: "other_current_asset",
+    label: "Other Current Assets",
+    name: "Other current asset",
+    group: "Asset",
+  },
+  {
+    key: "asset",
+    label: "Asset Accounts",
+    name: "Asset account",
+    group: "Asset",
+  },
+  {
+    key: "fixed_asset",
+    label: "Fixed Assets",
+    name: "Fixed asset",
+    group: "Asset",
+  },
+  {
+    key: "accounts_payable",
+    label: "Accounts Payable",
+    name: "Accounts payable",
+    group: "Liability",
+  },
+  {
+    key: "credit_card",
+    label: "Credit Cards",
+    name: "Credit card",
+    group: "Liability",
+  },
+  {
+    key: "current_liability",
+    label: "Other Current Liabilities",
+    name: "Other current liability",
+    group: "Liability",
+  },
+  {
+    key: "long_term_liability",
+    label: "Long Term Liabilities",
+    name: "Long term liability",
+    group: "Liability",
+  },
   { key: "equity", label: "Equity", name: "Equity account", group: "Equity" },
-  { key: "income", label: "Income Accounts", name: "Income account", group: "Income" },
-  { key: "other_income", label: "Other Income", name: "Other income", group: "Income" },
-  { key: "cogs", label: "Cost of Goods Sold (COGS) Accounts", name: "COGS account", group: "Expense" },
-  { key: "expense", label: "Expenses", name: "Expense account", group: "Expense" },
-  { key: "other_expense", label: "Other Expenses", name: "Other expense", group: "Expense" },
+  {
+    key: "income",
+    label: "Income Accounts",
+    name: "Income account",
+    group: "Income",
+  },
+  {
+    key: "other_income",
+    label: "Other Income",
+    name: "Other income",
+    group: "Income",
+  },
+  {
+    key: "cogs",
+    label: "Cost of Goods Sold (COGS) Accounts",
+    name: "COGS account",
+    group: "Expense",
+  },
+  {
+    key: "expense",
+    label: "Expenses",
+    name: "Expense account",
+    group: "Expense",
+  },
+  {
+    key: "other_expense",
+    label: "Other Expenses",
+    name: "Other expense",
+    group: "Expense",
+  },
 ];
 const ACCOUNT_GROUPS = ["Asset", "Liability", "Equity", "Income", "Expense"];
-const ACCOUNT_GROUP_OF = Object.fromEntries(ACCOUNT_TYPES.map((t) => [t.key, t.group]));
+const ACCOUNT_GROUP_OF = Object.fromEntries(
+  ACCOUNT_TYPES.map((t) => [t.key, t.group]),
+);
 // only these three can be picked on an item (Items form); they show stock value instead of ledger balance
 const ITEM_LINKED_TYPES = new Set(["cogs", "income", "asset"]);
 
 const formatRs = (n) =>
   `Rs.${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const ACCOUNT_TYPE_NAMES = Object.fromEntries(ACCOUNT_TYPES.map((t) => [t.key, t.name]));
-
+const ACCOUNT_TYPE_NAMES = Object.fromEntries(
+  ACCOUNT_TYPES.map((t) => [t.key, t.name]),
+);
 
 function TypedDeleteConfirm({ label, onConfirm, onCancel }) {
   const [value, setValue] = useState("");
@@ -6785,9 +8860,15 @@ function TypedDeleteConfirm({ label, onConfirm, onCancel }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-2">Delete "{label}"?</h2>
+        <h2 className="text-lg font-semibold text-gray-900 mb-2">
+          Delete "{label}"?
+        </h2>
         <p className="text-sm text-gray-500 mb-4">
-          This can't be undone. Type <span className="font-mono font-semibold text-gray-700">{expected}</span> to confirm.
+          This can't be undone. Type{" "}
+          <span className="font-mono font-semibold text-gray-700">
+            {expected}
+          </span>{" "}
+          to confirm.
         </p>
         <input
           autoFocus
@@ -6797,7 +8878,10 @@ function TypedDeleteConfirm({ label, onConfirm, onCancel }) {
           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-500"
         />
         <div className="flex gap-2 justify-end">
-          <button onClick={onCancel} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100"
+          >
             Cancel
           </button>
           <button
@@ -6826,10 +8910,21 @@ function AccountDetail({ accountId, go, fromParam }) {
     let cancelled = false;
     setLoading(true);
     getAccountDetail(accountId)
-      .then((d) => { if (!cancelled) { setData(d); setError(null); } })
-      .catch((err) => { if (!cancelled) setError(err.message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+      .then((d) => {
+        if (!cancelled) {
+          setData(d);
+          setError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [accountId]);
 
   const handleDelete = async () => {
@@ -6984,35 +9079,86 @@ const ACCT_THEMES = {
   quickbooks: {
     name: "QuickBooks Blue",
     swatch: ["#4b5b8c", "#8cc21f", "#e6eefb"],
-    page: "bg-[#dfe7ef]", panel: "bg-white border-gray-300", strip: "bg-[#f1f3f6] border-gray-200",
-    head: "bg-[#eef1f5] text-gray-500 border-gray-300", line: "border-gray-200",
-    rowA: "bg-white", rowB: "bg-[#e6eefb]", hover: "", sel: "bg-[#4e9a1e] text-white",
-    text: "text-gray-800", sub: "text-gray-500", selSub: "text-white/80", title: "text-gray-700",
-    input: "bg-white border-gray-300 text-gray-800", btn: "bg-green-600 hover:bg-green-700 text-white",
-    groupRow: "bg-[#d5e0f2] text-gray-700", boxText: "text-white",
-    box: { Asset: "bg-[#4b5b8c]", Liability: "bg-[#f0b83a]", Equity: "bg-[#7d9cc0]", Income: "bg-[#8cc21f]", Expense: "bg-[#e0452b]" },
+    page: "bg-[#dfe7ef]",
+    panel: "bg-white border-gray-300",
+    strip: "bg-[#f1f3f6] border-gray-200",
+    head: "bg-[#eef1f5] text-gray-500 border-gray-300",
+    line: "border-gray-200",
+    rowA: "bg-white",
+    rowB: "bg-[#e6eefb]",
+    hover: "",
+    sel: "bg-[#4e9a1e] text-white",
+    text: "text-gray-800",
+    sub: "text-gray-500",
+    selSub: "text-white/80",
+    title: "text-gray-700",
+    input: "bg-white border-gray-300 text-gray-800",
+    btn: "bg-green-600 hover:bg-green-700 text-white",
+    groupRow: "bg-[#d5e0f2] text-gray-700",
+    boxText: "text-white",
+    box: {
+      Asset: "bg-[#4b5b8c]",
+      Liability: "bg-[#f0b83a]",
+      Equity: "bg-[#7d9cc0]",
+      Income: "bg-[#8cc21f]",
+      Expense: "bg-[#e0452b]",
+    },
   },
   zoho: {
     name: "Zoho Light",
     swatch: ["#2563eb", "#ffffff", "#f4f5f9"],
-    page: "bg-[#f4f5f9]", panel: "bg-white border-gray-200", strip: "bg-transparent border-transparent",
-    head: "bg-[#f9fafc] text-gray-500 border-gray-200", line: "border-gray-100",
-    rowA: "bg-white", rowB: "bg-white", hover: "hover:bg-[#f5f8ff]", sel: "bg-[#e7efff] text-[#1d4ed8]",
-    text: "text-gray-800", sub: "text-gray-500", selSub: "text-blue-500", title: "text-gray-800",
-    input: "bg-white border-gray-300 text-gray-800", btn: "bg-[#2563eb] hover:bg-blue-700 text-white",
-    groupRow: "bg-[#f3f4f8] text-gray-600", boxText: "text-gray-800",
-    box: { Asset: "bg-[#e0ebff]", Liability: "bg-[#fff0d6]", Equity: "bg-[#ece6ff]", Income: "bg-[#dcf5e4]", Expense: "bg-[#fde3e0]" },
+    page: "bg-[#f4f5f9]",
+    panel: "bg-white border-gray-200",
+    strip: "bg-transparent border-transparent",
+    head: "bg-[#f9fafc] text-gray-500 border-gray-200",
+    line: "border-gray-100",
+    rowA: "bg-white",
+    rowB: "bg-white",
+    hover: "hover:bg-[#f5f8ff]",
+    sel: "bg-[#e7efff] text-[#1d4ed8]",
+    text: "text-gray-800",
+    sub: "text-gray-500",
+    selSub: "text-blue-500",
+    title: "text-gray-800",
+    input: "bg-white border-gray-300 text-gray-800",
+    btn: "bg-[#2563eb] hover:bg-blue-700 text-white",
+    groupRow: "bg-[#f3f4f8] text-gray-600",
+    boxText: "text-gray-800",
+    box: {
+      Asset: "bg-[#e0ebff]",
+      Liability: "bg-[#fff0d6]",
+      Equity: "bg-[#ece6ff]",
+      Income: "bg-[#dcf5e4]",
+      Expense: "bg-[#fde3e0]",
+    },
   },
   dark: {
     name: "Dark",
     swatch: ["#0f172a", "#1e293b", "#2563eb"],
-    page: "bg-[#0f172a]", panel: "bg-[#1e293b] border-slate-700", strip: "bg-[#162033] border-slate-700",
-    head: "bg-[#273449] text-slate-300 border-slate-600", line: "border-slate-700",
-    rowA: "bg-[#1e293b]", rowB: "bg-[#223047]", hover: "hover:bg-[#2a3a55]", sel: "bg-[#2563eb] text-white",
-    text: "text-slate-100", sub: "text-slate-400", selSub: "text-white/80", title: "text-slate-100",
-    input: "bg-[#0f172a] border-slate-600 text-slate-100", btn: "bg-[#2563eb] hover:bg-blue-500 text-white",
-    groupRow: "bg-[#2d3b52] text-slate-200", boxText: "text-white",
-    box: { Asset: "bg-[#334a7a]", Liability: "bg-[#8a6a1c]", Equity: "bg-[#4a5d7a]", Income: "bg-[#2f6b3a]", Expense: "bg-[#8a2f25]" },
+    page: "bg-[#0f172a]",
+    panel: "bg-[#1e293b] border-slate-700",
+    strip: "bg-[#162033] border-slate-700",
+    head: "bg-[#273449] text-slate-300 border-slate-600",
+    line: "border-slate-700",
+    rowA: "bg-[#1e293b]",
+    rowB: "bg-[#223047]",
+    hover: "hover:bg-[#2a3a55]",
+    sel: "bg-[#2563eb] text-white",
+    text: "text-slate-100",
+    sub: "text-slate-400",
+    selSub: "text-white/80",
+    title: "text-slate-100",
+    input: "bg-[#0f172a] border-slate-600 text-slate-100",
+    btn: "bg-[#2563eb] hover:bg-blue-500 text-white",
+    groupRow: "bg-[#2d3b52] text-slate-200",
+    boxText: "text-white",
+    box: {
+      Asset: "bg-[#334a7a]",
+      Liability: "bg-[#8a6a1c]",
+      Equity: "bg-[#4a5d7a]",
+      Income: "bg-[#2f6b3a]",
+      Expense: "bg-[#8a2f25]",
+    },
   },
 };
 
@@ -7028,8 +9174,8 @@ const ACCT_COLUMNS = [
 const ACCT_LAYOUT_KEY = "acct_layout_v1";
 const ACCT_LAYOUT_DEFAULT = {
   theme: "quickbooks",
-  view: "table",            // "table" | "cards"
-  density: "compact",       // "compact" | "comfortable"
+  view: "table", // "table" | "cards"
+  density: "compact", // "compact" | "comfortable"
   showSummary: true,
   showFilters: true,
   striped: true,
@@ -7051,20 +9197,32 @@ function useAccountLayout() {
       const saved = JSON.parse(localStorage.getItem(ACCT_LAYOUT_KEY) || "null");
       if (saved && typeof saved === "object") {
         const known = ACCT_LAYOUT_DEFAULT.cols.map((c) => c.key);
-        const savedCols = (saved.cols || []).filter((c) => known.includes(c.key));
-        const missing = ACCT_LAYOUT_DEFAULT.cols.filter((c) => !savedCols.some((s) => s.key === c.key));
+        const savedCols = (saved.cols || []).filter((c) =>
+          known.includes(c.key),
+        );
+        const missing = ACCT_LAYOUT_DEFAULT.cols.filter(
+          (c) => !savedCols.some((s) => s.key === c.key),
+        );
         return {
           ...ACCT_LAYOUT_DEFAULT,
           ...saved,
-          theme: ACCT_THEMES[saved.theme] ? saved.theme : ACCT_LAYOUT_DEFAULT.theme,
+          theme: ACCT_THEMES[saved.theme]
+            ? saved.theme
+            : ACCT_LAYOUT_DEFAULT.theme,
           cols: [...savedCols, ...missing],
         };
       }
-    } catch (e) { /* ignore broken saved data */ }
+    } catch (e) {
+      /* ignore broken saved data */
+    }
     return ACCT_LAYOUT_DEFAULT;
   });
   const save = (next) => {
-    try { localStorage.setItem(ACCT_LAYOUT_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked */ }
+    try {
+      localStorage.setItem(ACCT_LAYOUT_KEY, JSON.stringify(next));
+    } catch (e) {
+      /* storage blocked */
+    }
     return next;
   };
   const update = (patch) => setLayout((prev) => save({ ...prev, ...patch }));
@@ -7101,14 +9259,21 @@ function AccountingPage({ isAdmin, go }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
-  const balanceOf = (a) => (ITEM_LINKED_TYPES.has(a.account_type) ? a.total_value : a.ledger_balance);
+  const balanceOf = (a) =>
+    ITEM_LINKED_TYPES.has(a.account_type) ? a.total_value : a.ledger_balance;
   const openAccount = (a) => go({ view: "accounting", account: String(a.id) });
 
   const groupTotals = ACCOUNT_GROUPS.map((g) => {
     const list = accounts.filter((a) => ACCOUNT_GROUP_OF[a.account_type] === g);
-    return { g, count: list.length, total: list.reduce((s, a) => s + Number(balanceOf(a) || 0), 0) };
+    return {
+      g,
+      count: list.length,
+      total: list.reduce((s, a) => s + Number(balanceOf(a) || 0), 0),
+    };
   });
 
   const sortVal = (key, a) => {
@@ -7122,42 +9287,75 @@ function AccountingPage({ isAdmin, go }) {
 
   const q = search.trim().toLowerCase();
   const rows = accounts
-    .filter((a) => groupFilter === "all" || ACCOUNT_GROUP_OF[a.account_type] === groupFilter)
+    .filter(
+      (a) =>
+        groupFilter === "all" ||
+        ACCOUNT_GROUP_OF[a.account_type] === groupFilter,
+    )
     .filter((a) => typeFilter === "all" || a.account_type === typeFilter)
-    .filter((a) => !q || a.name.toLowerCase().includes(q) || (a.account_code || "").toLowerCase().includes(q))
+    .filter(
+      (a) =>
+        !q ||
+        a.name.toLowerCase().includes(q) ||
+        (a.account_code || "").toLowerCase().includes(q),
+    )
     .sort((a, b) => {
       const x = sortVal(sort.key, a);
       const y = sortVal(sort.key, b);
-      const r = typeof x === "number" ? x - y : compareNames(x, y) || compareNames(a.name, b.name);
+      const r =
+        typeof x === "number"
+          ? x - y
+          : compareNames(x, y) || compareNames(a.name, b.name);
       return sort.dir === "asc" ? r : -r;
     });
 
   const toggleSort = (key) =>
-    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+    setSort((s) =>
+      s.key === key
+        ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "asc" },
+    );
 
-  const visCols = layout.cols.filter((c) => c.visible).map((c) => ACCT_COLUMNS.find((x) => x.key === c.key)).filter(Boolean);
+  const visCols = layout.cols
+    .filter((c) => c.visible)
+    .map((c) => ACCT_COLUMNS.find((x) => x.key === c.key))
+    .filter(Boolean);
 
   const sections = layout.groupByType
-    ? ACCOUNT_TYPES.map((tp) => ({ key: tp.key, title: tp.label, list: rows.filter((a) => a.account_type === tp.key) })).filter((s) => s.list.length > 0)
+    ? ACCOUNT_TYPES.map((tp) => ({
+        key: tp.key,
+        title: tp.label,
+        list: rows.filter((a) => a.account_type === tp.key),
+      })).filter((s) => s.list.length > 0)
     : [{ key: "all", title: null, list: rows }];
 
   const cell = (key, a, selected) => {
     const sub = selected ? t.selSub : t.sub;
     const linked = ITEM_LINKED_TYPES.has(a.account_type);
     switch (key) {
-      case "code": return a.account_code || "";
-      case "name": return <span className="font-medium">{a.name}</span>;
-      case "type": return ACCOUNT_TYPE_NAMES[a.account_type] || a.account_type;
-      case "description": return <span className={sub}>{a.description || ""}</span>;
+      case "code":
+        return a.account_code || "";
+      case "name":
+        return <span className="font-medium">{a.name}</span>;
+      case "type":
+        return ACCOUNT_TYPE_NAMES[a.account_type] || a.account_type;
+      case "description":
+        return <span className={sub}>{a.description || ""}</span>;
       case "balance":
         return (
           <>
             {formatRs(balanceOf(a))}
-            {linked && a.ledger_balance !== 0 && <span className={`block text-[10px] ${sub}`}>Ledger {formatRs(a.ledger_balance)}</span>}
+            {linked && a.ledger_balance !== 0 && (
+              <span className={`block text-[10px] ${sub}`}>
+                Ledger {formatRs(a.ledger_balance)}
+              </span>
+            )}
           </>
         );
-      case "items": return linked ? a.item_count : "";
-      default: return "";
+      case "items":
+        return linked ? a.item_count : "";
+      default:
+        return "";
     }
   };
 
@@ -7172,7 +9370,14 @@ function AccountingPage({ isAdmin, go }) {
   const toggleCol = (key) => {
     const visibleCount = layout.cols.filter((c) => c.visible).length;
     updateLayout({
-      cols: layout.cols.map((c) => (c.key === key ? { ...c, visible: c.visible && visibleCount <= 1 ? true : !c.visible } : c)),
+      cols: layout.cols.map((c) =>
+        c.key === key
+          ? {
+              ...c,
+              visible: c.visible && visibleCount <= 1 ? true : !c.visible,
+            }
+          : c,
+      ),
     });
   };
   const segBtn = (label, active, onClick) => (
@@ -7186,7 +9391,11 @@ function AccountingPage({ isAdmin, go }) {
   );
   const checkRow = (label, key) => (
     <label className="flex items-center gap-2 text-sm text-gray-700 py-1">
-      <input type="checkbox" checked={layout[key]} onChange={(e) => updateLayout({ [key]: e.target.checked })} />
+      <input
+        type="checkbox"
+        checked={layout[key]}
+        onChange={(e) => updateLayout({ [key]: e.target.checked })}
+      />
       {label}
     </label>
   );
@@ -7204,7 +9413,9 @@ function AccountingPage({ isAdmin, go }) {
       <main className="p-3 sm:p-4 space-y-3">
         {/* ---- title row ---- */}
         <div className="flex items-center justify-between gap-2">
-          <h1 className={`text-base font-semibold ${t.title}`}>Chart of Accounts</h1>
+          <h1 className={`text-base font-semibold ${t.title}`}>
+            Chart of Accounts
+          </h1>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -7213,7 +9424,10 @@ function AccountingPage({ isAdmin, go }) {
             >
               <Settings size={14} /> Customize
             </button>
-            <button onClick={() => setFormOpen(true)} className={`${t.btn} px-4 py-1.5 rounded-sm text-sm font-medium`}>
+            <button
+              onClick={() => setFormOpen(true)}
+              className={`${t.btn} px-4 py-1.5 rounded-sm text-sm font-medium`}
+            >
               + Add Account
             </button>
           </div>
@@ -7227,12 +9441,21 @@ function AccountingPage({ isAdmin, go }) {
                 <button
                   key={g}
                   type="button"
-                  onClick={() => { setGroupFilter(groupFilter === g ? "all" : g); setTypeFilter("all"); }}
+                  onClick={() => {
+                    setGroupFilter(groupFilter === g ? "all" : g);
+                    setTypeFilter("all");
+                  }}
                   className={`${t.box[g]} ${t.boxText} text-left px-3 py-2 ${groupFilter === g ? "ring-2 ring-offset-1 ring-gray-700" : ""}`}
                 >
-                  <span className="block text-[10px] uppercase tracking-wide opacity-90">{g}</span>
-                  <span className="block text-lg font-semibold leading-tight">{formatRs(total)}</span>
-                  <span className="block text-[10px] uppercase opacity-90">{count} account{count === 1 ? "" : "s"}</span>
+                  <span className="block text-[10px] uppercase tracking-wide opacity-90">
+                    {g}
+                  </span>
+                  <span className="block text-lg font-semibold leading-tight">
+                    {formatRs(total)}
+                  </span>
+                  <span className="block text-[10px] uppercase opacity-90">
+                    {count} account{count === 1 ? "" : "s"}
+                  </span>
                 </button>
               ))}
             </div>
@@ -7242,24 +9465,56 @@ function AccountingPage({ isAdmin, go }) {
         {/* ---- list panel ---- */}
         <div className={`border ${t.panel}`}>
           {layout.showFilters && (
-            <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2 border-b ${t.line}`}>
-              <label className={`flex items-center gap-2 text-[11px] uppercase ${t.sub}`}>
+            <div
+              className={`flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2 border-b ${t.line}`}
+            >
+              <label
+                className={`flex items-center gap-2 text-[11px] uppercase ${t.sub}`}
+              >
                 Search
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name or code" className={`${inputCls} normal-case w-44`} />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Name or code"
+                  className={`${inputCls} normal-case w-44`}
+                />
               </label>
-              <label className={`flex items-center gap-2 text-[11px] uppercase ${t.sub}`}>
+              <label
+                className={`flex items-center gap-2 text-[11px] uppercase ${t.sub}`}
+              >
                 Group
-                <select value={groupFilter} onChange={(e) => { setGroupFilter(e.target.value); setTypeFilter("all"); }} className={`${inputCls} normal-case`}>
+                <select
+                  value={groupFilter}
+                  onChange={(e) => {
+                    setGroupFilter(e.target.value);
+                    setTypeFilter("all");
+                  }}
+                  className={`${inputCls} normal-case`}
+                >
                   <option value="all">All</option>
-                  {ACCOUNT_GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
+                  {ACCOUNT_GROUPS.map((g) => (
+                    <option key={g} value={g}>
+                      {g}
+                    </option>
+                  ))}
                 </select>
               </label>
-              <label className={`flex items-center gap-2 text-[11px] uppercase ${t.sub}`}>
+              <label
+                className={`flex items-center gap-2 text-[11px] uppercase ${t.sub}`}
+              >
                 Type
-                <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className={`${inputCls} normal-case`}>
+                <select
+                  value={typeFilter}
+                  onChange={(e) => setTypeFilter(e.target.value)}
+                  className={`${inputCls} normal-case`}
+                >
                   <option value="all">All</option>
-                  {ACCOUNT_TYPES.filter((tp) => groupFilter === "all" || tp.group === groupFilter).map((tp) => (
-                    <option key={tp.key} value={tp.key}>{tp.name}</option>
+                  {ACCOUNT_TYPES.filter(
+                    (tp) => groupFilter === "all" || tp.group === groupFilter,
+                  ).map((tp) => (
+                    <option key={tp.key} value={tp.key}>
+                      {tp.name}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -7277,7 +9532,13 @@ function AccountingPage({ isAdmin, go }) {
             <div className="p-3 space-y-4">
               {sections.map((s) => (
                 <div key={s.key}>
-                  {s.title && <h2 className={`text-xs font-semibold uppercase mb-2 ${t.sub}`}>{s.title} ({s.list.length})</h2>}
+                  {s.title && (
+                    <h2
+                      className={`text-xs font-semibold uppercase mb-2 ${t.sub}`}
+                    >
+                      {s.title} ({s.list.length})
+                    </h2>
+                  )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                     {s.list.map((a) => {
                       const selected = a.id === selectedId;
@@ -7290,13 +9551,32 @@ function AccountingPage({ isAdmin, go }) {
                           className={`text-left border rounded-md p-3 ${t.line} ${selected ? t.sel : `${t.rowA} ${t.text} ${t.hover}`}`}
                         >
                           <span className="flex items-start justify-between gap-2">
-                            <span className="font-medium truncate">{a.account_code ? `${a.account_code} · ` : ""}{a.name}</span>
-                            <span className="font-semibold shrink-0">{formatRs(balanceOf(a))}</span>
+                            <span className="font-medium truncate">
+                              {a.account_code ? `${a.account_code} · ` : ""}
+                              {a.name}
+                            </span>
+                            <span className="font-semibold shrink-0">
+                              {formatRs(balanceOf(a))}
+                            </span>
                           </span>
-                          <span className={`block text-xs mt-0.5 ${selected ? t.selSub : t.sub}`}>{ACCOUNT_TYPE_NAMES[a.account_type] || a.account_type}</span>
-                          {a.description && <span className={`block text-xs mt-1 truncate ${selected ? t.selSub : t.sub}`}>{a.description}</span>}
                           <span
-                            onClick={(e) => { e.stopPropagation(); openAccount(a); }}
+                            className={`block text-xs mt-0.5 ${selected ? t.selSub : t.sub}`}
+                          >
+                            {ACCOUNT_TYPE_NAMES[a.account_type] ||
+                              a.account_type}
+                          </span>
+                          {a.description && (
+                            <span
+                              className={`block text-xs mt-1 truncate ${selected ? t.selSub : t.sub}`}
+                            >
+                              {a.description}
+                            </span>
+                          )}
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openAccount(a);
+                            }}
                             className={`inline-block mt-2 text-xs underline ${selected ? "text-white" : "text-blue-600"}`}
                           >
                             Open
@@ -7321,29 +9601,56 @@ function AccountingPage({ isAdmin, go }) {
                         className={`px-3 ${pad} text-[11px] font-semibold uppercase tracking-wide border-r ${t.line} cursor-pointer select-none whitespace-nowrap ${c.right ? "text-right" : "text-left"}`}
                       >
                         {c.label}
-                        {sort.key === c.key && <span className="ml-1 text-[9px]">{sort.dir === "asc" ? "▲" : "▼"}</span>}
+                        {sort.key === c.key && (
+                          <span className="ml-1 text-[9px]">
+                            {sort.dir === "asc" ? "▲" : "▼"}
+                          </span>
+                        )}
                       </th>
                     ))}
-                    <th className={`px-3 ${pad} text-left text-[11px] font-semibold uppercase tracking-wide w-24`}>Action</th>
+                    <th
+                      className={`px-3 ${pad} text-left text-[11px] font-semibold uppercase tracking-wide w-24`}
+                    >
+                      Action
+                    </th>
                   </tr>
                 </thead>
                 {sections.map((s) => (
                   <tbody key={s.key} className={t.text}>
                     {s.title && (
                       <tr className={t.groupRow}>
-                        <td colSpan={visCols.length + 1} className={`px-3 ${pad} text-xs font-semibold uppercase`}>
+                        <td
+                          colSpan={visCols.length + 1}
+                          className={`px-3 ${pad} text-xs font-semibold uppercase`}
+                        >
                           <span className="flex justify-between">
-                            <span>{s.title} ({s.list.length})</span>
-                            <span>{formatRs(s.list.reduce((sum, a) => sum + Number(balanceOf(a) || 0), 0))}</span>
+                            <span>
+                              {s.title} ({s.list.length})
+                            </span>
+                            <span>
+                              {formatRs(
+                                s.list.reduce(
+                                  (sum, a) => sum + Number(balanceOf(a) || 0),
+                                  0,
+                                ),
+                              )}
+                            </span>
                           </span>
                         </td>
                       </tr>
                     )}
                     {s.list.map((a, i) => {
                       const selected = a.id === selectedId;
-                      const bg = selected ? t.sel : `${layout.striped && i % 2 ? t.rowB : t.rowA} ${t.hover}`;
+                      const bg = selected
+                        ? t.sel
+                        : `${layout.striped && i % 2 ? t.rowB : t.rowA} ${t.hover}`;
                       return (
-                        <tr key={a.id} onClick={() => setSelectedId(a.id)} onDoubleClick={() => openAccount(a)} className={`cursor-pointer ${bg}`}>
+                        <tr
+                          key={a.id}
+                          onClick={() => setSelectedId(a.id)}
+                          onDoubleClick={() => openAccount(a)}
+                          className={`cursor-pointer ${bg}`}
+                        >
                           {visCols.map((c) => (
                             <td
                               key={c.key}
@@ -7355,7 +9662,10 @@ function AccountingPage({ isAdmin, go }) {
                           <td className={`px-3 ${pad}`}>
                             <button
                               type="button"
-                              onClick={(e) => { e.stopPropagation(); openAccount(a); }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openAccount(a);
+                              }}
                               className="px-2 py-0.5 text-xs border rounded-sm bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
                             >
                               Open
@@ -7370,7 +9680,9 @@ function AccountingPage({ isAdmin, go }) {
             </div>
           )}
 
-          <div className={`flex justify-end px-3 py-2 border-t text-xs ${t.line} ${t.sub}`}>
+          <div
+            className={`flex justify-end px-3 py-2 border-t text-xs ${t.line} ${t.sub}`}
+          >
             Showing {rows.length ? 1 : 0} - {rows.length} of {accounts.length}
           </div>
         </div>
@@ -7378,15 +9690,31 @@ function AccountingPage({ isAdmin, go }) {
 
       {/* ---------- Customize panel (slides in from the right) ---------- */}
       {panelOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={() => setPanelOpen(false)}>
-          <div className="w-full max-w-sm bg-white h-full overflow-y-auto p-5 space-y-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex justify-end bg-black/30"
+          onClick={() => setPanelOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-white h-full overflow-y-auto p-5 space-y-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Customize layout</h2>
-              <button type="button" onClick={() => setPanelOpen(false)} className="text-gray-500 hover:text-gray-800 text-xl leading-none">✕</button>
+              <h2 className="text-lg font-semibold text-gray-900">
+                Customize layout
+              </h2>
+              <button
+                type="button"
+                onClick={() => setPanelOpen(false)}
+                className="text-gray-500 hover:text-gray-800 text-xl leading-none"
+              >
+                ✕
+              </button>
             </div>
 
             <section>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Theme</h3>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                Theme
+              </h3>
               <div className="grid grid-cols-1 gap-2">
                 {Object.entries(ACCT_THEMES).map(([key, th]) => (
                   <button
@@ -7396,33 +9724,55 @@ function AccountingPage({ isAdmin, go }) {
                     className={`flex items-center gap-3 border rounded-md px-3 py-2 text-left text-sm ${layout.theme === key ? "border-blue-600 ring-1 ring-blue-600" : "border-gray-300 hover:bg-gray-50"}`}
                   >
                     <span className="flex">
-                      {th.swatch.map((c) => <span key={c} className="w-5 h-5 border border-gray-300" style={{ background: c }} />)}
+                      {th.swatch.map((c) => (
+                        <span
+                          key={c}
+                          className="w-5 h-5 border border-gray-300"
+                          style={{ background: c }}
+                        />
+                      ))}
                     </span>
                     <span className="text-gray-800">{th.name}</span>
-                    {layout.theme === key && <span className="ml-auto text-blue-600">✓</span>}
+                    {layout.theme === key && (
+                      <span className="ml-auto text-blue-600">✓</span>
+                    )}
                   </button>
                 ))}
               </div>
             </section>
 
             <section>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Layout</h3>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                Layout
+              </h3>
               <div className="flex">
-                {segBtn("Table", layout.view === "table", () => updateLayout({ view: "table" }))}
-                {segBtn("Cards", layout.view === "cards", () => updateLayout({ view: "cards" }))}
+                {segBtn("Table", layout.view === "table", () =>
+                  updateLayout({ view: "table" }),
+                )}
+                {segBtn("Cards", layout.view === "cards", () =>
+                  updateLayout({ view: "cards" }),
+                )}
               </div>
             </section>
 
             <section>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Row density</h3>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                Row density
+              </h3>
               <div className="flex">
-                {segBtn("Compact", layout.density === "compact", () => updateLayout({ density: "compact" }))}
-                {segBtn("Comfortable", layout.density === "comfortable", () => updateLayout({ density: "comfortable" }))}
+                {segBtn("Compact", layout.density === "compact", () =>
+                  updateLayout({ density: "compact" }),
+                )}
+                {segBtn("Comfortable", layout.density === "comfortable", () =>
+                  updateLayout({ density: "comfortable" }),
+                )}
               </div>
             </section>
 
             <section>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-1">Show</h3>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-1">
+                Show
+              </h3>
               {checkRow("Summary boxes (top strip)", "showSummary")}
               {checkRow("Filter bar", "showFilters")}
               {checkRow("Striped rows", "striped")}
@@ -7430,17 +9780,42 @@ function AccountingPage({ isAdmin, go }) {
             </section>
 
             <section>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Columns (table layout)</h3>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                Columns (table layout)
+              </h3>
               <div className="space-y-1">
                 {layout.cols.map((c, i) => {
                   const def = ACCT_COLUMNS.find((x) => x.key === c.key);
                   if (!def) return null;
                   return (
-                    <div key={c.key} className="flex items-center gap-2 border border-gray-200 rounded-md px-2 py-1">
-                      <input type="checkbox" checked={c.visible} onChange={() => toggleCol(c.key)} />
-                      <span className="flex-1 text-sm text-gray-800">{def.label}</span>
-                      <button type="button" disabled={i === 0} onClick={() => moveCol(i, -1)} className="px-1 text-gray-500 disabled:opacity-30">▲</button>
-                      <button type="button" disabled={i === layout.cols.length - 1} onClick={() => moveCol(i, 1)} className="px-1 text-gray-500 disabled:opacity-30">▼</button>
+                    <div
+                      key={c.key}
+                      className="flex items-center gap-2 border border-gray-200 rounded-md px-2 py-1"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={c.visible}
+                        onChange={() => toggleCol(c.key)}
+                      />
+                      <span className="flex-1 text-sm text-gray-800">
+                        {def.label}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={i === 0}
+                        onClick={() => moveCol(i, -1)}
+                        className="px-1 text-gray-500 disabled:opacity-30"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        disabled={i === layout.cols.length - 1}
+                        onClick={() => moveCol(i, 1)}
+                        className="px-1 text-gray-500 disabled:opacity-30"
+                      >
+                        ▼
+                      </button>
                     </div>
                   );
                 })}
@@ -7448,14 +9823,24 @@ function AccountingPage({ isAdmin, go }) {
             </section>
 
             <div className="flex gap-2 pt-2">
-              <button type="button" onClick={resetLayout} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              <button
+                type="button"
+                onClick={resetLayout}
+                className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
                 Reset to default
               </button>
-              <button type="button" onClick={() => setPanelOpen(false)} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700">
+              <button
+                type="button"
+                onClick={() => setPanelOpen(false)}
+                className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700"
+              >
                 Done
               </button>
             </div>
-            <p className="text-xs text-gray-400">Your layout is saved automatically on this device.</p>
+            <p className="text-xs text-gray-400">
+              Your layout is saved automatically on this device.
+            </p>
           </div>
         </div>
       )}
@@ -7463,7 +9848,10 @@ function AccountingPage({ isAdmin, go }) {
       {formOpen && (
         <AccountForm
           onClose={() => setFormOpen(false)}
-          onSubmit={async (payload) => { await createAccount(payload); await load(); }}
+          onSubmit={async (payload) => {
+            await createAccount(payload);
+            await load();
+          }}
         />
       )}
     </div>
@@ -7480,7 +9868,8 @@ function AccountForm({ initialData, onClose, onSubmit }) {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const handleChange = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+  const handleChange = (field, value) =>
+    setForm((prev) => ({ ...prev, [field]: value }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -7500,18 +9889,32 @@ function AccountForm({ initialData, onClose, onSubmit }) {
     }
   };
 
-  const fieldCls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const fieldCls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">{isEditMode ? "Edit Account" : "Add Account"}</h2>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <h2 className="text-lg font-semibold mb-4">
+          {isEditMode ? "Edit Account" : "Add Account"}
+        </h2>
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-3">
-          <input required placeholder="Account name" value={form.name} onChange={(e) => handleChange("name", e.target.value)}
-            className={fieldCls} />
+          <input
+            required
+            placeholder="Account name"
+            value={form.name}
+            onChange={(e) => handleChange("name", e.target.value)}
+            className={fieldCls}
+          />
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Account type</label>
+            <label className="block text-xs text-gray-500 mb-1">
+              Account type
+            </label>
             <select
               value={form.account_type}
               onChange={(e) => handleChange("account_type", e.target.value)}
@@ -7520,21 +9923,40 @@ function AccountForm({ initialData, onClose, onSubmit }) {
               {ACCOUNT_GROUPS.map((g) => (
                 <optgroup key={g} label={g}>
                   {ACCOUNT_TYPES.filter((t) => t.group === g).map((t) => (
-                    <option key={t.key} value={t.key}>{t.label}</option>
+                    <option key={t.key} value={t.key}>
+                      {t.label}
+                    </option>
                   ))}
                 </optgroup>
               ))}
             </select>
           </div>
-          <input placeholder="Account code (optional)" value={form.account_code}
-            onChange={(e) => handleChange("account_code", e.target.value)} className={fieldCls} />
-          <textarea placeholder="Description (optional)" rows={2} value={form.description}
-            onChange={(e) => handleChange("description", e.target.value)} className={fieldCls} />
+          <input
+            placeholder="Account code (optional)"
+            value={form.account_code}
+            onChange={(e) => handleChange("account_code", e.target.value)}
+            className={fieldCls}
+          />
+          <textarea
+            placeholder="Description (optional)"
+            rows={2}
+            value={form.description}
+            onChange={(e) => handleChange("description", e.target.value)}
+            className={fieldCls}
+          />
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
               Cancel
             </button>
-            <button type="submit" disabled={submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
               {submitting ? "Saving..." : "Save Account"}
             </button>
           </div>
@@ -7546,7 +9968,11 @@ function AccountForm({ initialData, onClose, onSubmit }) {
 
 // ---------- Manual journals + trial balance (admin only) ----------
 const formatJournalDate = (iso) =>
-  new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+  new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 
 function JournalsPage({ isAdmin, go }) {
   const [tab, setTab] = useState("journals"); // "journals" | "trial"
@@ -7572,7 +9998,9 @@ function JournalsPage({ isAdmin, go }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const handleDelete = async () => {
     try {
@@ -7591,7 +10019,9 @@ function JournalsPage({ isAdmin, go }) {
     <button
       onClick={() => setTab(id)}
       className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-        tab === id ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
+        tab === id
+          ? "bg-blue-600 text-white"
+          : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
       }`}
     >
       {label}
@@ -7705,12 +10135,12 @@ function JournalsPage({ isAdmin, go }) {
                         </tbody>
                       </table>
                       <Gate right="delete_records">
-                      <button
-                        onClick={() => setDeleteTarget(j)}
-                        className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
-                      >
-                        <Trash2 size={14} /> Delete journal
-                      </button>
+                        <button
+                          onClick={() => setDeleteTarget(j)}
+                          className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                        >
+                          <Trash2 size={14} /> Delete journal
+                        </button>
                       </Gate>
                     </div>
                   )}
@@ -7782,7 +10212,12 @@ function JournalsPage({ isAdmin, go }) {
   );
 }
 
-const blankJournalLine = () => ({ account_id: "", debit: "", credit: "", description: "" });
+const blankJournalLine = () => ({
+  account_id: "",
+  debit: "",
+  credit: "",
+  description: "",
+});
 const toCents = (v) => Math.round((Number(v) || 0) * 100);
 
 function JournalForm({ onClose, onSaved }) {
@@ -7793,20 +10228,30 @@ function JournalForm({ onClose, onSaved }) {
   const [lines, setLines] = useState([blankJournalLine(), blankJournalLine()]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   useEffect(() => {
-    getAccounts().then(setAccounts).catch((err) => setError(err.message));
+    getAccounts()
+      .then(setAccounts)
+      .catch((err) => setError(err.message));
   }, []);
 
-  const setLine = (i, patch) => setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  const setLine = (i, patch) =>
+    setLines((prev) =>
+      prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
+    );
 
   const totalDebit = lines.reduce((s, l) => s + toCents(l.debit), 0);
   const totalCredit = lines.reduce((s, l) => s + toCents(l.credit), 0);
   const hasAmount = (l) => toCents(l.debit) > 0 || toCents(l.credit) > 0;
   const filled = lines.filter((l) => l.account_id && hasAmount(l));
   const missingAccount = lines.some((l) => hasAmount(l) && !l.account_id);
-  const canSave = filled.length >= 2 && !missingAccount && totalDebit === totalCredit && totalDebit > 0;
+  const canSave =
+    filled.length >= 2 &&
+    !missingAccount &&
+    totalDebit === totalCredit &&
+    totalDebit > 0;
   const difference = (totalDebit - totalCredit) / 100;
 
   const handleSubmit = async (e) => {
@@ -7838,70 +10283,158 @@ function JournalForm({ onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 max-h-[92vh] overflow-y-auto">
         <h2 className="text-lg font-semibold mb-4">New Manual Journal</h2>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <label className="text-xs text-gray-500">
               Date
-              <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1"} />
+              <input
+                required
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               Reference
-              <input value={reference} onChange={(e) => setReference(e.target.value)} className={cls + " mt-1"} />
+              <input
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
           </div>
-          <textarea rows={2} placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} className={cls} />
+          <textarea
+            rows={2}
+            placeholder="Notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className={cls}
+          />
 
           <div className="space-y-3">
             {lines.map((l, i) => (
-              <div key={i} className="border border-gray-200 rounded-lg p-3 space-y-2">
-                <select value={l.account_id} onChange={(e) => setLine(i, { account_id: e.target.value })} className={cls}>
+              <div
+                key={i}
+                className="border border-gray-200 rounded-lg p-3 space-y-2"
+              >
+                <select
+                  value={l.account_id}
+                  onChange={(e) => setLine(i, { account_id: e.target.value })}
+                  className={cls}
+                >
                   <option value="">Select account...</option>
                   {ACCOUNT_GROUPS.map((g) => (
                     <optgroup key={g} label={g}>
                       {accounts
                         .filter((a) => ACCOUNT_GROUP_OF[a.account_type] === g)
                         .sort((a, b) => compareNames(a.name, b.name))
-                        .map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        .map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
                     </optgroup>
                   ))}
                 </select>
                 <div className="grid grid-cols-2 gap-2">
-                  <input type="number" min="0" step="0.01" placeholder="Debit" value={l.debit}
-                    onChange={(e) => setLine(i, { debit: e.target.value, credit: e.target.value ? "" : l.credit })} className={cls} />
-                  <input type="number" min="0" step="0.01" placeholder="Credit" value={l.credit}
-                    onChange={(e) => setLine(i, { credit: e.target.value, debit: e.target.value ? "" : l.debit })} className={cls} />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Debit"
+                    value={l.debit}
+                    onChange={(e) =>
+                      setLine(i, {
+                        debit: e.target.value,
+                        credit: e.target.value ? "" : l.credit,
+                      })
+                    }
+                    className={cls}
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Credit"
+                    value={l.credit}
+                    onChange={(e) =>
+                      setLine(i, {
+                        credit: e.target.value,
+                        debit: e.target.value ? "" : l.debit,
+                      })
+                    }
+                    className={cls}
+                  />
                 </div>
                 <div className="flex gap-2">
-                  <input placeholder="Description (optional)" value={l.description}
-                    onChange={(e) => setLine(i, { description: e.target.value })} className={cls} />
+                  <input
+                    placeholder="Description (optional)"
+                    value={l.description}
+                    onChange={(e) =>
+                      setLine(i, { description: e.target.value })
+                    }
+                    className={cls}
+                  />
                   {lines.length > 2 && (
-                    <button type="button" title="Remove line"
-                      onClick={() => setLines((prev) => prev.filter((_, idx) => idx !== i))}
-                      className="shrink-0 border border-gray-300 rounded-lg px-3 text-gray-500 hover:bg-gray-50">
+                    <button
+                      type="button"
+                      title="Remove line"
+                      onClick={() =>
+                        setLines((prev) => prev.filter((_, idx) => idx !== i))
+                      }
+                      className="shrink-0 border border-gray-300 rounded-lg px-3 text-gray-500 hover:bg-gray-50"
+                    >
                       <Trash2 size={14} />
                     </button>
                   )}
                 </div>
               </div>
             ))}
-            <button type="button" onClick={() => setLines((prev) => [...prev, blankJournalLine()])}
-              className="text-sm text-blue-600 font-medium inline-flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setLines((prev) => [...prev, blankJournalLine()])}
+              className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+            >
               <Plus size={14} /> Add another line
             </button>
           </div>
 
           <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
-            <div className="flex justify-between"><span className="text-gray-500">Total debit</span><span>{formatRs(totalDebit / 100)}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">Total credit</span><span>{formatRs(totalCredit / 100)}</span></div>
-            <div className={`flex justify-between font-semibold ${difference === 0 ? "text-green-600" : "text-red-600"}`}>
-              <span>Difference</span><span>{formatRs(Math.abs(difference))}</span>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Total debit</span>
+              <span>{formatRs(totalDebit / 100)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Total credit</span>
+              <span>{formatRs(totalCredit / 100)}</span>
+            </div>
+            <div
+              className={`flex justify-between font-semibold ${difference === 0 ? "text-green-600" : "text-red-600"}`}
+            >
+              <span>Difference</span>
+              <span>{formatRs(Math.abs(difference))}</span>
             </div>
           </div>
 
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
-            <button type="submit" disabled={!canSave || submitting} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!canSave || submitting}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
               {submitting ? "Saving..." : "Save Journal"}
             </button>
           </div>
@@ -7912,7 +10445,13 @@ function JournalForm({ onClose, onSaved }) {
 }
 
 // ---------- Invoices (sales: lowers stock + posts to the ledger, admin only) ----------
-const INVOICE_TERM_DAYS = { "Due on Receipt": 0, "Net 15": 15, "Net 30": 30, "Net 45": 45, "Net 60": 60 };
+const INVOICE_TERM_DAYS = {
+  "Due on Receipt": 0,
+  "Net 15": 15,
+  "Net 30": 30,
+  "Net 45": 45,
+  "Net 60": 60,
+};
 const STOCK_TRACKED_TYPE = "Inventory Part"; // only this item type has stock that goes down when sold
 
 const addDaysISO = (iso, days) => {
@@ -7921,7 +10460,8 @@ const addDaysISO = (iso, days) => {
   return toISODate(d);
 };
 
-const primaryImageOf = (product) => product?.images?.find((i) => i.is_primary) || product?.images?.[0];
+const primaryImageOf = (product) =>
+  product?.images?.find((i) => i.is_primary) || product?.images?.[0];
 
 // small square picture of an item (falls back to a tag icon when it has no image)
 function ItemThumb({ product, size = 40 }) {
@@ -7931,16 +10471,28 @@ function ItemThumb({ product, size = 40 }) {
       style={{ width: size, height: size }}
       className="shrink-0 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center text-gray-300"
     >
-      {img ? <img src={img.image_url} alt="" className="w-full h-full object-cover" /> : <Tag size={Math.round(size / 2)} />}
+      {img ? (
+        <img
+          src={img.image_url}
+          alt=""
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <Tag size={Math.round(size / 2)} />
+      )}
     </div>
   );
 }
 
 function invoiceStatus(inv) {
-  if (inv.status === "void") return { label: "Void", cls: "bg-gray-100 text-gray-500" };
-  if (inv.balance_due <= 0.004) return { label: "Paid", cls: "bg-green-100 text-green-700" };
-  if (inv.due_date < toISODate(new Date())) return { label: "Overdue", cls: "bg-red-100 text-red-700" };
-  if (inv.amount_paid > 0) return { label: "Partially paid", cls: "bg-amber-100 text-amber-700" };
+  if (inv.status === "void")
+    return { label: "Void", cls: "bg-gray-100 text-gray-500" };
+  if (inv.balance_due <= 0.004)
+    return { label: "Paid", cls: "bg-green-100 text-green-700" };
+  if (inv.due_date < toISODate(new Date()))
+    return { label: "Overdue", cls: "bg-red-100 text-red-700" };
+  if (inv.amount_paid > 0)
+    return { label: "Partially paid", cls: "bg-amber-100 text-amber-700" };
   return { label: "Open", cls: "bg-blue-100 text-blue-700" };
 }
 
@@ -8328,9 +10880,15 @@ function InvoicePreviewModal({ invoice, onClose }) {
         {error ? (
           <p className="text-red-500 text-center py-16">{error}</p>
         ) : !url ? (
-          <p className="text-gray-400 text-center py-16">Preparing preview...</p>
+          <p className="text-gray-400 text-center py-16">
+            Preparing preview...
+          </p>
         ) : (
-          <iframe src={url} title="Invoice preview" className="flex-1 w-full rounded-b-xl" />
+          <iframe
+            src={url}
+            title="Invoice preview"
+            className="flex-1 w-full rounded-b-xl"
+          />
         )}
       </div>
     </div>
@@ -8339,7 +10897,16 @@ function InvoicePreviewModal({ invoice, onClose }) {
 
 // QuickBooks-style "Find Invoices": customer, number, PO, status, date range, amount range
 function InvoiceFindModal({ invoices, onGoTo, onClose }) {
-  const blank = { customer: "", number: "", po: "", status: "all", from: "", to: "", min: "", max: "" };
+  const blank = {
+    customer: "",
+    number: "",
+    po: "",
+    status: "all",
+    from: "",
+    to: "",
+    min: "",
+    max: "",
+  };
   const [f, setF] = useState(blank);
   const [results, setResults] = useState(null); // null = nothing searched yet
   const cls =
@@ -8354,13 +10921,15 @@ function InvoiceFindModal({ invoices, onGoTo, onClose }) {
 
   const runFind = (e) => {
     e?.preventDefault();
-    const has = (v, q) => (v || "").toLowerCase().includes(q.trim().toLowerCase());
+    const has = (v, q) =>
+      (v || "").toLowerCase().includes(q.trim().toLowerCase());
     setResults(
       invoices.filter((inv) => {
         if (f.customer && !has(inv.customer_name, f.customer)) return false;
         if (f.number && !has(inv.invoice_number, f.number)) return false;
         if (f.po && !has(inv.order_number, f.po)) return false;
-        if (f.status !== "all" && invoiceStatus(inv).label !== f.status) return false;
+        if (f.status !== "all" && invoiceStatus(inv).label !== f.status)
+          return false;
         if (f.from && inv.invoice_date < f.from) return false;
         if (f.to && inv.invoice_date > f.to) return false;
         if (f.min !== "" && inv.total < Number(f.min)) return false;
@@ -8383,19 +10952,37 @@ function InvoiceFindModal({ invoices, onGoTo, onClose }) {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="text-xs text-gray-500">
               Customer
-              <input autoFocus value={f.customer} onChange={(e) => set({ customer: e.target.value })} className={cls + " mt-1"} />
+              <input
+                autoFocus
+                value={f.customer}
+                onChange={(e) => set({ customer: e.target.value })}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               Invoice no.
-              <input value={f.number} onChange={(e) => set({ number: e.target.value })} placeholder="e.g. INV-0012" className={cls + " mt-1"} />
+              <input
+                value={f.number}
+                onChange={(e) => set({ number: e.target.value })}
+                placeholder="e.g. INV-0012"
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               Order / PO number
-              <input value={f.po} onChange={(e) => set({ po: e.target.value })} className={cls + " mt-1"} />
+              <input
+                value={f.po}
+                onChange={(e) => set({ po: e.target.value })}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               Status
-              <select value={f.status} onChange={(e) => set({ status: e.target.value })} className={cls + " mt-1"}>
+              <select
+                value={f.status}
+                onChange={(e) => set({ status: e.target.value })}
+                className={cls + " mt-1"}
+              >
                 <option value="all">All</option>
                 <option>Open</option>
                 <option>Overdue</option>
@@ -8406,29 +10993,65 @@ function InvoiceFindModal({ invoices, onGoTo, onClose }) {
             </label>
             <label className="text-xs text-gray-500">
               Date from
-              <input type="date" value={f.from} onChange={(e) => set({ from: e.target.value })} className={cls + " mt-1"} />
+              <input
+                type="date"
+                value={f.from}
+                onChange={(e) => set({ from: e.target.value })}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               Date to
-              <input type="date" value={f.to} min={f.from} onChange={(e) => set({ to: e.target.value })} className={cls + " mt-1"} />
+              <input
+                type="date"
+                value={f.to}
+                min={f.from}
+                onChange={(e) => set({ to: e.target.value })}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               Amount from
-              <input type="number" min="0" step="0.01" value={f.min} onChange={(e) => set({ min: e.target.value })} className={cls + " mt-1"} />
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={f.min}
+                onChange={(e) => set({ min: e.target.value })}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               Amount to
-              <input type="number" min="0" step="0.01" value={f.max} onChange={(e) => set({ max: e.target.value })} className={cls + " mt-1"} />
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={f.max}
+                onChange={(e) => set({ max: e.target.value })}
+                className={cls + " mt-1"}
+              />
             </label>
           </div>
           <div className="flex gap-2 pt-1">
-            <button type="submit" className="bg-blue-600 text-white rounded-lg px-5 py-2 text-sm font-medium hover:bg-blue-700">
+            <button
+              type="submit"
+              className="bg-blue-600 text-white rounded-lg px-5 py-2 text-sm font-medium hover:bg-blue-700"
+            >
               Find
             </button>
-            <button type="button" onClick={reset} className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50">
+            <button
+              type="button"
+              onClick={reset}
+              className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50"
+            >
               Reset
             </button>
-            <button type="button" onClick={onClose} className="ml-auto border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="ml-auto border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50"
+            >
               Close
             </button>
           </div>
@@ -8457,17 +11080,37 @@ function InvoiceFindModal({ invoices, onGoTo, onClose }) {
                     {results.map((inv) => {
                       const st = invoiceStatus(inv);
                       return (
-                        <tr key={inv.id} onDoubleClick={() => onGoTo(inv)} className="border-t border-gray-100 hover:bg-blue-50/40">
-                          <td className="px-3 py-2 whitespace-nowrap">{formatJournalDate(inv.invoice_date)}</td>
-                          <td className="px-3 py-2 whitespace-nowrap font-medium">{inv.invoice_number}</td>
+                        <tr
+                          key={inv.id}
+                          onDoubleClick={() => onGoTo(inv)}
+                          className="border-t border-gray-100 hover:bg-blue-50/40"
+                        >
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            {formatJournalDate(inv.invoice_date)}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap font-medium">
+                            {inv.invoice_number}
+                          </td>
                           <td className="px-3 py-2">{inv.customer_name}</td>
                           <td className="px-3 py-2">
-                            <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                            <span
+                              className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}
+                            >
+                              {st.label}
+                            </span>
                           </td>
-                          <td className="px-3 py-2 text-right whitespace-nowrap">{formatRs(inv.total)}</td>
-                          <td className="px-3 py-2 text-right whitespace-nowrap">{formatRs(inv.balance_due)}</td>
+                          <td className="px-3 py-2 text-right whitespace-nowrap">
+                            {formatRs(inv.total)}
+                          </td>
+                          <td className="px-3 py-2 text-right whitespace-nowrap">
+                            {formatRs(inv.balance_due)}
+                          </td>
                           <td className="px-3 py-2 text-right">
-                            <button type="button" onClick={() => onGoTo(inv)} className="text-blue-600 text-xs font-medium hover:underline">
+                            <button
+                              type="button"
+                              onClick={() => onGoTo(inv)}
+                              className="text-blue-600 text-xs font-medium hover:underline"
+                            >
                               Go To
                             </button>
                           </td>
@@ -8523,12 +11166,23 @@ function QuickCustomerModal({ initialName, onSave, onClose }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60]">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
         <h2 className="text-lg font-semibold mb-1">New customer</h2>
-        <p className="text-xs text-gray-500 mb-4">Phone number and address are optional.</p>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">{error}</div>}
+        <p className="text-xs text-gray-500 mb-4">
+          Phone number and address are optional.
+        </p>
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">
+            {error}
+          </div>
+        )}
         <form onSubmit={submit} className="space-y-3">
           <label className="block text-xs text-gray-500">
             Customer name *
-            <input required value={name} onChange={(e) => setName(e.target.value)} className={cls + " mt-1"} />
+            <input
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={cls + " mt-1"}
+            />
           </label>
           <label className="block text-xs text-gray-500">
             Phone number (optional)
@@ -8542,7 +11196,12 @@ function QuickCustomerModal({ initialName, onSave, onClose }) {
           </label>
           <label className="block text-xs text-gray-500">
             Address (optional)
-            <textarea rows={2} value={address} onChange={(e) => setAddress(e.target.value)} className={cls + " mt-1"} />
+            <textarea
+              rows={2}
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              className={cls + " mt-1"}
+            />
           </label>
           <div className="flex gap-2 pt-1">
             <button
@@ -8582,7 +11241,11 @@ function QuickItemModal({ initialName, onSave, onClose }) {
     setSaving(true);
     setError(null);
     try {
-      await onSave({ name: name.trim(), item_type: itemType, price: Number(price) || 0 });
+      await onSave({
+        name: name.trim(),
+        item_type: itemType,
+        price: Number(price) || 0,
+      });
       onClose();
     } catch (err) {
       setError(err.message);
@@ -8595,16 +11258,32 @@ function QuickItemModal({ initialName, onSave, onClose }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60]">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
         <h2 className="text-lg font-semibold mb-1">New item</h2>
-        <p className="text-xs text-gray-500 mb-4">Selling price is optional. You can edit the item fully later in Products.</p>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">{error}</div>}
+        <p className="text-xs text-gray-500 mb-4">
+          Selling price is optional. You can edit the item fully later in
+          Products.
+        </p>
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">
+            {error}
+          </div>
+        )}
         <form onSubmit={submit} className="space-y-3">
           <label className="block text-xs text-gray-500">
             Item name *
-            <input required value={name} onChange={(e) => setName(e.target.value)} className={cls + " mt-1"} />
+            <input
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={cls + " mt-1"}
+            />
           </label>
           <label className="block text-xs text-gray-500">
             Item type
-            <select value={itemType} onChange={(e) => setItemType(e.target.value)} className={cls + " mt-1"}>
+            <select
+              value={itemType}
+              onChange={(e) => setItemType(e.target.value)}
+              className={cls + " mt-1"}
+            >
               {ITEM_TYPES.filter((t) => t !== "Inventory Assembly").map((t) => (
                 <option key={t}>{t}</option>
               ))}
@@ -8647,7 +11326,12 @@ function QuickItemModal({ initialName, onSave, onClose }) {
 const INVOICE_ROW_GRID =
   "grid grid-cols-2 gap-2 sm:grid-cols-[28px_minmax(0,1.5fr)_minmax(0,1.5fr)_64px_96px_96px_32px] sm:items-center";
 
-const blankInvoiceLine = () => ({ product_id: "", description: "", quantity: "1", rate: "" });
+const blankInvoiceLine = () => ({
+  product_id: "",
+  description: "",
+  quantity: "1",
+  rate: "",
+});
 
 function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
   const [customers, setCustomers] = useState([]);
@@ -8667,14 +11351,14 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
   const [notes, setNotes] = useState(
     editInvoice?.notes || fromDoc?.notes || "",
   );
-    const [discountType, setDiscountType] = useState(
-      editInvoice?.discount_type || "amount",
-    ); // "amount" (Rs) or "percent"
-    const [discountValue, setDiscountValue] = useState(
-      editInvoice && Number(editInvoice.discount_value) > 0
-        ? String(editInvoice.discount_value)
-        : "",
-    );
+  const [discountType, setDiscountType] = useState(
+    editInvoice?.discount_type || "amount",
+  ); // "amount" (Rs) or "percent"
+  const [discountValue, setDiscountValue] = useState(
+    editInvoice && Number(editInvoice.discount_value) > 0
+      ? String(editInvoice.discount_value)
+      : "",
+  );
   const [lines, setLines] = useState(
     editInvoice && editInvoice.items.some((l) => l.product_id)
       ? editInvoice.items
@@ -8786,8 +11470,6 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
-
-  
 
   const customer = customers.find((c) => c.id === customerId);
   const autoDue = addDaysISO(
@@ -9403,9 +12085,12 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
 
 // ---------- Credit notes (step 6B: goods / money given back; posts to the ledger, admin only) ----------
 function creditNoteStatus(cn) {
-  if (cn.status === "void") return { label: "Void", cls: "bg-gray-100 text-gray-500" };
-  if (cn.balance <= 0.004) return { label: "Applied", cls: "bg-green-100 text-green-700" };
-  if (cn.amount_applied > 0) return { label: "Partially applied", cls: "bg-amber-100 text-amber-700" };
+  if (cn.status === "void")
+    return { label: "Void", cls: "bg-gray-100 text-gray-500" };
+  if (cn.balance <= 0.004)
+    return { label: "Applied", cls: "bg-green-100 text-green-700" };
+  if (cn.amount_applied > 0)
+    return { label: "Partially applied", cls: "bg-amber-100 text-amber-700" };
   return { label: "Open", cls: "bg-blue-100 text-blue-700" };
 }
 
@@ -9430,7 +12115,9 @@ function CreditNotesPage({ isAdmin, go }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const run = async (action) => {
     try {
@@ -9442,35 +12129,63 @@ function CreditNotesPage({ isAdmin, go }) {
   };
 
   const handleVoid = (cn) => {
-    if (!window.confirm(`Void ${cn.credit_number}? Returned stock is taken out again and its ledger entry is removed.`)) return;
+    if (
+      !window.confirm(
+        `Void ${cn.credit_number}? Returned stock is taken out again and its ledger entry is removed.`,
+      )
+    )
+      return;
     run(() => voidCreditNote(cn.id));
   };
 
   const handleDelete = (cn) => {
-    if (!window.confirm(`Permanently delete ${cn.credit_number}? This can't be undone.`)) return;
+    if (
+      !window.confirm(
+        `Permanently delete ${cn.credit_number}? This can't be undone.`,
+      )
+    )
+      return;
     run(() => deleteCreditNote(cn.id));
   };
 
   const handleRemoveApplication = (cn, app) => {
-    if (!window.confirm(`Take ${formatRs(app.amount)} off ${app.invoice_number}? That invoice will owe it again.`)) return;
+    if (
+      !window.confirm(
+        `Take ${formatRs(app.amount)} off ${app.invoice_number}? That invoice will owe it again.`,
+      )
+    )
+      return;
     run(() => removeCreditApplication(cn.id, app.id));
   };
 
   const q = search.trim().toLowerCase();
   const shown = notes.filter(
-    (n) => !q || [n.credit_number, n.customer_name, n.invoice_number].some((v) => (v || "").toLowerCase().includes(q))
+    (n) =>
+      !q ||
+      [n.credit_number, n.customer_name, n.invoice_number].some((v) =>
+        (v || "").toLowerCase().includes(q),
+      ),
   );
 
-  const btn = "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium";
+  const btn =
+    "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium";
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="creditnotes" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="creditnotes"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
 
       <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
-            <SearchBox value={search} onChange={setSearch} placeholder="Search credit notes..." />
+            <SearchBox
+              value={search}
+              onChange={setSearch}
+              placeholder="Search credit notes..."
+            />
           </div>
           <button
             onClick={() => setFormOpen(true)}
@@ -9485,7 +12200,9 @@ function CreditNotesPage({ isAdmin, go }) {
         ) : error ? (
           <p className="text-red-500 text-center py-16">{error}</p>
         ) : shown.length === 0 ? (
-          <p className="text-gray-400 text-center py-16">No credit notes yet.</p>
+          <p className="text-gray-400 text-center py-16">
+            No credit notes yet.
+          </p>
         ) : (
           <div className="space-y-2">
             {shown.map((cn) => {
@@ -9659,8 +12376,16 @@ function CreditNotesPage({ isAdmin, go }) {
         )}
       </main>
 
-      {formOpen && <CreditNoteForm onClose={() => setFormOpen(false)} onSaved={load} />}
-      {applyFor && <ApplyCreditModal credit={applyFor} onClose={() => setApplyFor(null)} onSaved={load} />}
+      {formOpen && (
+        <CreditNoteForm onClose={() => setFormOpen(false)} onSaved={load} />
+      )}
+      {applyFor && (
+        <ApplyCreditModal
+          credit={applyFor}
+          onClose={() => setApplyFor(null)}
+          onSaved={load}
+        />
+      )}
     </div>
   );
 }
@@ -9669,25 +12394,35 @@ function CreditNotesPage({ isAdmin, go }) {
 function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
   const [customers, setCustomers] = useState([]);
   const [items, setItems] = useState([]);
-  const [customerId, setCustomerId] = useState(fromInvoice ? fromInvoice.customer_id : "");
+  const [customerId, setCustomerId] = useState(
+    fromInvoice ? fromInvoice.customer_id : "",
+  );
   const [date, setDate] = useState(toISODate(new Date()));
   const [reason, setReason] = useState("");
   const [restock, setRestock] = useState(true);
   const [lines, setLines] = useState(
     fromInvoice && fromInvoice.items.some((l) => l.product_id)
-      ? fromInvoice.items.filter((l) => l.product_id).map((l) => ({
-          product_id: l.product_id, description: l.description || "", quantity: String(l.quantity), rate: String(l.rate),
-        }))
-      : [blankInvoiceLine()]
+      ? fromInvoice.items
+          .filter((l) => l.product_id)
+          .map((l) => ({
+            product_id: l.product_id,
+            description: l.description || "",
+            quantity: String(l.quantity),
+            rate: String(l.rate),
+          }))
+      : [blankInvoiceLine()],
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   useEffect(() => {
     Promise.all([getCustomers(), getProducts()])
       .then(([c, p]) => {
-        setCustomers(c.filter((x) => x.is_active || x.id === fromInvoice?.customer_id));
+        setCustomers(
+          c.filter((x) => x.is_active || x.id === fromInvoice?.customer_id),
+        );
         setItems(flattenParents(p).filter((x) => !(x.subitems?.length > 0)));
       })
       .catch((err) => setError(err.message));
@@ -9703,14 +12438,24 @@ function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
   const itemOptions = items.map((p) => ({
     value: p.id,
     label: p.label,
-    hint: p.item_type === STOCK_TRACKED_TYPE ? `${p.quantity} in stock` : p.item_type,
+    hint:
+      p.item_type === STOCK_TRACKED_TYPE
+        ? `${p.quantity} in stock`
+        : p.item_type,
     search: `${p.label} ${p.sku || ""}`,
   }));
 
-  const setLine = (i, patch) => setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  const setLine = (i, patch) =>
+    setLines((prev) =>
+      prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
+    );
   const pickItem = (i, productId) => {
     const p = itemById[productId];
-    setLine(i, { product_id: productId, description: p?.description || "", rate: p ? String(p.price ?? 0) : "" });
+    setLine(i, {
+      product_id: productId,
+      description: p?.description || "",
+      rate: p ? String(p.price ?? 0) : "",
+    });
   };
 
   const filled = lines.filter((l) => l.product_id);
@@ -9719,7 +12464,12 @@ function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
   const canSave =
     Boolean(customerId) &&
     filled.length > 0 &&
-    filled.every((l) => Number.isInteger(Number(l.quantity)) && Number(l.quantity) > 0 && toCents(l.rate) >= 0) &&
+    filled.every(
+      (l) =>
+        Number.isInteger(Number(l.quantity)) &&
+        Number(l.quantity) > 0 &&
+        toCents(l.rate) >= 0,
+    ) &&
     totalCents > 0;
 
   const handleSubmit = async (e) => {
@@ -9752,8 +12502,15 @@ function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">New Credit Note{fromInvoice ? ` for ${fromInvoice.invoice_number}` : ""}</h2>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <h2 className="text-lg font-semibold mb-4">
+          New Credit Note
+          {fromInvoice ? ` for ${fromInvoice.invoice_number}` : ""}
+        </h2>
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <FieldLabel>Customer</FieldLabel>
@@ -9769,7 +12526,13 @@ function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
 
           <label className="text-xs text-gray-500 block">
             Credit note date
-            <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1 sm:w-56"} />
+            <input
+              required
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className={cls + " mt-1 sm:w-56"}
+            />
           </label>
 
           <div className="space-y-3">
@@ -9777,7 +12540,10 @@ function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
             {lines.map((l, i) => {
               const p = itemById[l.product_id];
               return (
-                <div key={i} className="border border-gray-200 rounded-lg p-3 space-y-2">
+                <div
+                  key={i}
+                  className="border border-gray-200 rounded-lg p-3 space-y-2"
+                >
                   <div className="flex items-start gap-3">
                     <ItemThumb product={p} size={56} />
                     <div className="flex-1 min-w-0 space-y-2">
@@ -9792,7 +12558,9 @@ function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
                       <input
                         placeholder="Description (optional)"
                         value={l.description}
-                        onChange={(e) => setLine(i, { description: e.target.value })}
+                        onChange={(e) =>
+                          setLine(i, { description: e.target.value })
+                        }
                         className={cls}
                       />
                     </div>
@@ -9800,7 +12568,9 @@ function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
                       <button
                         type="button"
                         title="Remove line"
-                        onClick={() => setLines((prev) => prev.filter((_, idx) => idx !== i))}
+                        onClick={() =>
+                          setLines((prev) => prev.filter((_, idx) => idx !== i))
+                        }
                         className="shrink-0 border border-gray-300 rounded-lg p-2 text-gray-500 hover:bg-gray-50"
                       >
                         <Trash2 size={14} />
@@ -9811,17 +12581,33 @@ function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
                   <div className="grid grid-cols-3 gap-2">
                     <label className="text-xs text-gray-500">
                       Qty
-                      <input type="number" min="1" step="1" value={l.quantity}
-                        onChange={(e) => setLine(i, { quantity: e.target.value })} className={cls + " mt-1"} />
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={l.quantity}
+                        onChange={(e) =>
+                          setLine(i, { quantity: e.target.value })
+                        }
+                        className={cls + " mt-1"}
+                      />
                     </label>
                     <label className="text-xs text-gray-500">
                       Rate
-                      <input type="number" min="0" step="0.01" value={l.rate}
-                        onChange={(e) => setLine(i, { rate: e.target.value })} className={cls + " mt-1"} />
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={l.rate}
+                        onChange={(e) => setLine(i, { rate: e.target.value })}
+                        className={cls + " mt-1"}
+                      />
                     </label>
                     <div className="text-xs text-gray-500">
                       Amount
-                      <p className="mt-1 py-2 text-sm font-medium text-gray-900">{formatRs(lineCents(l) / 100)}</p>
+                      <p className="mt-1 py-2 text-sm font-medium text-gray-900">
+                        {formatRs(lineCents(l) / 100)}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -9837,14 +12623,28 @@ function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
           </div>
 
           <label className="flex items-start gap-2 text-sm text-gray-700">
-            <input type="checkbox" checked={restock} onChange={(e) => setRestock(e.target.checked)} className="mt-1" />
+            <input
+              type="checkbox"
+              checked={restock}
+              onChange={(e) => setRestock(e.target.checked)}
+              className="mt-1"
+            />
             <span>
               The goods came back, so put them back in stock
-              <span className="block text-xs text-gray-400">Untick this for a price adjustment or a discount where nothing was returned.</span>
+              <span className="block text-xs text-gray-400">
+                Untick this for a price adjustment or a discount where nothing
+                was returned.
+              </span>
             </span>
           </label>
 
-          <textarea rows={2} placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} className={cls} />
+          <textarea
+            rows={2}
+            placeholder="Reason (optional)"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            className={cls}
+          />
 
           <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
             <span>Credit total</span>
@@ -9852,7 +12652,11 @@ function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
           </div>
 
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
               Cancel
             </button>
             <button
@@ -9877,12 +12681,20 @@ function ApplyCreditModal({ credit, onClose, onSaved }) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   useEffect(() => {
     getInvoices()
       .then((all) =>
-        setInvoices(all.filter((i) => i.customer_id === credit.customer_id && i.status === "open" && i.balance_due > 0.004))
+        setInvoices(
+          all.filter(
+            (i) =>
+              i.customer_id === credit.customer_id &&
+              i.status === "open" &&
+              i.balance_due > 0.004,
+          ),
+        ),
       )
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -9891,7 +12703,9 @@ function ApplyCreditModal({ credit, onClose, onSaved }) {
   const pick = (id) => {
     setInvoiceId(id);
     const inv = invoices.find((i) => String(i.id) === String(id));
-    setAmount(inv ? String(Math.min(inv.balance_due, credit.balance).toFixed(2)) : "");
+    setAmount(
+      inv ? String(Math.min(inv.balance_due, credit.balance).toFixed(2)) : "",
+    );
   };
 
   const handleSubmit = async (e) => {
@@ -9899,7 +12713,10 @@ function ApplyCreditModal({ credit, onClose, onSaved }) {
     setSubmitting(true);
     setError(null);
     try {
-      await applyCreditNote(credit.id, { invoice_id: Number(invoiceId), amount: Number(amount) });
+      await applyCreditNote(credit.id, {
+        invoice_id: Number(invoiceId),
+        amount: Number(amount),
+      });
       await onSaved();
       onClose();
     } catch (err) {
@@ -9912,22 +12729,42 @@ function ApplyCreditModal({ credit, onClose, onSaved }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-        <h2 className="text-lg font-semibold mb-1">Apply {credit.credit_number}</h2>
-        <p className="text-sm text-gray-500 mb-4">{credit.customer_name} · Credit left {formatRs(credit.balance)}</p>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        <h2 className="text-lg font-semibold mb-1">
+          Apply {credit.credit_number}
+        </h2>
+        <p className="text-sm text-gray-500 mb-4">
+          {credit.customer_name} · Credit left {formatRs(credit.balance)}
+        </p>
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
 
         {loading ? (
           <p className="text-gray-400 text-center py-8">Loading...</p>
         ) : invoices.length === 0 ? (
           <div className="space-y-4">
-            <p className="text-sm text-gray-500">This customer has no unpaid invoices to apply the credit to.</p>
-            <button onClick={onClose} className="w-full border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">Close</button>
+            <p className="text-sm text-gray-500">
+              This customer has no unpaid invoices to apply the credit to.
+            </p>
+            <button
+              onClick={onClose}
+              className="w-full border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Close
+            </button>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <label className="text-xs text-gray-500 block">
               Invoice
-              <select required value={invoiceId} onChange={(e) => pick(e.target.value)} className={cls + " mt-1"}>
+              <select
+                required
+                value={invoiceId}
+                onChange={(e) => pick(e.target.value)}
+                className={cls + " mt-1"}
+              >
                 <option value="">Select an invoice...</option>
                 {invoices.map((i) => (
                   <option key={i.id} value={i.id}>
@@ -9938,11 +12775,22 @@ function ApplyCreditModal({ credit, onClose, onSaved }) {
             </label>
             <label className="text-xs text-gray-500 block">
               Amount to apply
-              <input required type="number" min="0.01" step="0.01" value={amount}
-                onChange={(e) => setAmount(e.target.value)} className={cls + " mt-1"} />
+              <input
+                required
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
             <div className="flex gap-2 pt-2">
-              <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+              >
                 Cancel
               </button>
               <button
@@ -9984,10 +12832,17 @@ function PaymentsPage({ isAdmin, go }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const handleDelete = async (p) => {
-    if (!window.confirm(`Delete ${p.payment_number}? Its invoices will owe the money again and the ledger entry is removed.`)) return;
+    if (
+      !window.confirm(
+        `Delete ${p.payment_number}? Its invoices will owe the money again and the ledger entry is removed.`,
+      )
+    )
+      return;
     try {
       await deletePayment(p.id);
       await load();
@@ -9998,17 +12853,29 @@ function PaymentsPage({ isAdmin, go }) {
 
   const q = search.trim().toLowerCase();
   const shown = payments.filter(
-    (p) => !q || [p.payment_number, p.customer_name, p.reference].some((v) => (v || "").toLowerCase().includes(q))
+    (p) =>
+      !q ||
+      [p.payment_number, p.customer_name, p.reference].some((v) =>
+        (v || "").toLowerCase().includes(q),
+      ),
   );
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="payments" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="payments"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
 
       <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
-            <SearchBox value={search} onChange={setSearch} placeholder="Search payments..." />
+            <SearchBox
+              value={search}
+              onChange={setSearch}
+              placeholder="Search payments..."
+            />
           </div>
           <button
             onClick={() => setFormOpen(true)}
@@ -10086,12 +12953,12 @@ function PaymentsPage({ isAdmin, go }) {
                         ))}
                       </div>
                       <Gate right="delete_records">
-                      <button
-                        onClick={() => handleDelete(p)}
-                        className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
-                      >
-                        <Trash2 size={14} /> Delete payment
-                      </button>
+                        <button
+                          onClick={() => handleDelete(p)}
+                          className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                        >
+                          <Trash2 size={14} /> Delete payment
+                        </button>
                       </Gate>
                     </div>
                   )}
@@ -10102,13 +12969,20 @@ function PaymentsPage({ isAdmin, go }) {
         )}
       </main>
 
-      {formOpen && <PaymentForm onClose={() => setFormOpen(false)} onSaved={load} />}
+      {formOpen && (
+        <PaymentForm onClose={() => setFormOpen(false)} onSaved={load} />
+      )}
     </div>
   );
 }
 
 // initialCustomerId / initialInvoiceId: used by the "Record payment" button on an invoice
-function PaymentForm({ initialCustomerId = "", initialInvoiceId = null, onClose, onSaved }) {
+function PaymentForm({
+  initialCustomerId = "",
+  initialInvoiceId = null,
+  onClose,
+  onSaved,
+}) {
   const [customers, setCustomers] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -10121,16 +12995,20 @@ function PaymentForm({ initialCustomerId = "", initialInvoiceId = null, onClose,
   const [applied, setApplied] = useState({}); // invoice id -> amount typed
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   useEffect(() => {
     Promise.all([getCustomers(), getInvoices(), getAccounts()])
       .then(([c, inv, acc]) => {
         setCustomers(c);
         setInvoices(inv);
-        const deposits = acc.filter((a) => DEPOSIT_ACCOUNT_TYPES.includes(a.account_type));
+        const deposits = acc.filter((a) =>
+          DEPOSIT_ACCOUNT_TYPES.includes(a.account_type),
+        );
         setAccounts(deposits);
-        const preferred = deposits.find((a) => a.name === "Undeposited Funds") || deposits[0];
+        const preferred =
+          deposits.find((a) => a.name === "Undeposited Funds") || deposits[0];
         if (preferred) setDepositId(preferred.id);
         const start = inv.find((i) => i.id === initialInvoiceId);
         if (start) setApplied({ [start.id]: String(start.balance_due) });
@@ -10139,17 +13017,34 @@ function PaymentForm({ initialCustomerId = "", initialInvoiceId = null, onClose,
   }, []);
 
   const owed = invoices
-    .filter((i) => i.customer_id === customerId && i.status === "open" && i.balance_due > 0.004)
+    .filter(
+      (i) =>
+        i.customer_id === customerId &&
+        i.status === "open" &&
+        i.balance_due > 0.004,
+    )
     .sort((a, b) => (a.due_date < b.due_date ? -1 : 1));
-  const customerOptions = customers.map((c) => ({ value: c.id, label: c.display_name, search: `${c.display_name} ${c.company_name || ""}` }));
+  const customerOptions = customers.map((c) => ({
+    value: c.id,
+    label: c.display_name,
+    search: `${c.display_name} ${c.company_name || ""}`,
+  }));
 
-  const pickCustomer = (id) => { setCustomerId(id); setApplied({}); };
-  const setAmount = (id, value) => setApplied((prev) => ({ ...prev, [id]: value }));
+  const pickCustomer = (id) => {
+    setCustomerId(id);
+    setApplied({});
+  };
+  const setAmount = (id, value) =>
+    setApplied((prev) => ({ ...prev, [id]: value }));
 
   const rows = owed.filter((i) => toCents(applied[i.id]) > 0);
   const totalCents = rows.reduce((s, i) => s + toCents(applied[i.id]), 0);
   const tooMuch = (i) => toCents(applied[i.id]) > toCents(i.balance_due);
-  const canSave = Boolean(customerId) && Boolean(depositId) && rows.length > 0 && !rows.some(tooMuch);
+  const canSave =
+    Boolean(customerId) &&
+    Boolean(depositId) &&
+    rows.length > 0 &&
+    !rows.some(tooMuch);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -10163,7 +13058,10 @@ function PaymentForm({ initialCustomerId = "", initialInvoiceId = null, onClose,
         deposit_account_id: Number(depositId),
         reference: reference.trim() || null,
         notes: notes.trim() || null,
-        allocations: rows.map((i) => ({ invoice_id: i.id, amount: Number(applied[i.id]) })),
+        allocations: rows.map((i) => ({
+          invoice_id: i.id,
+          amount: Number(applied[i.id]),
+        })),
       });
       await onSaved();
       onClose();
@@ -10178,7 +13076,11 @@ function PaymentForm({ initialCustomerId = "", initialInvoiceId = null, onClose,
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 max-h-[92vh] overflow-y-auto">
         <h2 className="text-lg font-semibold mb-4">Record Payment</h2>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <FieldLabel>Customer</FieldLabel>
@@ -10195,18 +13097,40 @@ function PaymentForm({ initialCustomerId = "", initialInvoiceId = null, onClose,
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="text-xs text-gray-500">
               Payment date
-              <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1"} />
+              <input
+                required
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               Payment mode
-              <select value={mode} onChange={(e) => setMode(e.target.value)} className={cls + " mt-1"}>
-                {PAYMENT_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value)}
+                className={cls + " mt-1"}
+              >
+                {PAYMENT_MODES.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="text-xs text-gray-500">
               Deposit to
-              <select value={depositId} onChange={(e) => setDepositId(e.target.value)} className={cls + " mt-1"}>
-                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              <select
+                value={depositId}
+                onChange={(e) => setDepositId(e.target.value)}
+                className={cls + " mt-1"}
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
               </select>
             </label>
           </div>
@@ -10214,21 +13138,36 @@ function PaymentForm({ initialCustomerId = "", initialInvoiceId = null, onClose,
           <div className="space-y-2">
             <FieldLabel>Invoices to pay</FieldLabel>
             {!customerId ? (
-              <p className="text-sm text-gray-400">Pick a customer to see what they owe.</p>
+              <p className="text-sm text-gray-400">
+                Pick a customer to see what they owe.
+              </p>
             ) : owed.length === 0 ? (
-              <p className="text-sm text-gray-400">This customer has no unpaid invoices.</p>
+              <p className="text-sm text-gray-400">
+                This customer has no unpaid invoices.
+              </p>
             ) : (
               owed.map((i) => (
-                <div key={i.id} className="border border-gray-200 rounded-lg p-3 flex items-center gap-3">
+                <div
+                  key={i.id}
+                  className="border border-gray-200 rounded-lg p-3 flex items-center gap-3"
+                >
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900">{i.invoice_number}</p>
-                    <p className="text-xs text-gray-400">
-                      Due {formatJournalDate(i.due_date)} · Owes {formatRs(i.balance_due)}
+                    <p className="text-sm font-medium text-gray-900">
+                      {i.invoice_number}
                     </p>
-                    {tooMuch(i) && <p className="text-xs text-red-600">More than is owed.</p>}
+                    <p className="text-xs text-gray-400">
+                      Due {formatJournalDate(i.due_date)} · Owes{" "}
+                      {formatRs(i.balance_due)}
+                    </p>
+                    {tooMuch(i) && (
+                      <p className="text-xs text-red-600">More than is owed.</p>
+                    )}
                   </div>
                   <input
-                    type="number" min="0" step="0.01" placeholder="0.00"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
                     value={applied[i.id] ?? ""}
                     onChange={(e) => setAmount(i.id, e.target.value)}
                     className={cls + " !w-28"}
@@ -10246,8 +13185,18 @@ function PaymentForm({ initialCustomerId = "", initialInvoiceId = null, onClose,
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <input placeholder="Reference (cheque no., transfer ID...)" value={reference} onChange={(e) => setReference(e.target.value)} className={cls} />
-            <input placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} className={cls} />
+            <input
+              placeholder="Reference (cheque no., transfer ID...)"
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              className={cls}
+            />
+            <input
+              placeholder="Notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className={cls}
+            />
           </div>
 
           <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
@@ -10256,7 +13205,11 @@ function PaymentForm({ initialCustomerId = "", initialInvoiceId = null, onClose,
           </div>
 
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
               Cancel
             </button>
             <button
@@ -10274,8 +13227,19 @@ function PaymentForm({ initialCustomerId = "", initialInvoiceId = null, onClose,
 }
 // ---------- Purchase bills (step 5: what you owe vendors. Adds stock + posts to the ledger, admin only) ----------
 // Not the same as the "Bill" tab (BillPage below), which is only the quick "restock several items" batch.
-const BILL_EXPENSE_TYPES = ["expense", "other_expense", "cogs", "fixed_asset", "other_current_asset"]; // accounts a plain expense line can use
-const PAID_FROM_ACCOUNT_TYPES = ["cash", "bank", "credit_card", "other_current_asset"]; // where vendor payments can come from
+const BILL_EXPENSE_TYPES = [
+  "expense",
+  "other_expense",
+  "cogs",
+  "fixed_asset",
+  "other_current_asset",
+]; // accounts a plain expense line can use
+const PAID_FROM_ACCOUNT_TYPES = [
+  "cash",
+  "bank",
+  "credit_card",
+  "other_current_asset",
+]; // where vendor payments can come from
 
 function PurchaseBillsPage({ isAdmin, go }) {
   const [bills, setBills] = useState([]);
@@ -10298,10 +13262,17 @@ function PurchaseBillsPage({ isAdmin, go }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const handleVoid = async (b) => {
-    if (!window.confirm(`Void ${b.bill_number}? The stock it added is taken back and its ledger entry is removed.`)) return;
+    if (
+      !window.confirm(
+        `Void ${b.bill_number}? The stock it added is taken back and its ledger entry is removed.`,
+      )
+    )
+      return;
     try {
       await voidPurchaseBill(b.id);
       await load();
@@ -10312,17 +13283,29 @@ function PurchaseBillsPage({ isAdmin, go }) {
 
   const q = search.trim().toLowerCase();
   const shown = bills.filter(
-    (b) => !q || [b.bill_number, b.vendor_name, b.vendor_ref].some((v) => (v || "").toLowerCase().includes(q))
+    (b) =>
+      !q ||
+      [b.bill_number, b.vendor_name, b.vendor_ref].some((v) =>
+        (v || "").toLowerCase().includes(q),
+      ),
   );
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="purchases" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="purchases"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
 
       <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
-            <SearchBox value={search} onChange={setSearch} placeholder="Search bills..." />
+            <SearchBox
+              value={search}
+              onChange={setSearch}
+              placeholder="Search bills..."
+            />
           </div>
           <button
             onClick={() => setFormOpen(true)}
@@ -10344,7 +13327,10 @@ function PurchaseBillsPage({ isAdmin, go }) {
               const st = invoiceStatus(b); // bills have the same status / balance_due / due_date fields as invoices
               const open = expandedId === b.id;
               return (
-                <div key={b.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div
+                  key={b.id}
+                  className="bg-white border border-gray-200 rounded-xl overflow-hidden"
+                >
                   <button
                     type="button"
                     onClick={() => setExpandedId(open ? null : b.id)}
@@ -10352,18 +13338,32 @@ function PurchaseBillsPage({ isAdmin, go }) {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 truncate">
-                        {b.bill_number} <span className="text-gray-400 font-normal">· {b.vendor_name}</span>
+                        {b.bill_number}{" "}
+                        <span className="text-gray-400 font-normal">
+                          · {b.vendor_name}
+                        </span>
                       </p>
                       <p className="text-xs text-gray-400 truncate">
-                        {formatJournalDate(b.bill_date)} · Due {formatJournalDate(b.due_date)}
+                        {formatJournalDate(b.bill_date)} · Due{" "}
+                        {formatJournalDate(b.due_date)}
                         {b.vendor_ref && ` · Ref ${b.vendor_ref}`}
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="font-semibold text-gray-900">{formatRs(b.total)}</p>
-                      <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                      <p className="font-semibold text-gray-900">
+                        {formatRs(b.total)}
+                      </p>
+                      <span
+                        className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}
+                      >
+                        {st.label}
+                      </span>
                     </div>
-                    {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                    {open ? (
+                      <ChevronDown size={16} className="text-gray-400" />
+                    ) : (
+                      <ChevronRight size={16} className="text-gray-400" />
+                    )}
                   </button>
 
                   {open && (
@@ -10378,22 +13378,39 @@ function PurchaseBillsPage({ isAdmin, go }) {
                             </div>
                           )}
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm text-gray-900 truncate">{l.item_name}</p>
+                            <p className="text-sm text-gray-900 truncate">
+                              {l.item_name}
+                            </p>
                             <p className="text-xs text-gray-400 truncate">
                               {l.quantity} × {formatRs(l.rate)}
                               {l.description && ` · ${l.description}`}
                             </p>
                           </div>
-                          <span className="text-sm font-medium text-gray-900 shrink-0">{formatRs(l.amount)}</span>
+                          <span className="text-sm font-medium text-gray-900 shrink-0">
+                            {formatRs(l.amount)}
+                          </span>
                         </div>
                       ))}
 
-                      {b.notes && <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">{b.notes}</p>}
+                      {b.notes && (
+                        <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">
+                          {b.notes}
+                        </p>
+                      )}
 
                       <div className="border-t border-gray-100 pt-2 text-sm space-y-1">
-                        <div className="flex justify-between"><span className="text-gray-500">Total</span><span>{formatRs(b.total)}</span></div>
-                        <div className="flex justify-between"><span className="text-gray-500">Paid</span><span>{formatRs(b.amount_paid)}</span></div>
-                        <div className="flex justify-between font-semibold"><span>Balance due</span><span>{formatRs(b.balance_due)}</span></div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Total</span>
+                          <span>{formatRs(b.total)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Paid</span>
+                          <span>{formatRs(b.amount_paid)}</span>
+                        </div>
+                        <div className="flex justify-between font-semibold">
+                          <span>Balance due</span>
+                          <span>{formatRs(b.balance_due)}</span>
+                        </div>
                       </div>
 
                       {b.status !== "void" && (
@@ -10407,12 +13424,12 @@ function PurchaseBillsPage({ isAdmin, go }) {
                             </button>
                           )}
                           <Gate right="void_transactions">
-                          <button
-                            onClick={() => handleVoid(b)}
-                            className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
-                          >
-                            <Trash2 size={14} /> Void bill
-                          </button>
+                            <button
+                              onClick={() => handleVoid(b)}
+                              className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                            >
+                              <Trash2 size={14} /> Void bill
+                            </button>
                           </Gate>
                         </div>
                       )}
@@ -10425,7 +13442,9 @@ function PurchaseBillsPage({ isAdmin, go }) {
         )}
       </main>
 
-      {formOpen && <PurchaseBillForm onClose={() => setFormOpen(false)} onSaved={load} />}
+      {formOpen && (
+        <PurchaseBillForm onClose={() => setFormOpen(false)} onSaved={load} />
+      )}
 
       {payFor && (
         <VendorPaymentForm
@@ -10440,7 +13459,14 @@ function PurchaseBillsPage({ isAdmin, go }) {
 }
 
 // a line is either an Item (stock goes up if it is an Inventory Part) or a plain Expense (e.g. electricity)
-const blankBillLine = () => ({ kind: "item", product_id: "", account_id: "", description: "", quantity: "1", rate: "" });
+const blankBillLine = () => ({
+  kind: "item",
+  product_id: "",
+  account_id: "",
+  description: "",
+  quantity: "1",
+  rate: "",
+});
 
 function PurchaseBillForm({ onClose, onSaved }) {
   const [vendors, setVendors] = useState([]);
@@ -10455,7 +13481,8 @@ function PurchaseBillForm({ onClose, onSaved }) {
   const [lines, setLines] = useState([blankBillLine()]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   useEffect(() => {
     Promise.all([getVendors(), getProducts(), getAccounts()])
@@ -10463,7 +13490,9 @@ function PurchaseBillForm({ onClose, onSaved }) {
         setVendors(v);
         // only real items: a parent that has subitems can't be bought itself
         setItems(flattenParents(p).filter((x) => !(x.subitems?.length > 0)));
-        setAccounts(a.filter((x) => BILL_EXPENSE_TYPES.includes(x.account_type)));
+        setAccounts(
+          a.filter((x) => BILL_EXPENSE_TYPES.includes(x.account_type)),
+        );
       })
       .catch((err) => setError(err.message));
   }, []);
@@ -10476,26 +13505,46 @@ function PurchaseBillForm({ onClose, onSaved }) {
   const itemOptions = items.map((p) => ({
     value: p.id,
     label: p.label,
-    hint: p.item_type === STOCK_TRACKED_TYPE ? `${p.quantity} in stock` : p.item_type,
+    hint:
+      p.item_type === STOCK_TRACKED_TYPE
+        ? `${p.quantity} in stock`
+        : p.item_type,
     search: `${p.label} ${p.sku || ""}`,
   }));
-  const accountOptions = accounts.map((a) => ({ value: a.id, label: a.name, hint: ACCOUNT_TYPE_NAMES[a.account_type] }));
+  const accountOptions = accounts.map((a) => ({
+    value: a.id,
+    label: a.name,
+    hint: ACCOUNT_TYPE_NAMES[a.account_type],
+  }));
 
-  const setLine = (i, patch) => setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  const setLine = (i, patch) =>
+    setLines((prev) =>
+      prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
+    );
   const pickItem = (i, productId) => {
     const p = itemById[productId];
     // the item's current cost is the starting rate; change it to what this bill actually charges
-    setLine(i, { product_id: productId, description: p?.purchase_description || "", rate: p && Number(p.cost) > 0 ? String(p.cost) : "" });
+    setLine(i, {
+      product_id: productId,
+      description: p?.purchase_description || "",
+      rate: p && Number(p.cost) > 0 ? String(p.cost) : "",
+    });
   };
 
-  const isFilled = (l) => (l.kind === "item" ? Boolean(l.product_id) : Boolean(l.account_id));
+  const isFilled = (l) =>
+    l.kind === "item" ? Boolean(l.product_id) : Boolean(l.account_id);
   const filled = lines.filter(isFilled);
   const lineCents = (l) => (Number(l.quantity) || 0) * toCents(l.rate);
   const totalCents = filled.reduce((s, l) => s + lineCents(l), 0);
   const canSave =
     Boolean(vendorId) &&
     filled.length > 0 &&
-    filled.every((l) => Number.isInteger(Number(l.quantity)) && Number(l.quantity) > 0 && toCents(l.rate) >= 0) &&
+    filled.every(
+      (l) =>
+        Number.isInteger(Number(l.quantity)) &&
+        Number(l.quantity) > 0 &&
+        toCents(l.rate) >= 0,
+    ) &&
     totalCents > 0 &&
     effectiveDue >= date;
 
@@ -10511,7 +13560,9 @@ function PurchaseBillForm({ onClose, onSaved }) {
         vendor_ref: vendorRef.trim() || null,
         notes: notes.trim() || null,
         items: filled.map((l) => ({
-          ...(l.kind === "item" ? { product_id: l.product_id } : { account_id: l.account_id }),
+          ...(l.kind === "item"
+            ? { product_id: l.product_id }
+            : { account_id: l.account_id }),
           description: l.description.trim() || null,
           quantity: Number(l.quantity),
           rate: Number(l.rate) || 0,
@@ -10530,7 +13581,11 @@ function PurchaseBillForm({ onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
         <h2 className="text-lg font-semibold mb-4">New Bill</h2>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <FieldLabel>Vendor</FieldLabel>
@@ -10547,21 +13602,49 @@ function PurchaseBillForm({ onClose, onSaved }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="text-xs text-gray-500">
               Bill date
-              <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1"} />
+              <input
+                required
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               Vendor's invoice number
-              <input value={vendorRef} onChange={(e) => setVendorRef(e.target.value)} className={cls + " mt-1"} />
+              <input
+                value={vendorRef}
+                onChange={(e) => setVendorRef(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               Payment terms
-              <select value={terms} onChange={(e) => { setTerms(e.target.value); setDueDate(""); }} className={cls + " mt-1"}>
-                {Object.keys(INVOICE_TERM_DAYS).map((t) => <option key={t} value={t}>{t}</option>)}
+              <select
+                value={terms}
+                onChange={(e) => {
+                  setTerms(e.target.value);
+                  setDueDate("");
+                }}
+                className={cls + " mt-1"}
+              >
+                {Object.keys(INVOICE_TERM_DAYS).map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="text-xs text-gray-500">
               Due date
-              <input required type="date" value={effectiveDue} min={date} onChange={(e) => setDueDate(e.target.value)} className={cls + " mt-1"} />
+              <input
+                required
+                type="date"
+                value={effectiveDue}
+                min={date}
+                onChange={(e) => setDueDate(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
           </div>
 
@@ -10570,22 +13653,40 @@ function PurchaseBillForm({ onClose, onSaved }) {
             {lines.map((l, i) => {
               const p = itemById[l.product_id];
               return (
-                <div key={i} className="border border-gray-200 rounded-lg p-3 space-y-2">
+                <div
+                  key={i}
+                  className="border border-gray-200 rounded-lg p-3 space-y-2"
+                >
                   <div className="flex items-start gap-3">
                     {l.kind === "item" ? (
                       <ItemThumb product={p} size={56} />
                     ) : (
-                      <div style={{ width: 56, height: 56 }} className="shrink-0 rounded-lg bg-gray-100 flex items-center justify-center text-gray-300">
+                      <div
+                        style={{ width: 56, height: 56 }}
+                        className="shrink-0 rounded-lg bg-gray-100 flex items-center justify-center text-gray-300"
+                      >
                         <Receipt size={28} />
                       </div>
                     )}
                     <div className="flex-1 min-w-0 space-y-2">
                       <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs">
-                        {[["item", "Item"], ["expense", "Expense"]].map(([k, label]) => (
+                        {[
+                          ["item", "Item"],
+                          ["expense", "Expense"],
+                        ].map(([k, label]) => (
                           <button
                             key={k}
                             type="button"
-                            onClick={() => l.kind !== k && setLine(i, { kind: k, product_id: "", account_id: "", description: "", rate: "" })}
+                            onClick={() =>
+                              l.kind !== k &&
+                              setLine(i, {
+                                kind: k,
+                                product_id: "",
+                                account_id: "",
+                                description: "",
+                                rate: "",
+                              })
+                            }
                             className={`px-3 py-1 ${l.kind === k ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
                           >
                             {label}
@@ -10614,7 +13715,9 @@ function PurchaseBillForm({ onClose, onSaved }) {
                       <input
                         placeholder="Description (optional)"
                         value={l.description}
-                        onChange={(e) => setLine(i, { description: e.target.value })}
+                        onChange={(e) =>
+                          setLine(i, { description: e.target.value })
+                        }
                         className={cls}
                       />
                     </div>
@@ -10622,7 +13725,9 @@ function PurchaseBillForm({ onClose, onSaved }) {
                       <button
                         type="button"
                         title="Remove line"
-                        onClick={() => setLines((prev) => prev.filter((_, idx) => idx !== i))}
+                        onClick={() =>
+                          setLines((prev) => prev.filter((_, idx) => idx !== i))
+                        }
                         className="shrink-0 border border-gray-300 rounded-lg p-2 text-gray-500 hover:bg-gray-50"
                       >
                         <Trash2 size={14} />
@@ -10633,23 +13738,43 @@ function PurchaseBillForm({ onClose, onSaved }) {
                   <div className="grid grid-cols-3 gap-2">
                     <label className="text-xs text-gray-500">
                       Qty
-                      <input type="number" min="1" step="1" value={l.quantity}
-                        onChange={(e) => setLine(i, { quantity: e.target.value })} className={cls + " mt-1"} />
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={l.quantity}
+                        onChange={(e) =>
+                          setLine(i, { quantity: e.target.value })
+                        }
+                        className={cls + " mt-1"}
+                      />
                     </label>
                     <label className="text-xs text-gray-500">
                       Rate
-                      <input type="number" min="0" step="0.01" value={l.rate}
-                        onChange={(e) => setLine(i, { rate: e.target.value })} className={cls + " mt-1"} />
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={l.rate}
+                        onChange={(e) => setLine(i, { rate: e.target.value })}
+                        className={cls + " mt-1"}
+                      />
                     </label>
                     <div className="text-xs text-gray-500">
                       Amount
-                      <p className="mt-1 py-2 text-sm font-medium text-gray-900">{formatRs(lineCents(l) / 100)}</p>
+                      <p className="mt-1 py-2 text-sm font-medium text-gray-900">
+                        {formatRs(lineCents(l) / 100)}
+                      </p>
                     </div>
                   </div>
 
-                  {p && p.item_type === STOCK_TRACKED_TYPE && Number(l.quantity) > 0 && (
-                    <p className="text-xs text-green-700">+{Number(l.quantity)} will be added to stock.</p>
-                  )}
+                  {p &&
+                    p.item_type === STOCK_TRACKED_TYPE &&
+                    Number(l.quantity) > 0 && (
+                      <p className="text-xs text-green-700">
+                        +{Number(l.quantity)} will be added to stock.
+                      </p>
+                    )}
                 </div>
               );
             })}
@@ -10662,7 +13787,13 @@ function PurchaseBillForm({ onClose, onSaved }) {
             </button>
           </div>
 
-          <textarea rows={2} placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} className={cls} />
+          <textarea
+            rows={2}
+            placeholder="Notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className={cls}
+          />
 
           <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
             <span>Total</span>
@@ -10670,7 +13801,11 @@ function PurchaseBillForm({ onClose, onSaved }) {
           </div>
 
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
               Cancel
             </button>
             <button
@@ -10686,7 +13821,6 @@ function PurchaseBillForm({ onClose, onSaved }) {
     </div>
   );
 }
-
 
 // ---------- Vendor payments (step 5: money out. Pays off bills + posts to the ledger, admin only) ----------
 function VendorPaymentsPage({ isAdmin, go }) {
@@ -10709,10 +13843,17 @@ function VendorPaymentsPage({ isAdmin, go }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const handleDelete = async (p) => {
-    if (!window.confirm(`Delete ${p.payment_number}? Its bills will be owed again and the ledger entry is removed.`)) return;
+    if (
+      !window.confirm(
+        `Delete ${p.payment_number}? Its bills will be owed again and the ledger entry is removed.`,
+      )
+    )
+      return;
     try {
       await deleteVendorPayment(p.id);
       await load();
@@ -10723,17 +13864,29 @@ function VendorPaymentsPage({ isAdmin, go }) {
 
   const q = search.trim().toLowerCase();
   const shown = payments.filter(
-    (p) => !q || [p.payment_number, p.vendor_name, p.reference].some((v) => (v || "").toLowerCase().includes(q))
+    (p) =>
+      !q ||
+      [p.payment_number, p.vendor_name, p.reference].some((v) =>
+        (v || "").toLowerCase().includes(q),
+      ),
   );
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="vendorpayments" onTab={(tab) => go(tab === "home" ? {} : { view: tab })} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="vendorpayments"
+        onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+      />
 
       <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex gap-3 items-center">
           <div className="flex-1">
-            <SearchBox value={search} onChange={setSearch} placeholder="Search payments made..." />
+            <SearchBox
+              value={search}
+              onChange={setSearch}
+              placeholder="Search payments made..."
+            />
           </div>
           <button
             onClick={() => setFormOpen(true)}
@@ -10748,7 +13901,9 @@ function VendorPaymentsPage({ isAdmin, go }) {
         ) : error ? (
           <p className="text-red-500 text-center py-16">{error}</p>
         ) : shown.length === 0 ? (
-          <p className="text-gray-400 text-center py-16">No payments made yet.</p>
+          <p className="text-gray-400 text-center py-16">
+            No payments made yet.
+          </p>
         ) : (
           <div className="space-y-2">
             {shown.map((p) => {
@@ -10827,13 +13982,20 @@ function VendorPaymentsPage({ isAdmin, go }) {
         )}
       </main>
 
-      {formOpen && <VendorPaymentForm onClose={() => setFormOpen(false)} onSaved={load} />}
+      {formOpen && (
+        <VendorPaymentForm onClose={() => setFormOpen(false)} onSaved={load} />
+      )}
     </div>
   );
 }
 
 // initialVendorId / initialBillId: used by the "Record payment" button on a bill
-function VendorPaymentForm({ initialVendorId = "", initialBillId = null, onClose, onSaved }) {
+function VendorPaymentForm({
+  initialVendorId = "",
+  initialBillId = null,
+  onClose,
+  onSaved,
+}) {
   const [vendors, setVendors] = useState([]);
   const [bills, setBills] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -10846,16 +14008,22 @@ function VendorPaymentForm({ initialVendorId = "", initialBillId = null, onClose
   const [applied, setApplied] = useState({}); // bill id -> amount typed
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const cls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   useEffect(() => {
     Promise.all([getVendors(), getPurchaseBills(), getAccounts()])
       .then(([v, b, acc]) => {
         setVendors(v);
         setBills(b);
-        const sources = acc.filter((a) => PAID_FROM_ACCOUNT_TYPES.includes(a.account_type));
+        const sources = acc.filter((a) =>
+          PAID_FROM_ACCOUNT_TYPES.includes(a.account_type),
+        );
         setAccounts(sources);
-        const preferred = sources.find((a) => a.account_type === "cash" || a.account_type === "bank") || sources[0];
+        const preferred =
+          sources.find(
+            (a) => a.account_type === "cash" || a.account_type === "bank",
+          ) || sources[0];
         if (preferred) setPaidFromId(preferred.id);
         const start = b.find((x) => x.id === initialBillId);
         if (start) setApplied({ [start.id]: String(start.balance_due) });
@@ -10864,17 +14032,30 @@ function VendorPaymentForm({ initialVendorId = "", initialBillId = null, onClose
   }, []);
 
   const owed = bills
-    .filter((b) => b.vendor_id === vendorId && b.status === "open" && b.balance_due > 0.004)
+    .filter(
+      (b) =>
+        b.vendor_id === vendorId &&
+        b.status === "open" &&
+        b.balance_due > 0.004,
+    )
     .sort((a, b) => (a.due_date < b.due_date ? -1 : 1));
   const vendorOptions = vendors.map((v) => ({ value: v.id, label: v.name }));
 
-  const pickVendor = (id) => { setVendorId(id); setApplied({}); };
-  const setAmount = (id, value) => setApplied((prev) => ({ ...prev, [id]: value }));
+  const pickVendor = (id) => {
+    setVendorId(id);
+    setApplied({});
+  };
+  const setAmount = (id, value) =>
+    setApplied((prev) => ({ ...prev, [id]: value }));
 
   const rows = owed.filter((b) => toCents(applied[b.id]) > 0);
   const totalCents = rows.reduce((s, b) => s + toCents(applied[b.id]), 0);
   const tooMuch = (b) => toCents(applied[b.id]) > toCents(b.balance_due);
-  const canSave = Boolean(vendorId) && Boolean(paidFromId) && rows.length > 0 && !rows.some(tooMuch);
+  const canSave =
+    Boolean(vendorId) &&
+    Boolean(paidFromId) &&
+    rows.length > 0 &&
+    !rows.some(tooMuch);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -10888,7 +14069,10 @@ function VendorPaymentForm({ initialVendorId = "", initialBillId = null, onClose
         paid_from_account_id: Number(paidFromId),
         reference: reference.trim() || null,
         notes: notes.trim() || null,
-        allocations: rows.map((b) => ({ bill_id: b.id, amount: Number(applied[b.id]) })),
+        allocations: rows.map((b) => ({
+          bill_id: b.id,
+          amount: Number(applied[b.id]),
+        })),
       });
       await onSaved();
       onClose();
@@ -10903,7 +14087,11 @@ function VendorPaymentForm({ initialVendorId = "", initialBillId = null, onClose
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 max-h-[92vh] overflow-y-auto">
         <h2 className="text-lg font-semibold mb-4">Pay Vendor</h2>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <FieldLabel>Vendor</FieldLabel>
@@ -10920,18 +14108,40 @@ function VendorPaymentForm({ initialVendorId = "", initialBillId = null, onClose
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="text-xs text-gray-500">
               Payment date
-              <input required type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cls + " mt-1"} />
+              <input
+                required
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={cls + " mt-1"}
+              />
             </label>
             <label className="text-xs text-gray-500">
               Payment mode
-              <select value={mode} onChange={(e) => setMode(e.target.value)} className={cls + " mt-1"}>
-                {PAYMENT_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value)}
+                className={cls + " mt-1"}
+              >
+                {PAYMENT_MODES.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="text-xs text-gray-500">
               Paid from
-              <select value={paidFromId} onChange={(e) => setPaidFromId(e.target.value)} className={cls + " mt-1"}>
-                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              <select
+                value={paidFromId}
+                onChange={(e) => setPaidFromId(e.target.value)}
+                className={cls + " mt-1"}
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
               </select>
             </label>
           </div>
@@ -10939,24 +14149,42 @@ function VendorPaymentForm({ initialVendorId = "", initialBillId = null, onClose
           <div className="space-y-2">
             <FieldLabel>Bills to pay</FieldLabel>
             {!vendorId ? (
-              <p className="text-sm text-gray-400">Pick a vendor to see what you owe them.</p>
+              <p className="text-sm text-gray-400">
+                Pick a vendor to see what you owe them.
+              </p>
             ) : owed.length === 0 ? (
-              <p className="text-sm text-gray-400">You have no unpaid bills from this vendor.</p>
+              <p className="text-sm text-gray-400">
+                You have no unpaid bills from this vendor.
+              </p>
             ) : (
               owed.map((b) => (
-                <div key={b.id} className="border border-gray-200 rounded-lg p-3 flex items-center gap-3">
+                <div
+                  key={b.id}
+                  className="border border-gray-200 rounded-lg p-3 flex items-center gap-3"
+                >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900">
                       {b.bill_number}
-                      {b.vendor_ref && <span className="text-gray-400 font-normal"> · {b.vendor_ref}</span>}
+                      {b.vendor_ref && (
+                        <span className="text-gray-400 font-normal">
+                          {" "}
+                          · {b.vendor_ref}
+                        </span>
+                      )}
                     </p>
                     <p className="text-xs text-gray-400">
-                      Due {formatJournalDate(b.due_date)} · Owed {formatRs(b.balance_due)}
+                      Due {formatJournalDate(b.due_date)} · Owed{" "}
+                      {formatRs(b.balance_due)}
                     </p>
-                    {tooMuch(b) && <p className="text-xs text-red-600">More than is owed.</p>}
+                    {tooMuch(b) && (
+                      <p className="text-xs text-red-600">More than is owed.</p>
+                    )}
                   </div>
                   <input
-                    type="number" min="0" step="0.01" placeholder="0.00"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
                     value={applied[b.id] ?? ""}
                     onChange={(e) => setAmount(b.id, e.target.value)}
                     className={cls + " !w-28"}
@@ -10974,8 +14202,18 @@ function VendorPaymentForm({ initialVendorId = "", initialBillId = null, onClose
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <input placeholder="Reference (cheque no., transfer ID...)" value={reference} onChange={(e) => setReference(e.target.value)} className={cls} />
-            <input placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} className={cls} />
+            <input
+              placeholder="Reference (cheque no., transfer ID...)"
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              className={cls}
+            />
+            <input
+              placeholder="Notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className={cls}
+            />
           </div>
 
           <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
@@ -10984,7 +14222,11 @@ function VendorPaymentForm({ initialVendorId = "", initialBillId = null, onClose
           </div>
 
           <div className="flex gap-2 pt-2">
-            <button type="button" onClick={onClose} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
               Cancel
             </button>
             <button
@@ -11051,7 +14293,9 @@ function SearchSelect({
 
   const selected = options.find((o) => o.value === value);
   const q = query.trim().toLowerCase();
-  const filtered = q ? options.filter((o) => (o.search || o.label).toLowerCase().includes(q)) : options;
+  const filtered = q
+    ? options.filter((o) => (o.search || o.label).toLowerCase().includes(q))
+    : options;
   const canCreate =
     Boolean(onCreateNew) &&
     q !== "" &&
@@ -11081,8 +14325,12 @@ function SearchSelect({
     };
   }, [open]);
 
-  useEffect(() => { if (disabled) close(); }, [disabled]);
-  useEffect(() => { setActive(0); }, [query, open]);
+  useEffect(() => {
+    if (disabled) close();
+  }, [disabled]);
+  useEffect(() => {
+    setActive(0);
+  }, [query, open]);
 
   const choose = (option) => {
     onChange(option.value);
@@ -11092,9 +14340,13 @@ function SearchSelect({
   const handleKeyDown = (e) => {
     if (!open) return;
     if (e.key === "Escape") close();
-    else if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(i + 1, rowCount - 1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
-    else if (e.key === "Enter") {
+    else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive((i) => Math.min(i + 1, rowCount - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
       e.preventDefault();
       if (filtered[active]) choose(filtered[active]);
       else if (canCreate) createNow();
@@ -11110,13 +14362,20 @@ function SearchSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         className={`w-full flex items-center justify-between gap-2 border rounded-lg px-3 py-2.5 text-sm text-left bg-white transition focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:border-gray-300 ${
-          open ? "border-blue-500 ring-2 ring-blue-100" : "border-gray-300 hover:border-gray-400"
+          open
+            ? "border-blue-500 ring-2 ring-blue-100"
+            : "border-gray-300 hover:border-gray-400"
         }`}
       >
-        <span className={`truncate ${selected ? "text-gray-900" : "text-gray-400"}`}>
+        <span
+          className={`truncate ${selected ? "text-gray-900" : "text-gray-400"}`}
+        >
           {selected ? selected.label : placeholder}
         </span>
-        <ChevronDown size={16} className={`shrink-0 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
+        <ChevronDown
+          size={16}
+          className={`shrink-0 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`}
+        />
       </button>
 
       {open && (
@@ -11124,7 +14383,10 @@ function SearchSelect({
           {searchable && (
             <div className="p-2 border-b border-gray-100">
               <div className="relative">
-                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Search
+                  size={14}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+                />
                 <input
                   autoFocus
                   value={query}
@@ -11154,7 +14416,11 @@ function SearchSelect({
                 >
                   <span className="truncate">{o.label}</span>
                   <span className="flex items-center gap-2 shrink-0">
-                    {o.hint && <span className="text-xs text-gray-400 font-normal">{o.hint}</span>}
+                    {o.hint && (
+                      <span className="text-xs text-gray-400 font-normal">
+                        {o.hint}
+                      </span>
+                    )}
                     {o.value === value && <Check size={14} />}
                   </span>
                 </li>
@@ -11169,8 +14435,12 @@ function SearchSelect({
                   active === filtered.length ? "bg-blue-50" : ""
                 }`}
               >
-                <span className="truncate">+ Create new {createLabel} "{query.trim()}"</span>
-                <span className="shrink-0 text-xs font-normal text-gray-400">Press Enter</span>
+                <span className="truncate">
+                  + Create new {createLabel} "{query.trim()}"
+                </span>
+                <span className="shrink-0 text-xs font-normal text-gray-400">
+                  Press Enter
+                </span>
               </li>
             )}
           </ul>
@@ -11181,12 +14451,24 @@ function SearchSelect({
 }
 
 // Inline "create item" panel shown under the Item title
-function CreateItemPanel({ existingNames, parentOptions = [], onCreate, onCancel }) {
-  const [form, setForm] = useState({ name: "", sku: "", price: "", is_subitem: false, parent_id: "" });
+function CreateItemPanel({
+  existingNames,
+  parentOptions = [],
+  onCreate,
+  onCancel,
+}) {
+  const [form, setForm] = useState({
+    name: "",
+    sku: "",
+    price: "",
+    is_subitem: false,
+    parent_id: "",
+  });
   const [imageFiles, setImageFiles] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const set = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+  const set = (field, value) =>
+    setForm((prev) => ({ ...prev, [field]: value }));
 
   const handleSave = async () => {
     const name = form.name.trim();
@@ -11209,7 +14491,7 @@ function CreateItemPanel({ existingNames, parentOptions = [], onCreate, onCancel
           price: form.price || 0,
           parent_id: form.is_subitem ? form.parent_id : "",
         },
-        imageFiles
+        imageFiles,
       );
     } catch (err) {
       setError(err.message);
@@ -11220,7 +14502,11 @@ function CreateItemPanel({ existingNames, parentOptions = [], onCreate, onCancel
   return (
     <div className="mb-3 border border-blue-200 bg-blue-50/50 rounded-xl p-3 space-y-2">
       <p className="text-xs font-medium text-blue-700">New item</p>
-      {error && <div className="bg-red-50 text-red-600 text-xs rounded-lg px-3 py-2">{error}</div>}
+      {error && (
+        <div className="bg-red-50 text-red-600 text-xs rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
       <input
         autoFocus
         placeholder="Item name *"
@@ -11239,7 +14525,12 @@ function CreateItemPanel({ existingNames, parentOptions = [], onCreate, onCancel
           }}
           className="rounded border-gray-300"
         />
-        <label htmlFor="new_item_is_subitem" className="text-sm text-gray-700 whitespace-nowrap">Subitem of</label>
+        <label
+          htmlFor="new_item_is_subitem"
+          className="text-sm text-gray-700 whitespace-nowrap"
+        >
+          Subitem of
+        </label>
         <select
           disabled={!form.is_subitem}
           value={form.parent_id}
@@ -11248,12 +14539,19 @@ function CreateItemPanel({ existingNames, parentOptions = [], onCreate, onCancel
         >
           <option value="">Select parent item...</option>
           {parentOptions.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
           ))}
         </select>
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <input placeholder="SKU (optional)" value={form.sku} onChange={(e) => set("sku", e.target.value)} className={inputCls} />
+        <input
+          placeholder="SKU (optional)"
+          value={form.sku}
+          onChange={(e) => set("sku", e.target.value)}
+          className={inputCls}
+        />
         <input
           type="number"
           min="0"
@@ -11265,7 +14563,9 @@ function CreateItemPanel({ existingNames, parentOptions = [], onCreate, onCancel
         />
       </div>
       <div>
-        <label className="block text-xs text-gray-500 mb-1">Images (optional — you can add them later)</label>
+        <label className="block text-xs text-gray-500 mb-1">
+          Images (optional — you can add them later)
+        </label>
         <input
           type="file"
           accept="image/*"
@@ -11275,10 +14575,19 @@ function CreateItemPanel({ existingNames, parentOptions = [], onCreate, onCancel
         />
       </div>
       <div className="flex gap-2 pt-1">
-        <button type="button" onClick={onCancel} className="flex-1 border border-gray-300 bg-white rounded-lg py-2 text-sm font-medium hover:bg-gray-50">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 border border-gray-300 bg-white rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+        >
           Cancel
         </button>
-        <button type="button" onClick={handleSave} disabled={saving} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+        >
           {saving ? "Creating..." : "Create item"}
         </button>
       </div>
@@ -11374,34 +14683,34 @@ function NewBillForm({ onBack, onSaved, editBill = null }) {
   const [showCreateItem, setShowCreateItem] = useState(false);
   const [showSubmit, setShowSubmit] = useState(false);
 
-    useEffect(() => {
-      getProducts()
-        .then((p) => {
-          setProducts(p);
-          if (editBill) {
-            // start from the bill's current lines; show stock as it was BEFORE this bill
-            const flat = flattenParents(p);
-            setLines(
-              editBill.items
-                .map((it) => {
-                  const prod = flat.find((x) => x.id === it.product_id);
-                  return prod
-                    ? {
-                        product: {
-                          ...prod,
-                          quantity: prod.quantity - it.quantity,
-                        },
-                        quantity: it.quantity,
-                      }
-                    : null;
-                })
-                .filter(Boolean),
-            );
-          }
-        })
-        .catch((err) => setLoadError(err.message))
-        .finally(() => setLoading(false));
-    }, []);
+  useEffect(() => {
+    getProducts()
+      .then((p) => {
+        setProducts(p);
+        if (editBill) {
+          // start from the bill's current lines; show stock as it was BEFORE this bill
+          const flat = flattenParents(p);
+          setLines(
+            editBill.items
+              .map((it) => {
+                const prod = flat.find((x) => x.id === it.product_id);
+                return prod
+                  ? {
+                      product: {
+                        ...prod,
+                        quantity: prod.quantity - it.quantity,
+                      },
+                      quantity: it.quantity,
+                    }
+                  : null;
+              })
+              .filter(Boolean),
+          );
+        }
+      })
+      .catch((err) => setLoadError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
 
   const allItems = flattenParents(products);
   const billableItems = allItems
@@ -11459,15 +14768,15 @@ function NewBillForm({ onBack, onSaved, editBill = null }) {
   const handleRemoveLine = (productId) =>
     setLines((prev) => prev.filter((l) => l.product.id !== productId));
 
-    const handleSubmitBill = async (adderName) => {
-      const items = lines.map((l) => ({
-        product_id: l.product.id,
-        quantity: l.quantity,
-      }));
-      if (editBill) await updateBill(editBill.id, adderName, items);
-      else await createBill(adderName, items);
-      onSaved();
-    };
+  const handleSubmitBill = async (adderName) => {
+    const items = lines.map((l) => ({
+      product_id: l.product.id,
+      quantity: l.quantity,
+    }));
+    if (editBill) await updateBill(editBill.id, adderName, items);
+    else await createBill(adderName, items);
+    onSaved();
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -11697,10 +15006,10 @@ function NewBillForm({ onBack, onSaved, editBill = null }) {
 
 // ---------- Bill page: list of submitted bills (newest first) ----------
 function BillPage({ go, autoCreateToken }) {
-    const [creating, setCreating] = useState(false);
-    const [editBill, setEditBill] = useState(null); // the bill being edited
-    useQuickNew(() => setCreating(true));
-    const [bills, setBills] = useState([]);
+  const [creating, setCreating] = useState(false);
+  const [editBill, setEditBill] = useState(null); // the bill being edited
+  useQuickNew(() => setCreating(true));
+  const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState("");
@@ -11719,8 +15028,12 @@ function BillPage({ go, autoCreateToken }) {
 
   useEffect(() => {
     load();
-    const interval = setInterval(() => { if (!document.hidden) load(); }, 10000);
-    const onVisible = () => { if (!document.hidden) load(); };
+    const interval = setInterval(() => {
+      if (!document.hidden) load();
+    }, 10000);
+    const onVisible = () => {
+      if (!document.hidden) load();
+    };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       clearInterval(interval);
@@ -11769,7 +15082,9 @@ function BillPage({ go, autoCreateToken }) {
   }
 
   const monthOptions = getMonthOptions(bills.map((b) => b.created_at));
-  const shown = selectedMonth ? bills.filter((b) => b.created_at?.slice(0, 7) === selectedMonth) : bills;
+  const shown = selectedMonth
+    ? bills.filter((b) => b.created_at?.slice(0, 7) === selectedMonth)
+    : bills;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -11781,15 +15096,23 @@ function BillPage({ go, autoCreateToken }) {
 
       <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-4 flex justify-end">
-          <button onClick={() => setCreating(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
+          <button
+            onClick={() => setCreating(true)}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700"
+          >
             + New Bill
           </button>
         </div>
         <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
           <h2 className="text-sm font-semibold text-gray-500 uppercase">
-            Bills <span className="text-gray-400 font-normal">({shown.length})</span>
+            Bills{" "}
+            <span className="text-gray-400 font-normal">({shown.length})</span>
           </h2>
-          <MonthSelect options={monthOptions} value={selectedMonth} onChange={setSelectedMonth} />
+          <MonthSelect
+            options={monthOptions}
+            value={selectedMonth}
+            onChange={setSelectedMonth}
+          />
         </div>
 
         {loading ? (
@@ -11798,7 +15121,9 @@ function BillPage({ go, autoCreateToken }) {
           <p className="text-red-500 text-center py-16">{error}</p>
         ) : shown.length === 0 ? (
           <p className="text-gray-400 text-sm text-center py-16">
-            {bills.length === 0 ? "No bills yet. Tap “New Bill” to add stock in bulk." : "No bills for this month."}
+            {bills.length === 0
+              ? "No bills yet. Tap “New Bill” to add stock in bulk."
+              : "No bills for this month."}
           </p>
         ) : (
           <div className="space-y-2">
@@ -11901,16 +15226,32 @@ const toISODate = (d) =>
 function formatIssuedDate(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   const pretty = new Date(y, m - 1, d).toLocaleDateString(undefined, {
-    weekday: "short", year: "numeric", month: "short", day: "numeric",
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
   });
   const now = new Date();
   if (iso === toISODate(now)) return `Today · ${pretty}`;
-  if (iso === toISODate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))) return `Yesterday · ${pretty}`;
+  if (
+    iso ===
+    toISODate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
+  )
+    return `Yesterday · ${pretty}`;
   return pretty;
 }
 
 // ---------- Review popup shown before stock is deducted ----------
-function ReviewIssuedModal({ date, responsible, rows, warnings, error, submitting, onBack, onConfirm }) {
+function ReviewIssuedModal({
+  date,
+  responsible,
+  rows,
+  warnings,
+  error,
+  submitting,
+  onBack,
+  onConfirm,
+}) {
   const totalDeduct = rows.reduce((sum, r) => sum + r.deduct, 0);
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
@@ -11923,15 +15264,27 @@ function ReviewIssuedModal({ date, responsible, rows, warnings, error, submittin
           {formatIssuedDate(date)} · by {responsible}
         </p>
 
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>}
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
 
         <div className="space-y-2 mb-4">
           {rows.map((r) => (
-            <div key={r.product.id} className="border border-gray-200 rounded-lg p-3">
+            <div
+              key={r.product.id}
+              className="border border-gray-200 rounded-lg p-3"
+            >
               <div className="flex justify-between items-start gap-3">
-                <p className="font-medium text-gray-900 truncate">{r.product.name}</p>
+                <p className="font-medium text-gray-900 truncate">
+                  {r.product.name}
+                </p>
                 <p className="text-sm shrink-0">
-                  {r.product.quantity} → <span className="font-semibold text-amber-600">{r.product.quantity - r.deduct}</span>
+                  {r.product.quantity} →{" "}
+                  <span className="font-semibold text-amber-600">
+                    {r.product.quantity - r.deduct}
+                  </span>
                 </p>
               </div>
               <p className="text-xs text-gray-500 mt-1">
@@ -11945,15 +15298,20 @@ function ReviewIssuedModal({ date, responsible, rows, warnings, error, submittin
 
         {warnings.length > 0 && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
-            <p className="text-sm font-medium text-amber-800 mb-1">Check for double counting</p>
+            <p className="text-sm font-medium text-amber-800 mb-1">
+              Check for double counting
+            </p>
             <p className="text-xs text-amber-700 mb-2">
-              These approved requests are for items in this list but are not ticked. If they are part of this list, go
-              back and tick them — otherwise they will be deducted a second time.
+              These approved requests are for items in this list but are not
+              ticked. If they are part of this list, go back and tick them —
+              otherwise they will be deducted a second time.
             </p>
             <ul className="text-xs text-amber-800 space-y-0.5">
               {warnings.map((w) => (
                 <li key={w.id}>
-                  • {w.product?.name || `Product #${w.product_id}`} × {w.quantity} — {w.requested_by || "unknown"}, approved {formatDateTime(w.resolved_at)}
+                  • {w.product?.name || `Product #${w.product_id}`} ×{" "}
+                  {w.quantity} — {w.requested_by || "unknown"}, approved{" "}
+                  {formatDateTime(w.resolved_at)}
                 </li>
               ))}
             </ul>
@@ -11961,14 +15319,24 @@ function ReviewIssuedModal({ date, responsible, rows, warnings, error, submittin
         )}
 
         <p className="text-sm text-gray-600 mb-4">
-          Total to deduct: <span className="font-semibold text-amber-600">{totalDeduct}</span> units
+          Total to deduct:{" "}
+          <span className="font-semibold text-amber-600">{totalDeduct}</span>{" "}
+          units
         </p>
 
         <div className="flex gap-2">
-          <button onClick={onBack} disabled={submitting} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50">
+          <button
+            onClick={onBack}
+            disabled={submitting}
+            className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+          >
             Go back
           </button>
-          <button onClick={onConfirm} disabled={submitting} className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700 disabled:opacity-50">
+          <button
+            onClick={onConfirm}
+            disabled={submitting}
+            className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+          >
             {submitting ? "Saving..." : "Confirm & deduct"}
           </button>
         </div>
@@ -12012,32 +15380,60 @@ function NewIssuedForm({ onBack, onSaved }) {
     setTicked([]);
     setReconcileError(false);
     getReconcilableRequests(issuedDate)
-      .then((data) => { if (!cancelled) setReconcilable(data); })
-      .catch(() => { if (!cancelled) { setReconcilable([]); setReconcileError(true); } });
-    return () => { cancelled = true; };
+      .then((data) => {
+        if (!cancelled) setReconcilable(data);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setReconcilable([]);
+          setReconcileError(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [issuedDate]);
 
   const tickedSet = new Set(ticked);
   const coveredByProduct = {};
   reconcilable.forEach((r) => {
-    if (tickedSet.has(r.id)) coveredByProduct[r.product_id] = (coveredByProduct[r.product_id] || 0) + r.quantity;
+    if (tickedSet.has(r.id))
+      coveredByProduct[r.product_id] =
+        (coveredByProduct[r.product_id] || 0) + r.quantity;
   });
   const covered = (productId) => coveredByProduct[productId] || 0;
 
-  const leafProducts = flattenParents(products).filter((p) => !(p.subitems?.length > 0));
-  const sortedProducts = [...leafProducts].sort((a, b) => compareNames(a.name, b.name));
-  const itemOptions = sortedProducts.map((p) => ({ value: String(p.id), label: p.label, hint: `${p.quantity} in stock` }));
+  const leafProducts = flattenParents(products).filter(
+    (p) => !(p.subitems?.length > 0),
+  );
+  const sortedProducts = [...leafProducts].sort((a, b) =>
+    compareNames(a.name, b.name),
+  );
+  const itemOptions = sortedProducts.map((p) => ({
+    value: String(p.id),
+    label: p.label,
+    hint: `${p.quantity} in stock`,
+  }));
   const selectedItem = leafProducts.find((p) => String(p.id) === itemId);
-  const alreadyInList = lines.find((l) => l.product.id === selectedItem?.id)?.quantity || 0;
-  const pendingDeduct = selectedItem ? Math.max(0, alreadyInList - covered(selectedItem.id)) : 0;
-  const availableStock = selectedItem ? selectedItem.quantity - pendingDeduct : 0;
+  const alreadyInList =
+    lines.find((l) => l.product.id === selectedItem?.id)?.quantity || 0;
+  const pendingDeduct = selectedItem
+    ? Math.max(0, alreadyInList - covered(selectedItem.id))
+    : 0;
+  const availableStock = selectedItem
+    ? selectedItem.quantity - pendingDeduct
+    : 0;
   const qtyNumber = Number(quantity);
   const qtyValid = Number.isInteger(qtyNumber) && qtyNumber > 0;
 
   const totalUnits = lines.reduce((sum, l) => sum + l.quantity, 0);
-  const deductUnits = lines.reduce((sum, l) => sum + (l.quantity - covered(l.product.id)), 0);
+  const deductUnits = lines.reduce(
+    (sum, l) => sum + (l.quantity - covered(l.product.id)),
+    0,
+  );
 
-  const isSameDay = (r) => r.resolved_at && toISODate(new Date(r.resolved_at)) === issuedDate;
+  const isSameDay = (r) =>
+    r.resolved_at && toISODate(new Date(r.resolved_at)) === issuedDate;
   const sameDayRequests = reconcilable.filter(isSameDay);
   const otherRequests = reconcilable.filter((r) => !isSameDay(r));
 
@@ -12047,7 +15443,9 @@ function NewIssuedForm({ onBack, onSaved }) {
   };
   const toggleTick = (r) => {
     setFormError(null);
-    setTicked((prev) => (prev.includes(r.id) ? prev.filter((id) => id !== r.id) : [...prev, r.id]));
+    setTicked((prev) =>
+      prev.includes(r.id) ? prev.filter((id) => id !== r.id) : [...prev, r.id],
+    );
   };
 
   // "+ Create Product" uses the same form as the main product screen
@@ -12057,7 +15455,8 @@ function NewIssuedForm({ onBack, onSaved }) {
     setItemId(String(created.id));
   };
 
-  const stepQuantity = (delta) => setQuantity(String(Math.max(1, (Number(quantity) || 0) + delta)));
+  const stepQuantity = (delta) =>
+    setQuantity(String(Math.max(1, (Number(quantity) || 0) + delta)));
 
   const handleAddToList = () => {
     setFormError(null);
@@ -12066,13 +15465,17 @@ function NewIssuedForm({ onBack, onSaved }) {
     if (qtyNumber > availableStock) {
       return setFormError(
         `Only ${selectedItem.quantity} of "${selectedItem.name}" in stock` +
-          (pendingDeduct ? ` (${pendingDeduct} already in this list)` : "")
+          (pendingDeduct ? ` (${pendingDeduct} already in this list)` : ""),
       );
     }
     setLines((prev) => {
       const existing = prev.find((l) => l.product.id === selectedItem.id);
       if (existing) {
-        return prev.map((l) => (l.product.id === selectedItem.id ? { ...l, quantity: l.quantity + qtyNumber } : l));
+        return prev.map((l) =>
+          l.product.id === selectedItem.id
+            ? { ...l, quantity: l.quantity + qtyNumber }
+            : l,
+        );
       }
       return [...prev, { product: selectedItem, quantity: qtyNumber }];
     });
@@ -12086,22 +15489,34 @@ function NewIssuedForm({ onBack, onSaved }) {
         if (l.product.id !== productId) return l;
         const min = Math.max(1, covered(productId));
         const max = l.product.quantity + covered(productId);
-        return { ...l, quantity: Math.min(max, Math.max(min, Math.floor(Number(value)) || 1)) };
-      })
+        return {
+          ...l,
+          quantity: Math.min(
+            max,
+            Math.max(min, Math.floor(Number(value)) || 1),
+          ),
+        };
+      }),
     );
   };
 
   const handleRemoveLine = (productId) => {
     setLines((prev) => prev.filter((l) => l.product.id !== productId));
     // ticked requests only make sense while their item is in the list
-    setTicked((prev) => prev.filter((id) => reconcilable.find((r) => r.id === id)?.product_id !== productId));
+    setTicked((prev) =>
+      prev.filter(
+        (id) => reconcilable.find((r) => r.id === id)?.product_id !== productId,
+      ),
+    );
   };
 
   const handleReview = () => {
     setFormError(null);
-    if (lines.length === 0) return setFormError("Add at least one item to the list");
+    if (lines.length === 0)
+      return setFormError("Add at least one item to the list");
     if (!issuedDate) return setFormError("Select the issued date");
-    if (!responsibleBy.trim()) return setFormError("Responsible by is required");
+    if (!responsibleBy.trim())
+      return setFormError("Responsible by is required");
     setShowReview(true);
   };
 
@@ -12113,7 +15528,10 @@ function NewIssuedForm({ onBack, onSaved }) {
         issued_date: issuedDate,
         description: description.trim() || null,
         responsible_by: responsibleBy.trim().replace(/\s+/g, " "),
-        items: lines.map((l) => ({ product_id: l.product.id, quantity: l.quantity })),
+        items: lines.map((l) => ({
+          product_id: l.product.id,
+          quantity: l.quantity,
+        })),
         request_ids: ticked,
       });
       onSaved();
@@ -12130,7 +15548,10 @@ function NewIssuedForm({ onBack, onSaved }) {
     deduct: l.quantity - covered(l.product.id),
   }));
   // only warn about requests approved on the chosen date; nearby-day ones stay optional in the checklist
-  const warnings = sameDayRequests.filter((r) => !tickedSet.has(r.id) && lines.some((l) => l.product.id === r.product_id));
+  const warnings = sameDayRequests.filter(
+    (r) =>
+      !tickedSet.has(r.id) && lines.some((l) => l.product.id === r.product_id),
+  );
 
   const renderRequest = (r) => {
     const isTicked = tickedSet.has(r.id);
@@ -12150,14 +15571,18 @@ function NewIssuedForm({ onBack, onSaved }) {
         />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-900 truncate">
-            {r.product?.name || `Product #${r.product_id}`} <span className="text-gray-500 font-normal">× {r.quantity}</span>
+            {r.product?.name || `Product #${r.product_id}`}{" "}
+            <span className="text-gray-500 font-normal">× {r.quantity}</span>
           </p>
           <p className="text-xs text-gray-400 truncate">
-            Requested by {r.requested_by || "—"} · approved {formatDateTime(r.resolved_at)}
+            Requested by {r.requested_by || "—"} · approved{" "}
+            {formatDateTime(r.resolved_at)}
           </p>
           {disabled && (
             <p className="text-xs text-amber-600 mt-0.5">
-              {hasLine ? "More than the quantity in the list" : "Add this item to the list first"}
+              {hasLine
+                ? "More than the quantity in the list"
+                : "Add this item to the list first"}
             </p>
           )}
         </div>
@@ -12167,7 +15592,11 @@ function NewIssuedForm({ onBack, onSaved }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <SubHeader title="Create Issued List" subtitle="Reduce stock for items employees took" onBack={onBack} />
+      <SubHeader
+        title="Create Issued List"
+        subtitle="Reduce stock for items employees took"
+        onBack={onBack}
+      />
 
       <main className="p-4 sm:p-6 max-w-2xl space-y-4">
         {loading ? (
@@ -12177,7 +15606,11 @@ function NewIssuedForm({ onBack, onSaved }) {
         ) : (
           <>
             <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 space-y-5">
-              {formError && !showReview && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2">{formError}</div>}
+              {formError && !showReview && (
+                <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2">
+                  {formError}
+                </div>
+              )}
 
               {/* Date (native mini calendar) */}
               <div>
@@ -12189,12 +15622,20 @@ function NewIssuedForm({ onBack, onSaved }) {
                   onChange={(e) => setIssuedDate(e.target.value)}
                   className={inputCls}
                 />
-                <p className="text-xs text-gray-400 mt-1.5">The day the employees took these items.</p>
+                <p className="text-xs text-gray-400 mt-1.5">
+                  The day the employees took these items.
+                </p>
               </div>
 
               {/* Item */}
               <div>
-                <FieldLabel action={<FieldButton onClick={() => setShowProductForm(true)}>Create Product</FieldButton>}>
+                <FieldLabel
+                  action={
+                    <FieldButton onClick={() => setShowProductForm(true)}>
+                      Create Product
+                    </FieldButton>
+                  }
+                >
                   Item
                 </FieldLabel>
                 <SearchSelect
@@ -12203,28 +15644,54 @@ function NewIssuedForm({ onBack, onSaved }) {
                   options={itemOptions}
                   placeholder="Search or select item"
                   searchPlaceholder="Search items..."
-                  emptyText={products.length ? "No item found — use “Create Product”" : "No products yet — use “Create Product”"}
+                  emptyText={
+                    products.length
+                      ? "No item found — use “Create Product”"
+                      : "No products yet — use “Create Product”"
+                  }
                 />
 
                 {/* Quantity + add to list */}
-                <div className={`mt-4 rounded-xl border p-3 sm:p-4 transition ${selectedItem ? "border-gray-200 bg-gray-50" : "border-gray-100 bg-gray-50/60"}`}>
+                <div
+                  className={`mt-4 rounded-xl border p-3 sm:p-4 transition ${selectedItem ? "border-gray-200 bg-gray-50" : "border-gray-100 bg-gray-50/60"}`}
+                >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Quantity taken</span>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Quantity taken
+                    </span>
                     {selectedItem && (
                       <span className="text-xs text-gray-500">
-                        In stock: <span className="font-medium text-gray-700">{availableStock}</span>
+                        In stock:{" "}
+                        <span className="font-medium text-gray-700">
+                          {availableStock}
+                        </span>
                         {qtyValid && (
-                          <> → <span className={`font-medium ${availableStock - qtyNumber < 0 ? "text-red-600" : "text-amber-600"}`}>
-                            {availableStock - qtyNumber}
-                          </span></>
+                          <>
+                            {" "}
+                            →{" "}
+                            <span
+                              className={`font-medium ${availableStock - qtyNumber < 0 ? "text-red-600" : "text-amber-600"}`}
+                            >
+                              {availableStock - qtyNumber}
+                            </span>
+                          </>
                         )}
                       </span>
                     )}
                   </div>
                   <div className="flex flex-col sm:flex-row gap-2">
-                    <div className={`flex items-stretch rounded-lg border border-gray-300 bg-white overflow-hidden sm:w-44 ${!selectedItem ? "opacity-50" : ""}`}>
-                      <button type="button" onClick={() => stepQuantity(-1)} disabled={!selectedItem} aria-label="Decrease quantity"
-                        className="w-11 text-lg text-gray-600 hover:bg-gray-100 disabled:hover:bg-transparent disabled:cursor-not-allowed">−</button>
+                    <div
+                      className={`flex items-stretch rounded-lg border border-gray-300 bg-white overflow-hidden sm:w-44 ${!selectedItem ? "opacity-50" : ""}`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => stepQuantity(-1)}
+                        disabled={!selectedItem}
+                        aria-label="Decrease quantity"
+                        className="w-11 text-lg text-gray-600 hover:bg-gray-100 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                      >
+                        −
+                      </button>
                       <input
                         type="number"
                         min="1"
@@ -12233,12 +15700,22 @@ function NewIssuedForm({ onBack, onSaved }) {
                         value={quantity}
                         disabled={!selectedItem}
                         onChange={(e) => setQuantity(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddToList())}
+                        onKeyDown={(e) =>
+                          e.key === "Enter" &&
+                          (e.preventDefault(), handleAddToList())
+                        }
                         aria-label="Quantity"
                         className="flex-1 min-w-0 text-center text-sm font-medium border-x border-gray-200 py-2.5 focus:outline-none focus:bg-blue-50 disabled:bg-transparent [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       />
-                      <button type="button" onClick={() => stepQuantity(1)} disabled={!selectedItem} aria-label="Increase quantity"
-                        className="w-11 text-lg text-gray-600 hover:bg-gray-100 disabled:hover:bg-transparent disabled:cursor-not-allowed">+</button>
+                      <button
+                        type="button"
+                        onClick={() => stepQuantity(1)}
+                        disabled={!selectedItem}
+                        aria-label="Increase quantity"
+                        className="w-11 text-lg text-gray-600 hover:bg-gray-100 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                      >
+                        +
+                      </button>
                     </div>
                     <button
                       type="button"
@@ -12257,24 +15734,39 @@ function NewIssuedForm({ onBack, onSaved }) {
             {/* Issued item list */}
             <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5">
               <h2 className="text-sm font-semibold text-gray-500 uppercase mb-3">
-                Issued items <span className="text-gray-400 font-normal">({lines.length} · {totalUnits} units)</span>
+                Issued items{" "}
+                <span className="text-gray-400 font-normal">
+                  ({lines.length} · {totalUnits} units)
+                </span>
               </h2>
               {lines.length === 0 ? (
-                <p className="text-sm text-gray-400">No items added yet. Pick an item and quantity above, then “Add to list”.</p>
+                <p className="text-sm text-gray-400">
+                  No items added yet. Pick an item and quantity above, then “Add
+                  to list”.
+                </p>
               ) : (
                 <div className="space-y-2">
                   {lines.map((l) => {
                     const cov = covered(l.product.id);
                     return (
-                      <div key={l.product.id} className="flex items-center gap-3 border border-gray-200 rounded-lg p-3">
+                      <div
+                        key={l.product.id}
+                        className="flex items-center gap-3 border border-gray-200 rounded-lg p-3"
+                      >
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-gray-900 truncate">{l.product.name}</p>
+                          <p className="font-medium text-gray-900 truncate">
+                            {l.product.name}
+                          </p>
                           <p className="text-xs text-gray-500 mt-0.5">
-                            {l.product.quantity} → <span className="font-medium text-amber-600">{l.product.quantity - (l.quantity - cov)}</span>
+                            {l.product.quantity} →{" "}
+                            <span className="font-medium text-amber-600">
+                              {l.product.quantity - (l.quantity - cov)}
+                            </span>
                           </p>
                           {cov > 0 && (
                             <p className="text-xs text-blue-600 mt-0.5">
-                              {l.quantity} in list − {cov} already deducted via approved requests
+                              {l.quantity} in list − {cov} already deducted via
+                              approved requests
                             </p>
                           )}
                         </div>
@@ -12282,11 +15774,18 @@ function NewIssuedForm({ onBack, onSaved }) {
                           type="number"
                           min="1"
                           value={l.quantity}
-                          onChange={(e) => handleLineQty(l.product.id, e.target.value)}
+                          onChange={(e) =>
+                            handleLineQty(l.product.id, e.target.value)
+                          }
                           aria-label={`Quantity for ${l.product.name}`}
                           className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
-                        <button type="button" onClick={() => handleRemoveLine(l.product.id)} aria-label="Remove" className="p-1.5 rounded-full text-red-500 hover:bg-red-50">
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveLine(l.product.id)}
+                          aria-label="Remove"
+                          className="p-1.5 rounded-full text-red-500 hover:bg-red-50"
+                        >
                           <Trash2 size={16} />
                         </button>
                       </div>
@@ -12299,20 +15798,27 @@ function NewIssuedForm({ onBack, onSaved }) {
             {/* Approved requests already deducted (prevents counting them twice) */}
             {(reconcilable.length > 0 || reconcileError) && (
               <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5">
-                <h2 className="text-sm font-semibold text-gray-500 uppercase mb-1">Already deducted via requests</h2>
+                <h2 className="text-sm font-semibold text-gray-500 uppercase mb-1">
+                  Already deducted via requests
+                </h2>
                 {reconcileError ? (
                   <p className="text-sm text-red-500">
-                    Couldn't load approved requests, so double-count protection is off. Reopen this form to try again.
+                    Couldn't load approved requests, so double-count protection
+                    is off. Reopen this form to try again.
                   </p>
                 ) : (
                   <>
                     <p className="text-xs text-gray-400 mb-3">
-                      Stock for these requests was already reduced when they were approved. If an item on your list was
-                      one of them, tick it so it is not deducted twice.
+                      Stock for these requests was already reduced when they
+                      were approved. If an item on your list was one of them,
+                      tick it so it is not deducted twice.
                     </p>
                     <div className="space-y-2">
                       {sameDayRequests.length === 0 && (
-                        <p className="text-sm text-gray-400">No approved requests on {formatIssuedDate(issuedDate)}.</p>
+                        <p className="text-sm text-gray-400">
+                          No approved requests on {formatIssuedDate(issuedDate)}
+                          .
+                        </p>
                       )}
                       {sameDayRequests.map(renderRequest)}
                     </div>
@@ -12323,9 +15829,16 @@ function NewIssuedForm({ onBack, onSaved }) {
                           onClick={() => setShowOthers((v) => !v)}
                           className="text-xs font-medium text-blue-600 hover:underline"
                         >
-                          {showOthers ? "Hide" : "Show"} {otherRequests.length} other approved {otherRequests.length === 1 ? "request" : "requests"} from nearby days
+                          {showOthers ? "Hide" : "Show"} {otherRequests.length}{" "}
+                          other approved{" "}
+                          {otherRequests.length === 1 ? "request" : "requests"}{" "}
+                          from nearby days
                         </button>
-                        {showOthers && <div className="space-y-2 mt-2">{otherRequests.map(renderRequest)}</div>}
+                        {showOthers && (
+                          <div className="space-y-2 mt-2">
+                            {otherRequests.map(renderRequest)}
+                          </div>
+                        )}
                       </div>
                     )}
                   </>
@@ -12336,7 +15849,10 @@ function NewIssuedForm({ onBack, onSaved }) {
             {/* Description + responsible */}
             <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 space-y-5">
               <div>
-                <FieldLabel>Description <span className="text-gray-400 font-normal">(optional)</span></FieldLabel>
+                <FieldLabel>
+                  Description{" "}
+                  <span className="text-gray-400 font-normal">(optional)</span>
+                </FieldLabel>
                 <textarea
                   rows={3}
                   value={description}
@@ -12346,7 +15862,9 @@ function NewIssuedForm({ onBack, onSaved }) {
                 />
               </div>
               <div>
-                <FieldLabel>Responsible by <span className="text-red-500">*</span></FieldLabel>
+                <FieldLabel>
+                  Responsible by <span className="text-red-500">*</span>
+                </FieldLabel>
                 <input
                   value={responsibleBy}
                   onChange={(e) => setResponsibleBy(e.target.value)}
@@ -12367,7 +15885,9 @@ function NewIssuedForm({ onBack, onSaved }) {
               </button>
               {lines.length > 0 && (
                 <p className="text-xs text-gray-400 text-center mt-2">
-                  This will reduce stock by {deductUnits} {deductUnits === 1 ? "unit" : "units"} across {lines.length} {lines.length === 1 ? "item" : "items"}.
+                  This will reduce stock by {deductUnits}{" "}
+                  {deductUnits === 1 ? "unit" : "units"} across {lines.length}{" "}
+                  {lines.length === 1 ? "item" : "items"}.
                 </p>
               )}
             </div>
@@ -12390,7 +15910,10 @@ function NewIssuedForm({ onBack, onSaved }) {
           warnings={warnings}
           error={formError}
           submitting={submitting}
-          onBack={() => { setShowReview(false); setFormError(null); }}
+          onBack={() => {
+            setShowReview(false);
+            setFormError(null);
+          }}
           onConfirm={handleConfirm}
         />
       )}
@@ -12423,8 +15946,12 @@ function IssuedPage({ go, autoCreateToken }) {
 
   useEffect(() => {
     load();
-    const interval = setInterval(() => { if (!document.hidden) load(); }, 10000);
-    const onVisible = () => { if (!document.hidden) load(); };
+    const interval = setInterval(() => {
+      if (!document.hidden) load();
+    }, 10000);
+    const onVisible = () => {
+      if (!document.hidden) load();
+    };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       clearInterval(interval);
@@ -12438,8 +15965,15 @@ function IssuedPage({ go, autoCreateToken }) {
 
   const handleUndo = async (list) => {
     const units = list.items.reduce((sum, m) => sum + m.quantity, 0);
-    const extra = list.covered_requests?.length ? " Its approved requests can be counted again." : "";
-    if (!confirm(`Undo this issued list?\n\n${units} units will be added back to stock.${extra}`)) return;
+    const extra = list.covered_requests?.length
+      ? " Its approved requests can be counted again."
+      : "";
+    if (
+      !confirm(
+        `Undo this issued list?\n\n${units} units will be added back to stock.${extra}`,
+      )
+    )
+      return;
     setUndoingId(list.id);
     setUndoError(null);
     try {
@@ -12457,13 +15991,19 @@ function IssuedPage({ go, autoCreateToken }) {
     return (
       <NewIssuedForm
         onBack={() => setCreating(false)}
-        onSaved={() => { setCreating(false); setLoading(true); load(); }}
+        onSaved={() => {
+          setCreating(false);
+          setLoading(true);
+          load();
+        }}
       />
     );
   }
 
   const monthOptions = getMonthOptions(lists.map((l) => l.issued_date));
-  const shown = selectedMonth ? lists.filter((l) => l.issued_date.slice(0, 7) === selectedMonth) : lists;
+  const shown = selectedMonth
+    ? lists.filter((l) => l.issued_date.slice(0, 7) === selectedMonth)
+    : lists;
 
   // the server already sorts by issued_date (newest first); group neighbours that share a date
   const groups = [];
@@ -12483,18 +16023,30 @@ function IssuedPage({ go, autoCreateToken }) {
 
       <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-4 flex justify-end">
-          <button onClick={() => setCreating(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
+          <button
+            onClick={() => setCreating(true)}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700"
+          >
             + Create Issued List
           </button>
         </div>
         <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
           <h2 className="text-sm font-semibold text-gray-500 uppercase">
-            Issued lists <span className="text-gray-400 font-normal">({shown.length})</span>
+            Issued lists{" "}
+            <span className="text-gray-400 font-normal">({shown.length})</span>
           </h2>
-          <MonthSelect options={monthOptions} value={selectedMonth} onChange={setSelectedMonth} />
+          <MonthSelect
+            options={monthOptions}
+            value={selectedMonth}
+            onChange={setSelectedMonth}
+          />
         </div>
 
-        {undoError && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">{undoError}</div>}
+        {undoError && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {undoError}
+          </div>
+        )}
 
         {loading ? (
           <p className="text-gray-400 text-center py-16">Loading...</p>
@@ -12502,21 +16054,34 @@ function IssuedPage({ go, autoCreateToken }) {
           <p className="text-red-500 text-center py-16">{error}</p>
         ) : shown.length === 0 ? (
           <p className="text-gray-400 text-sm text-center py-16">
-            {lists.length === 0 ? "No issued lists yet. Tap “Create Issued List” to reduce stock from a list." : "No issued lists for this month."}
+            {lists.length === 0
+              ? "No issued lists yet. Tap “Create Issued List” to reduce stock from a list."
+              : "No issued lists for this month."}
           </p>
         ) : (
           <div className="space-y-6">
             {groups.map((g) => (
               <section key={g.date}>
-                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{formatIssuedDate(g.date)}</h3>
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  {formatIssuedDate(g.date)}
+                </h3>
                 <div className="space-y-2">
                   {g.lists.map((list) => {
                     const open = openId === list.id;
                     const covered = list.covered_requests || [];
-                    const units = list.items.reduce((sum, m) => sum + m.quantity, 0);
-                    const productCount = new Set([...list.items.map((m) => m.product_id), ...covered.map((r) => r.product_id)]).size;
+                    const units = list.items.reduce(
+                      (sum, m) => sum + m.quantity,
+                      0,
+                    );
+                    const productCount = new Set([
+                      ...list.items.map((m) => m.product_id),
+                      ...covered.map((r) => r.product_id),
+                    ]).size;
                     return (
-                      <div key={list.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                      <div
+                        key={list.id}
+                        className="bg-white border border-gray-200 rounded-xl overflow-hidden"
+                      >
                         <button
                           onClick={() => setOpenId(open ? null : list.id)}
                           aria-expanded={open}
@@ -12526,39 +16091,69 @@ function IssuedPage({ go, autoCreateToken }) {
                             <ClipboardList size={16} />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="font-medium text-gray-900 truncate">{list.responsible_by}</p>
+                            <p className="font-medium text-gray-900 truncate">
+                              {list.responsible_by}
+                            </p>
                             <p className="text-xs text-gray-400 truncate">
-                              {list.description || `Created ${formatDateTime(list.created_at)}`}
+                              {list.description ||
+                                `Created ${formatDateTime(list.created_at)}`}
                             </p>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="text-sm font-semibold text-amber-600">−{units}</p>
+                            <p className="text-sm font-semibold text-amber-600">
+                              −{units}
+                            </p>
                             <p className="text-xs text-gray-400">
-                              {productCount} {productCount === 1 ? "item" : "items"}
-                              {covered.length > 0 && ` · ${covered.length} via requests`}
+                              {productCount}{" "}
+                              {productCount === 1 ? "item" : "items"}
+                              {covered.length > 0 &&
+                                ` · ${covered.length} via requests`}
                             </p>
                           </div>
-                          <ChevronDown size={18} className={`text-gray-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+                          <ChevronDown
+                            size={18}
+                            className={`text-gray-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+                          />
                         </button>
 
                         {open && (
                           <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-3">
-                            {list.description && <p className="text-sm text-gray-600 whitespace-pre-line">{list.description}</p>}
-                            <p className="text-xs text-gray-400">Created {formatDateTime(list.created_at)}</p>
+                            {list.description && (
+                              <p className="text-sm text-gray-600 whitespace-pre-line">
+                                {list.description}
+                              </p>
+                            )}
+                            <p className="text-xs text-gray-400">
+                              Created {formatDateTime(list.created_at)}
+                            </p>
 
                             {list.items.length > 0 && (
                               <div className="space-y-2">
-                                <p className="text-xs font-semibold text-gray-500 uppercase">Deducted by this list</p>
+                                <p className="text-xs font-semibold text-gray-500 uppercase">
+                                  Deducted by this list
+                                </p>
                                 {list.items
                                   .slice()
-                                  .sort((a, b) => compareNames(a.product?.name || "", b.product?.name || ""))
+                                  .sort((a, b) =>
+                                    compareNames(
+                                      a.product?.name || "",
+                                      b.product?.name || "",
+                                    ),
+                                  )
                                   .map((m) => (
-                                    <div key={m.id} className="flex justify-between items-center gap-3 text-sm">
+                                    <div
+                                      key={m.id}
+                                      className="flex justify-between items-center gap-3 text-sm"
+                                    >
                                       <div className="min-w-0">
-                                        <p className="text-gray-900 truncate">{m.product?.name || `Product #${m.product_id}`}</p>
-                                        
+                                        <p className="text-gray-900 truncate">
+                                          {m.product?.name ||
+                                            `Product #${m.product_id}`}
+                                        </p>
                                       </div>
-                                      <span className="font-semibold text-amber-600 shrink-0">−{m.quantity}</span>
+                                      <span className="font-semibold text-amber-600 shrink-0">
+                                        −{m.quantity}
+                                      </span>
                                     </div>
                                   ))}
                               </div>
@@ -12566,29 +16161,47 @@ function IssuedPage({ go, autoCreateToken }) {
 
                             {covered.length > 0 && (
                               <div className="space-y-2">
-                                <p className="text-xs font-semibold text-gray-500 uppercase">Already deducted via approved requests</p>
+                                <p className="text-xs font-semibold text-gray-500 uppercase">
+                                  Already deducted via approved requests
+                                </p>
                                 {covered.map((r) => (
-                                  <div key={r.id} className="flex justify-between items-center gap-3 text-sm">
+                                  <div
+                                    key={r.id}
+                                    className="flex justify-between items-center gap-3 text-sm"
+                                  >
                                     <div className="min-w-0">
-                                      <p className="text-gray-900 truncate">{r.product?.name || `Product #${r.product_id}`}</p>
+                                      <p className="text-gray-900 truncate">
+                                        {r.product?.name ||
+                                          `Product #${r.product_id}`}
+                                      </p>
                                       <p className="text-xs text-gray-400 truncate">
-                                        {r.requested_by || "—"}{r.resolved_at ? ` · approved ${formatDateTime(r.resolved_at)}` : ""}
+                                        {r.requested_by || "—"}
+                                        {r.resolved_at
+                                          ? ` · approved ${formatDateTime(r.resolved_at)}`
+                                          : ""}
                                       </p>
                                     </div>
-                                    <span className="font-medium text-gray-500 shrink-0">{r.quantity}</span>
+                                    <span className="font-medium text-gray-500 shrink-0">
+                                      {r.quantity}
+                                    </span>
                                   </div>
                                 ))}
                               </div>
                             )}
 
                             <div className="pt-3 border-t border-gray-200 flex items-center justify-between gap-3">
-                              <p className="text-xs text-gray-400">Entered by mistake? Undo puts the deducted stock back.</p>
+                              <p className="text-xs text-gray-400">
+                                Entered by mistake? Undo puts the deducted stock
+                                back.
+                              </p>
                               <button
                                 onClick={() => handleUndo(list)}
                                 disabled={undoingId === list.id}
                                 className="shrink-0 text-sm font-medium text-red-600 border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-50 disabled:opacity-50"
                               >
-                                {undoingId === list.id ? "Undoing..." : "Undo list"}
+                                {undoingId === list.id
+                                  ? "Undoing..."
+                                  : "Undo list"}
                               </button>
                             </div>
                           </div>
@@ -12615,267 +16228,313 @@ function useQuickNew(open) {
   const ref = useRef(open);
   ref.current = open;
   useEffect(() => {
-    if (pendingNew) { pendingNew = false; ref.current(); }
-    const onNew = (e) => { e.detail.handled = true; ref.current(); };
+    if (pendingNew) {
+      pendingNew = false;
+      ref.current();
+    }
+    const onNew = (e) => {
+      e.detail.handled = true;
+      ref.current();
+    };
     window.addEventListener("app:new", onNew);
     return () => window.removeEventListener("app:new", onNew);
   }, []);
 }
 
 const SHORTCUT_HELP = [
-  ["Create", [
-    ["Ctrl + N", "New - customer, invoice, bill... whatever page you are on (otherwise a new item)"],
-    ["Alt + A", "Same as Ctrl + N (works in a normal browser tab too)"],
-    ["Ctrl + I", "Create invoice"],
-    ["Ctrl + W", "Pay a vendor (new payment made)"],
-    ["Ctrl + B", "New stock bill"],
-  ]],
-  ["Go to", [
-    ["Ctrl + A", "Chart of accounts"],
-    ["Ctrl + J", "Customers"],
-    ["Ctrl + L", "Items"],
-    ["Ctrl + R", "Banking"],
-    ["Ctrl + Y", "Manual journals"],
-    ["Ctrl + Q", "Reports"],
-    ["Alt + H", "Home / dashboard"],
-    ["Alt + C", "Customers"],
-    ["Alt + V", "Vendors"],
-    ["Alt + Q", "Quotes"],
-    ["Alt + S", "Sales orders"],
-    ["Alt + I", "Invoices"],
-    ["Alt + P", "Payments received"],
-    ["Alt + N", "Credit notes"],
-    ["Alt + B", "Bills"],
-    ["Alt + M", "Payments made"],
-    ["Alt + X", "Taxes"],
-    ["Alt + U", "Issued"],
-    ["Alt + G", "Manage items"],
-  ]],
-  ["Anywhere", [
-    ["Ctrl + F  or  /", "Find (search)"],
-    ["Ctrl + Enter", "Save the open form"],
-    ["Esc", "Close the open form"],
-    ["F1  or  ?", "Show this list"],
-  ]],
+  [
+    "Create",
+    [
+      [
+        "Ctrl + N",
+        "New - customer, invoice, bill... whatever page you are on (otherwise a new item)",
+      ],
+      ["Alt + A", "Same as Ctrl + N (works in a normal browser tab too)"],
+      ["Ctrl + I", "Create invoice"],
+      ["Ctrl + W", "Pay a vendor (new payment made)"],
+      ["Ctrl + B", "New stock bill"],
+    ],
+  ],
+  [
+    "Go to",
+    [
+      ["Ctrl + A", "Chart of accounts"],
+      ["Ctrl + J", "Customers"],
+      ["Ctrl + L", "Items"],
+      ["Ctrl + R", "Banking"],
+      ["Ctrl + Y", "Manual journals"],
+      ["Ctrl + Q", "Reports"],
+      ["Alt + H", "Home / dashboard"],
+      ["Alt + C", "Customers"],
+      ["Alt + V", "Vendors"],
+      ["Alt + Q", "Quotes"],
+      ["Alt + S", "Sales orders"],
+      ["Alt + I", "Invoices"],
+      ["Alt + P", "Payments received"],
+      ["Alt + N", "Credit notes"],
+      ["Alt + B", "Bills"],
+      ["Alt + M", "Payments made"],
+      ["Alt + X", "Taxes"],
+      ["Alt + U", "Issued"],
+      ["Alt + G", "Manage items"],
+    ],
+  ],
+  [
+    "Anywhere",
+    [
+      ["Ctrl + F  or  /", "Find (search)"],
+      ["Ctrl + Enter", "Save the open form"],
+      ["Esc", "Close the open form"],
+      ["F1  or  ?", "Show this list"],
+    ],
+  ],
 ];
 
-const CTRL_GO = { a: "accounting", j: "customers", l: "items", r: "banking", y: "journals", q: "reports" };
+const CTRL_GO = {
+  a: "accounting",
+  j: "customers",
+  l: "items",
+  r: "banking",
+  y: "journals",
+  q: "reports",
+};
 const ALT_GO = {
-  KeyH: "", KeyC: "customers", KeyV: "vendors", KeyQ: "quotes", KeyS: "salesorders", KeyI: "invoices",
-  KeyP: "payments", KeyN: "creditnotes", KeyB: "purchases", KeyM: "vendorpayments", KeyX: "taxes",
-  KeyU: "issued", KeyG: "manage",
+  KeyH: "",
+  KeyC: "customers",
+  KeyV: "vendors",
+  KeyQ: "quotes",
+  KeyS: "salesorders",
+  KeyI: "invoices",
+  KeyP: "payments",
+  KeyN: "creditnotes",
+  KeyB: "purchases",
+  KeyM: "vendorpayments",
+  KeyX: "taxes",
+  KeyU: "issued",
+  KeyG: "manage",
 };
 
-  function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
-    const [open, setOpen] = useState(false);
-    const [helpOpen, setHelpOpen] = useState(false);
-    const [searchParams, setSearchParams] = useSearchParams();
+function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
+  const [open, setOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
-    useEffect(() => {
-      if (!isAdmin) return;
-      const typing = () => {
-        const el = document.activeElement;
-        return (
-          !!el &&
-          (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) ||
-            el.isContentEditable)
+  useEffect(() => {
+    if (!isAdmin) return;
+    const typing = () => {
+      const el = document.activeElement;
+      return (
+        !!el &&
+        (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) ||
+          el.isContentEditable)
+      );
+    };
+    // a form / dialog is open: don't navigate away from half-typed work
+    const formOpen = () =>
+      [...document.querySelectorAll(".fixed.inset-0")].some((el) =>
+        el.querySelector("form, input, select, textarea"),
+      );
+    const go = (view) => setSearchParams(view ? { view } : {});
+    const openNew = (view) => {
+      if (searchParams.get("view") === view) {
+        window.dispatchEvent(
+          new CustomEvent("app:new", { detail: { handled: false } }),
         );
-      };
-      // a form / dialog is open: don't navigate away from half-typed work
-      const formOpen = () =>
-        [...document.querySelectorAll(".fixed.inset-0")].some((el) =>
-          el.querySelector("form, input, select, textarea"),
-        );
-      const go = (view) => setSearchParams(view ? { view } : {});
-      const openNew = (view) => {
-        if (searchParams.get("view") === view) {
+      } else {
+        pendingNew = true;
+        setSearchParams({ view });
+      }
+    };
+    const overlayButton = (pattern) =>
+      [...document.querySelectorAll(".fixed.inset-0 button")]
+        .reverse()
+        .find((b) => pattern.test(b.textContent.trim()));
+
+    const onKeyDown = (e) => {
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+
+      // ---- keys that work everywhere ----
+      if (e.key === "F1" || (e.key === "?" && !typing() && !mod)) {
+        e.preventDefault();
+        setHelpOpen((v) => !v);
+        return;
+      }
+      if (e.key === "Escape") {
+        if (helpOpen) {
+          setHelpOpen(false);
+          return;
+        }
+        overlayButton(/^(cancel|close)$/i)?.click();
+        return;
+      }
+      if (mod && e.key === "Enter") {
+        e.preventDefault();
+        const form = [
+          ...document.querySelectorAll(".fixed.inset-0 form"),
+        ].pop();
+        if (form) form.requestSubmit();
+        else overlayButton(/^(save|create|record|submit|post|add)\b/i)?.click();
+        return;
+      }
+      if (e.key === "/" && !mod && !e.altKey && !typing()) {
+        e.preventDefault();
+        [...document.querySelectorAll('input[placeholder^="Search"]')]
+          .find((i) => i.offsetParent !== null)
+          ?.focus();
+        return;
+      }
+
+      if (formOpen() || helpOpen) return; // everything below would leave an open form
+
+      // ---- Alt + letter: go to a list ----
+      if (e.altKey && !mod && !e.shiftKey) {
+        if (e.code === "KeyA") {
+          e.preventDefault();
+          e.stopPropagation();
           window.dispatchEvent(
             new CustomEvent("app:new", { detail: { handled: false } }),
           );
-        } else {
-          pendingNew = true;
-          setSearchParams({ view });
-        }
-      };
-      const overlayButton = (pattern) =>
-        [...document.querySelectorAll(".fixed.inset-0 button")]
-          .reverse()
-          .find((b) => pattern.test(b.textContent.trim()));
-
-      const onKeyDown = (e) => {
-        const mod = e.ctrlKey || e.metaKey;
-        const key = e.key.toLowerCase();
-
-        // ---- keys that work everywhere ----
-        if (e.key === "F1" || (e.key === "?" && !typing() && !mod)) {
-          e.preventDefault();
-          setHelpOpen((v) => !v);
           return;
         }
-        if (e.key === "Escape") {
-          if (helpOpen) {
-            setHelpOpen(false);
-            return;
-          }
-          overlayButton(/^(cancel|close)$/i)?.click();
-          return;
+        if (e.code in ALT_GO) {
+          e.preventDefault();
+          go(ALT_GO[e.code]);
         }
-        if (mod && e.key === "Enter") {
-          e.preventDefault();
-          const form = [
-            ...document.querySelectorAll(".fixed.inset-0 form"),
-          ].pop();
-          if (form) form.requestSubmit();
-          else
-            overlayButton(/^(save|create|record|submit|post|add)\b/i)?.click();
-          return;
-        }
-        if (e.key === "/" && !mod && !e.altKey && !typing()) {
-          e.preventDefault();
-          [...document.querySelectorAll('input[placeholder^="Search"]')]
-            .find((i) => i.offsetParent !== null)
-            ?.focus();
-          return;
-        }
+        return;
+      }
 
-        if (formOpen() || helpOpen) return; // everything below would leave an open form
+      // ---- Ctrl + letter ----
+      if (!mod || e.shiftKey || e.altKey) return;
 
-        // ---- Alt + letter: go to a list ----
-        if (e.altKey && !mod && !e.shiftKey) {
-          if (e.code === "KeyA") {
-            e.preventDefault();
-            e.stopPropagation();
-            window.dispatchEvent(
-              new CustomEvent("app:new", { detail: { handled: false } }),
-            );
-            return;
-          }
-          if (e.code in ALT_GO) {
-            e.preventDefault();
-            go(ALT_GO[e.code]);
-          }
-          return;
-        }
+      if (key === "n") {
+        e.preventDefault(); // stop the browser's own "new window" (only possible in the installed app window)
+        const detail = { handled: false };
+        window.dispatchEvent(new CustomEvent("app:new", { detail }));
+        if (!detail.handled) setOpen(true); // no "New" on this page -> new item
+      } else if (key === "i") {
+        e.preventDefault();
+        openNew("invoices");
+      } else if (key === "w") {
+        e.preventDefault();
+        openNew("vendorpayments");
+      } else if (key === "b") {
+        e.preventDefault(); // stop Chrome's "toggle bookmarks bar"
+        onNewBill();
+      } else if (key === "f") {
+        e.preventDefault();
+        [...document.querySelectorAll('input[placeholder^="Search"]')]
+          .find((i) => i.offsetParent !== null)
+          ?.focus();
+      } else if (key === "a" && typing()) {
+        return; // let Ctrl+A select the text inside a field
+      } else if (key in CTRL_GO) {
+        e.preventDefault();
+        go(CTRL_GO[key]);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isAdmin, onNewBill, searchParams, helpOpen]);
 
-        // ---- Ctrl + letter ----
-        if (!mod || e.shiftKey || e.altKey) return;
+  // the "Keyboard shortcuts" link in the sidebar
+  useEffect(() => {
+    const show = () => setHelpOpen(true);
+    window.addEventListener("app:help", show);
+    return () => window.removeEventListener("app:help", show);
+  }, []);
 
-        if (key === "n") {
-          e.preventDefault(); // stop the browser's own "new window" (only possible in the installed app window)
-          const detail = { handled: false };
-          window.dispatchEvent(new CustomEvent("app:new", { detail }));
-          if (!detail.handled) setOpen(true); // no "New" on this page -> new item
-        } else if (key === "i") {
-          e.preventDefault();
-          openNew("invoices");
-        } else if (key === "w") {
-          e.preventDefault();
-          openNew("vendorpayments");
-        } else if (key === "b") {
-          e.preventDefault(); // stop Chrome's "toggle bookmarks bar"
-          onNewBill();
-        } else if (key === "f") {
-          e.preventDefault();
-          [...document.querySelectorAll('input[placeholder^="Search"]')]
-            .find((i) => i.offsetParent !== null)
-            ?.focus();
-        } else if (key === "a" && typing()) {
-          return; // let Ctrl+A select the text inside a field
-        } else if (key in CTRL_GO) {
-          e.preventDefault();
-          go(CTRL_GO[key]);
-        }
-      };
-      window.addEventListener("keydown", onKeyDown);
-      return () => window.removeEventListener("keydown", onKeyDown);
-    }, [isAdmin, onNewBill, searchParams, helpOpen]);
+  return (
+    <>
+      {open && (
+        <ProductForm
+          onSubmit={async (values, imageFiles) => {
+            await createProduct(values, imageFiles);
+            onProductCreated?.();
+          }}
+          onClose={() => setOpen(false)}
+        />
+      )}
 
-    // the "Keyboard shortcuts" link in the sidebar
-    useEffect(() => {
-      const show = () => setHelpOpen(true);
-      window.addEventListener("app:help", show);
-      return () => window.removeEventListener("app:help", show);
-    }, []);
-
-    return (
-      <>
-        {open && (
-          <ProductForm
-            onSubmit={async (values, imageFiles) => {
-              await createProduct(values, imageFiles);
-              onProductCreated?.();
-            }}
-            onClose={() => setOpen(false)}
-          />
-        )}
-
-        {isAdmin && helpOpen && (
+      {isAdmin && helpOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={() => setHelpOpen(false)}
+        >
           <div
-            className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
-            onClick={() => setHelpOpen(false)}
+            className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-5"
+            onClick={(e) => e.stopPropagation()}
           >
-            <div
-              className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-5"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-gray-900">
-                  Keyboard shortcuts
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setHelpOpen(false)}
-                  className="text-sm text-gray-500 hover:text-gray-800"
-                >
-                  Close
-                </button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
-                {SHORTCUT_HELP.map(([group, rows]) => (
-                  <div key={group}>
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1.5">
-                      {group}
-                    </h3>
-                    {rows.map(([keys, label]) => (
-                      <div
-                        key={keys}
-                        className="flex items-start justify-between gap-3 py-1 text-sm"
-                      >
-                        <span className="text-gray-600">{label}</span>
-                        <kbd className="shrink-0 text-xs bg-gray-100 border border-gray-300 rounded px-1.5 py-0.5 text-gray-700 whitespace-nowrap">
-                          {keys}
-                        </kbd>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-              <p className="text-xs text-gray-400 mt-4">
-                On Mac, use Cmd instead of Ctrl and Option instead of Alt.
-              </p>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Keyboard shortcuts
+              </h2>
+              <button
+                type="button"
+                onClick={() => setHelpOpen(false)}
+                className="text-sm text-gray-500 hover:text-gray-800"
+              >
+                Close
+              </button>
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+              {SHORTCUT_HELP.map(([group, rows]) => (
+                <div key={group}>
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1.5">
+                    {group}
+                  </h3>
+                  {rows.map(([keys, label]) => (
+                    <div
+                      key={keys}
+                      className="flex items-start justify-between gap-3 py-1 text-sm"
+                    >
+                      <span className="text-gray-600">{label}</span>
+                      <kbd className="shrink-0 text-xs bg-gray-100 border border-gray-300 rounded px-1.5 py-0.5 text-gray-700 whitespace-nowrap">
+                        {keys}
+                      </kbd>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-4">
+              On Mac, use Cmd instead of Ctrl and Option instead of Alt.
+            </p>
           </div>
-        )}
-      </>
-    );
-  }
+        </div>
+      )}
+    </>
+  );
+}
 
-
-  // which permission area each sidebar entry / ?view= value needs (convenience only - the server checks again)
+// which permission area each sidebar entry / ?view= value needs (convenience only - the server checks again)
 const VIEW_AREA = {
-  customers: "customers", items: "inventory", manage: "inventory",
-  quotes: "sales_documents", salesorders: "sales_documents", invoices: "invoices",
-  payments: "payments_in", creditnotes: "credit_notes",
-  vendors: "vendors", purchases: "purchase_bills", vendorpayments: "payments_out",
-  bill: "stock_bills", issued: "issued", inventory: "requests",
-  accounting: "chart_of_accounts", journals: "journals", banking: "banking", taxes: "taxes", reports: "reports",
+  customers: "customers",
+  items: "inventory",
+  manage: "inventory",
+  quotes: "sales_documents",
+  salesorders: "sales_documents",
+  invoices: "invoices",
+  payments: "payments_in",
+  creditnotes: "credit_notes",
+  vendors: "vendors",
+  purchases: "purchase_bills",
+  vendorpayments: "payments_out",
+  bill: "stock_bills",
+  issued: "issued",
+  inventory: "requests",
+  accounting: "chart_of_accounts",
+  journals: "journals",
+  banking: "banking",
+  taxes: "taxes",
+  reports: "reports",
 };
 function viewAllowed(id, can, hasRight, openMode) {
-      if (id === "users" || id === "audit")
-        return !openMode && can("users", "view") && hasRight("manage_users");
+  if (id === "users" || id === "audit")
+    return !openMode && can("users", "view") && hasRight("manage_users");
   if (openMode) return true;
   const area = VIEW_AREA[id];
-  if (!area) return true;                       // home, dashboard, unknown values
+  if (!area) return true; // home, dashboard, unknown values
   if (!can(area, "view")) return false;
   if (id === "reports" && !hasRight("view_reports")) return false;
   return true;
@@ -13024,15 +16683,22 @@ function ZohoLayout({ children }) {
 // shown instead of the dashboard when the user may not see reports (e.g. Sales)
 function WelcomeHome({ go }) {
   const { user, can, hasRight, openMode } = useAuth();
-  const links = ZOHO_NAV.flat().filter((n) => n.id !== "home" && viewAllowed(n.id, can, hasRight, openMode));
+  const links = ZOHO_NAV.flat().filter(
+    (n) => n.id !== "home" && viewAllowed(n.id, can, hasRight, openMode),
+  );
   return (
     <div className="p-4 sm:p-6">
-      <h1 className="text-xl font-semibold text-gray-900">Welcome{user ? `, ${user.full_name}` : ""}</h1>
+      <h1 className="text-xl font-semibold text-gray-900">
+        Welcome{user ? `, ${user.full_name}` : ""}
+      </h1>
       <p className="text-sm text-gray-500 mt-1 mb-4">Pick where to start:</p>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {links.map(({ id, label, Icon }) => (
-          <button key={id} onClick={() => go({ view: id })}
-            className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-800 hover:border-blue-500 hover:text-blue-600">
+          <button
+            key={id}
+            onClick={() => go({ view: id })}
+            className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-800 hover:border-blue-500 hover:text-blue-600"
+          >
             <Icon size={16} /> {label}
           </button>
         ))}
@@ -13045,7 +16711,10 @@ function NoAccess() {
   return (
     <div className="p-6">
       <h1 className="text-lg font-semibold text-gray-900">No access</h1>
-      <p className="text-sm text-gray-500 mt-1">Your role does not include this page. Ask an administrator if you need it.</p>
+      <p className="text-sm text-gray-500 mt-1">
+        Your role does not include this page. Ask an administrator if you need
+        it.
+      </p>
     </div>
   );
 }
@@ -13065,36 +16734,61 @@ function AgeingCard({ title, ageing, onNew, newLabel = "New" }) {
   return (
     <div className="bg-white border border-gray-200 rounded-lg mb-5 overflow-hidden">
       <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200">
-        <h2 className="text-base sm:text-lg font-medium text-gray-800">{title}</h2>
+        <h2 className="text-base sm:text-lg font-medium text-gray-800">
+          {title}
+        </h2>
         {onNew && (
-          <button onClick={onNew} className="flex items-center gap-1.5 text-sm text-gray-700 hover:text-blue-600">
-            <span className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center"><Plus size={13} /></span>
+          <button
+            onClick={onNew}
+            className="flex items-center gap-1.5 text-sm text-gray-700 hover:text-blue-600"
+          >
+            <span className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center">
+              <Plus size={13} />
+            </span>
             {newLabel}
           </button>
         )}
       </div>
 
       <div className="px-5 pt-3 pb-4">
-        <p className="text-xs text-gray-600 mb-1.5">{title} {formatRs(total)}</p>
+        <p className="text-xs text-gray-600 mb-1.5">
+          {title} {formatRs(total)}
+        </p>
         <div className="flex h-2.5 rounded-full overflow-hidden bg-gray-200">
           {total > 0 &&
             AGE_BUCKETS.map(([key, , color]) =>
-              ageing[key] > 0 ? <div key={key} style={{ width: `${(ageing[key] / total) * 100}%`, background: color }} /> : null
+              ageing[key] > 0 ? (
+                <div
+                  key={key}
+                  style={{
+                    width: `${(ageing[key] / total) * 100}%`,
+                    background: color,
+                  }}
+                />
+              ) : null,
             )}
         </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-y-4 px-5 py-4 border-t border-gray-200">
         <div className="md:border-r md:border-gray-200 md:pr-4">
-          <p className="text-[11px] font-medium uppercase text-blue-500">Current</p>
-          <p className="text-lg sm:text-xl text-gray-900 mt-1">{amount("current")}</p>
+          <p className="text-[11px] font-medium uppercase text-blue-500">
+            Current
+          </p>
+          <p className="text-lg sm:text-xl text-gray-900 mt-1">
+            {amount("current")}
+          </p>
         </div>
         <div className="col-span-2 md:col-span-4 md:pl-4">
-          <p className="text-[11px] font-medium uppercase text-orange-500">Overdue</p>
+          <p className="text-[11px] font-medium uppercase text-orange-500">
+            Overdue
+          </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-y-3 gap-x-4 mt-1">
             {AGE_BUCKETS.slice(1).map(([key, label]) => (
               <div key={key}>
-                <p className="text-lg sm:text-xl text-gray-900">{amount(key)}</p>
+                <p className="text-lg sm:text-xl text-gray-900">
+                  {amount(key)}
+                </p>
                 <p className="text-xs text-gray-500">{label}</p>
               </div>
             ))}
@@ -13111,12 +16805,19 @@ function niceTicks(peak) {
   const mag = Math.pow(10, Math.floor(Math.log10(raw)));
   const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
   const count = Math.max(1, Math.ceil(peak / step));
-  return { ticks: Array.from({ length: count + 1 }, (_, i) => i * step), top: count * step };
+  return {
+    ticks: Array.from({ length: count + 1 }, (_, i) => i * step),
+    top: count * step,
+  };
 }
-const tickLabel = (n) => (n >= 1000 ? `${+(n / 1000).toFixed(1)} K` : String(n));
+const tickLabel = (n) =>
+  n >= 1000 ? `${+(n / 1000).toFixed(1)} K` : String(n);
 
 function SalesExpensesChart({ rows }) {
-  const peak = Math.max(0, ...rows.flatMap((r) => [r.sales, r.receipts, r.expenses]));
+  const peak = Math.max(
+    0,
+    ...rows.flatMap((r) => [r.sales, r.receipts, r.expenses]),
+  );
   const { ticks, top } = niceTicks(peak || 20000);
   const H = 230;
   const pct = (v) => (v > 0 ? `${Math.max(1, (v / top) * 100)}%` : "0%");
@@ -13124,7 +16825,11 @@ function SalesExpensesChart({ rows }) {
     <div className="flex">
       <div className="relative w-12 shrink-0" style={{ height: H }}>
         {ticks.map((t) => (
-          <span key={t} className="absolute right-2 text-[11px] text-gray-500 translate-y-1/2" style={{ bottom: `${(t / top) * 100}%` }}>
+          <span
+            key={t}
+            className="absolute right-2 text-[11px] text-gray-500 translate-y-1/2"
+            style={{ bottom: `${(t / top) * 100}%` }}
+          >
             {tickLabel(t)}
           </span>
         ))}
@@ -13133,15 +16838,31 @@ function SalesExpensesChart({ rows }) {
         <div className="min-w-[560px]">
           <div className="relative" style={{ height: H }}>
             {ticks.map((t) => (
-              <div key={t} className="absolute left-0 right-0 border-t border-gray-100" style={{ bottom: `${(t / top) * 100}%` }} />
+              <div
+                key={t}
+                className="absolute left-0 right-0 border-t border-gray-100"
+                style={{ bottom: `${(t / top) * 100}%` }}
+              />
             ))}
             <div className="absolute inset-0 flex justify-around">
               {rows.map((r) => (
                 <div key={r.month} className="flex items-end gap-0.5 h-full">
-                  <div className="w-2.5 rounded-t-sm bg-[#2f80ed]" style={{ height: pct(r.sales) }} title={`Sales ${formatRs(r.sales)}`} />
-                  <div className="w-2.5 rounded-t-sm bg-[#27ae60]" style={{ height: pct(r.receipts) }} title={`Receipts ${formatRs(r.receipts)}`} />
+                  <div
+                    className="w-2.5 rounded-t-sm bg-[#2f80ed]"
+                    style={{ height: pct(r.sales) }}
+                    title={`Sales ${formatRs(r.sales)}`}
+                  />
+                  <div
+                    className="w-2.5 rounded-t-sm bg-[#27ae60]"
+                    style={{ height: pct(r.receipts) }}
+                    title={`Receipts ${formatRs(r.receipts)}`}
+                  />
                   {r.expenses > 0 && (
-                    <div className="w-2.5 rounded-t-sm bg-[#eb5757]" style={{ height: pct(r.expenses) }} title={`Expenses ${formatRs(r.expenses)}`} />
+                    <div
+                      className="w-2.5 rounded-t-sm bg-[#eb5757]"
+                      style={{ height: pct(r.expenses) }}
+                      title={`Expenses ${formatRs(r.expenses)}`}
+                    />
                   )}
                 </div>
               ))}
@@ -13150,8 +16871,12 @@ function SalesExpensesChart({ rows }) {
           <div className="flex justify-around mt-2">
             {rows.map((r) => (
               <div key={r.month} className="text-center w-8">
-                <p className="text-[11px] text-gray-600 leading-tight">{r.month}</p>
-                <p className="text-[9px] text-gray-400 leading-tight">{r.year}</p>
+                <p className="text-[11px] text-gray-600 leading-tight">
+                  {r.month}
+                </p>
+                <p className="text-[9px] text-gray-400 leading-tight">
+                  {r.year}
+                </p>
               </div>
             ))}
           </div>
@@ -13187,15 +16912,29 @@ function useDashboardLayout() {
     try {
       const saved = JSON.parse(localStorage.getItem(DASH_LAYOUT_KEY) || "null");
       if (saved && typeof saved === "object") {
-        const savedW = (saved.widgets || []).filter((w) => DASH_WIDGET_NAMES[w.id]);
-        const missing = DASH_LAYOUT_DEFAULT.widgets.filter((w) => !savedW.some((s) => s.id === w.id));
-        return { ...DASH_LAYOUT_DEFAULT, ...saved, widgets: [...savedW, ...missing] };
+        const savedW = (saved.widgets || []).filter(
+          (w) => DASH_WIDGET_NAMES[w.id],
+        );
+        const missing = DASH_LAYOUT_DEFAULT.widgets.filter(
+          (w) => !savedW.some((s) => s.id === w.id),
+        );
+        return {
+          ...DASH_LAYOUT_DEFAULT,
+          ...saved,
+          widgets: [...savedW, ...missing],
+        };
       }
-    } catch (e) { /* ignore broken saved data */ }
+    } catch (e) {
+      /* ignore broken saved data */
+    }
     return DASH_LAYOUT_DEFAULT;
   });
   const save = (next) => {
-    try { localStorage.setItem(DASH_LAYOUT_KEY, JSON.stringify(next)); } catch (e) { /* storage blocked */ }
+    try {
+      localStorage.setItem(DASH_LAYOUT_KEY, JSON.stringify(next));
+    } catch (e) {
+      /* storage blocked */
+    }
     return next;
   };
   const update = (patch) => setLayout((prev) => save({ ...prev, ...patch }));
@@ -13211,7 +16950,10 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
   const [layout, updateLayout, resetLayout] = useDashboardLayout();
   const [panelOpen, setPanelOpen] = useState(false);
 
-  const tabs = [["dashboard", "Dashboard"], ...(layout.showStockTab ? [["stock", "Stock Alerts"]] : [])];
+  const tabs = [
+    ["dashboard", "Dashboard"],
+    ...(layout.showStockTab ? [["stock", "Stock Alerts"]] : []),
+  ];
   const activeTab = tabs.some(([id]) => id === tab) ? tab : "dashboard";
 
   // ---- customize-panel helpers ----
@@ -13223,20 +16965,38 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
     updateLayout({ widgets: next });
   };
   const patchWidget = (id, patch) =>
-    updateLayout({ widgets: layout.widgets.map((w) => (w.id === id ? { ...w, ...patch } : w)) });
+    updateLayout({
+      widgets: layout.widgets.map((w) =>
+        w.id === id ? { ...w, ...patch } : w,
+      ),
+    });
 
   // each widget = one card; the card root carries its own bottom spacing
   const renderWidget = (id) => {
     switch (id) {
       case "receivables":
-        return <AgeingCard title="Total Receivables" ageing={data.receivables_ageing} onNew={() => go({ view: "invoices" })} />;
+        return (
+          <AgeingCard
+            title="Total Receivables"
+            ageing={data.receivables_ageing}
+            onNew={() => go({ view: "invoices" })}
+          />
+        );
       case "payables":
-        return <AgeingCard title="Total Payables" ageing={data.payables_ageing} onNew={() => go({ view: "purchases" })} />;
+        return (
+          <AgeingCard
+            title="Total Payables"
+            ageing={data.payables_ageing}
+            onNew={() => go({ view: "purchases" })}
+          />
+        );
       case "sales":
         return (
           <div className="bg-white border border-gray-200 rounded-lg mb-5 overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200">
-              <h2 className="text-base sm:text-lg font-medium text-gray-800">Sales and Expenses</h2>
+              <h2 className="text-base sm:text-lg font-medium text-gray-800">
+                Sales and Expenses
+              </h2>
               <select
                 value={year}
                 onChange={(e) => setYear(Number(e.target.value))}
@@ -13249,20 +17009,28 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
             <div className="flex flex-col md:flex-row">
               <div className="flex-1 min-w-0 p-5">
                 <SalesExpensesChart rows={data.fy_chart} />
-                <p className="text-xs text-gray-500 mt-5">* Sales value displayed is inclusive of tax.</p>
+                <p className="text-xs text-gray-500 mt-5">
+                  * Sales value displayed is inclusive of tax.
+                </p>
               </div>
               <div className="md:w-60 shrink-0 border-t md:border-t-0 md:border-l border-gray-200 p-5 space-y-6">
                 <div>
                   <p className="text-sm text-[#2f80ed]">Total Sales</p>
-                  <p className="text-xl sm:text-2xl text-gray-900 mt-1">{formatRs(data.fy_sales)}</p>
+                  <p className="text-xl sm:text-2xl text-gray-900 mt-1">
+                    {formatRs(data.fy_sales)}
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm text-[#27ae60]">Total Receipts</p>
-                  <p className="text-xl sm:text-2xl text-gray-900 mt-1">{formatRs(data.fy_receipts)}</p>
+                  <p className="text-xl sm:text-2xl text-gray-900 mt-1">
+                    {formatRs(data.fy_receipts)}
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm text-[#eb5757]">Total Expenses</p>
-                  <p className="text-xl sm:text-2xl text-gray-900 mt-1">{formatRs(data.fy_expenses)}</p>
+                  <p className="text-xl sm:text-2xl text-gray-900 mt-1">
+                    {formatRs(data.fy_expenses)}
+                  </p>
                 </div>
               </div>
             </div>
@@ -13272,13 +17040,28 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
         return (
           <div className="bg-white border border-gray-200 rounded-lg mb-5 overflow-hidden">
             <div className="px-5 py-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
-              <h2 className="text-base font-medium text-gray-800">Cash & Bank</h2>
-              <button onClick={() => go({ view: "banking" })} className="text-xs text-blue-600 hover:underline">View all</button>
+              <h2 className="text-base font-medium text-gray-800">
+                Cash & Bank
+              </h2>
+              <button
+                onClick={() => go({ view: "banking" })}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                View all
+              </button>
             </div>
             <div className="px-5 py-2">
-              {data.cash_accounts.length === 0 && <p className="text-xs text-gray-400 py-2">No cash or bank accounts yet</p>}
-              {data.cash_accounts.map((a) => <ReportLine key={a.id} label={a.name} amount={a.balance} />)}
-              {data.cash_accounts.length > 0 && <ReportLine label="Total" amount={data.cash_total} bold />}
+              {data.cash_accounts.length === 0 && (
+                <p className="text-xs text-gray-400 py-2">
+                  No cash or bank accounts yet
+                </p>
+              )}
+              {data.cash_accounts.map((a) => (
+                <ReportLine key={a.id} label={a.name} amount={a.balance} />
+              ))}
+              {data.cash_accounts.length > 0 && (
+                <ReportLine label="Total" amount={data.cash_total} bold />
+              )}
             </div>
           </div>
         );
@@ -13286,11 +17069,17 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
         return (
           <div className="bg-white border border-gray-200 rounded-lg mb-5 overflow-hidden">
             <div className="px-5 py-3 bg-gray-50 border-b border-gray-200">
-              <h2 className="text-base font-medium text-gray-800">Top Expenses (this year)</h2>
+              <h2 className="text-base font-medium text-gray-800">
+                Top Expenses (this year)
+              </h2>
             </div>
             <div className="px-5 py-2">
-              {data.top_expenses.length === 0 && <p className="text-xs text-gray-400 py-2">No expenses yet</p>}
-              {data.top_expenses.map((a) => <ReportLine key={a.id} label={a.name} amount={a.amount} />)}
+              {data.top_expenses.length === 0 && (
+                <p className="text-xs text-gray-400 py-2">No expenses yet</p>
+              )}
+              {data.top_expenses.map((a) => (
+                <ReportLine key={a.id} label={a.name} amount={a.amount} />
+              ))}
             </div>
           </div>
         );
@@ -13303,7 +17092,12 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <AppHeader isAdmin={isAdmin} active="home" onTab={() => {}} onProductAdded={onProductAdded} />
+      <AppHeader
+        isAdmin={isAdmin}
+        active="home"
+        onTab={() => {}}
+        onProductAdded={onProductAdded}
+      />
 
       <div className="bg-white border-b border-gray-200 px-4 sm:px-6 pt-5">
         <div className="flex items-center gap-4">
@@ -13311,7 +17105,9 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
             <Landmark size={22} />
           </div>
           <div className="min-w-0">
-            <h1 className="text-xl font-medium text-gray-900 truncate">Hello, Admin</h1>
+            <h1 className="text-xl font-medium text-gray-900 truncate">
+              Hello, Admin
+            </h1>
             <p className="text-sm text-gray-500 truncate">STD OPERATION</p>
           </div>
           <button
@@ -13328,12 +17124,16 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
               key={id}
               onClick={() => setTab(id)}
               className={`pb-3 text-sm whitespace-nowrap border-b-2 ${
-                activeTab === id ? "border-blue-500 text-gray-900 font-medium" : "border-transparent text-gray-500 hover:text-gray-800"
+                activeTab === id
+                  ? "border-blue-500 text-gray-900 font-medium"
+                  : "border-transparent text-gray-500 hover:text-gray-800"
               }`}
             >
               {label}
               {id === "stock" && data?.low_stock_count > 0 && (
-                <span className="ml-1.5 bg-red-500 text-white text-[10px] rounded-full px-1.5 py-0.5">{data.low_stock_count}</span>
+                <span className="ml-1.5 bg-red-500 text-white text-[10px] rounded-full px-1.5 py-0.5">
+                  {data.low_stock_count}
+                </span>
               )}
             </button>
           ))}
@@ -13342,35 +17142,50 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
 
       <main className="p-4 sm:p-6 w-full">
         <ReportBody loading={loading} error={error} data={data}>
-          {data && activeTab === "dashboard" && (
-            shown.length === 0 ? (
-              <p className="text-center text-gray-400 py-16">All widgets are hidden. Use “Customize” to show them again.</p>
+          {data &&
+            activeTab === "dashboard" &&
+            (shown.length === 0 ? (
+              <p className="text-center text-gray-400 py-16">
+                All widgets are hidden. Use “Customize” to show them again.
+              </p>
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-5">
                 {shown.map((w) => (
-                  <div key={w.id} className={`min-w-0 ${w.size === "full" ? "lg:col-span-2" : ""}`}>
+                  <div
+                    key={w.id}
+                    className={`min-w-0 ${w.size === "full" ? "lg:col-span-2" : ""}`}
+                  >
                     {renderWidget(w.id)}
                   </div>
                 ))}
               </div>
-            )
-          )}
+            ))}
 
           {data && activeTab === "stock" && (
             <div className="bg-white border border-gray-200 rounded-lg overflow-hidden max-w-2xl">
               <div className="px-5 py-3 bg-gray-50 border-b border-gray-200">
-                <h2 className="text-base font-medium text-gray-800">Low stock ({data.low_stock_count})</h2>
+                <h2 className="text-base font-medium text-gray-800">
+                  Low stock ({data.low_stock_count})
+                </h2>
               </div>
               <div className="px-5 py-2">
-                {data.low_stock.length === 0 && <p className="text-xs text-gray-400 py-3">All items are above their reorder level</p>}
+                {data.low_stock.length === 0 && (
+                  <p className="text-xs text-gray-400 py-3">
+                    All items are above their reorder level
+                  </p>
+                )}
                 {data.low_stock.map((p) => (
                   <button
                     key={p.id}
-                    onClick={() => go({ view: "items", item: String(p.id), from: "home" })}
+                    onClick={() =>
+                      go({ view: "items", item: String(p.id), from: "home" })
+                    }
                     className="w-full flex justify-between gap-3 py-2 text-sm text-left hover:bg-gray-50"
                   >
                     <span className="text-gray-700 truncate">{p.name}</span>
-                    <span className="shrink-0 text-red-600">{p.quantity} / min {p.reorder_min}</span>
+                    <span className="shrink-0 text-red-600">
+                      {p.quantity} / min {p.reorder_min}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -13381,31 +17196,53 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
 
       {/* ---------- Customize dashboard panel ---------- */}
       {panelOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={() => setPanelOpen(false)}>
-          <div className="w-full max-w-sm h-full overflow-y-auto bg-white text-gray-900 p-5 space-y-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex justify-end bg-black/40"
+          onClick={() => setPanelOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm h-full overflow-y-auto bg-white text-gray-900 p-5 space-y-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Customize dashboard</h2>
-              <button type="button" onClick={() => setPanelOpen(false)} className="text-gray-500 hover:text-gray-900 text-xl leading-none">✕</button>
+              <button
+                type="button"
+                onClick={() => setPanelOpen(false)}
+                className="text-gray-500 hover:text-gray-900 text-xl leading-none"
+              >
+                ✕
+              </button>
             </div>
 
             <button
               type="button"
-              onClick={() => { setPanelOpen(false); window.dispatchEvent(new Event("app:appearance")); }}
+              onClick={() => {
+                setPanelOpen(false);
+                window.dispatchEvent(new Event("app:appearance"));
+              }}
               className="w-full border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
               App theme &amp; colours…
             </button>
 
             <section>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Page width</h3>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                Page width
+              </h3>
               <div className="flex">
-                {[[false, "Contained"], [true, "Full width"]].map(([val, name]) => (
+                {[
+                  [false, "Contained"],
+                  [true, "Full width"],
+                ].map(([val, name]) => (
                   <button
                     key={name}
                     type="button"
                     onClick={() => updateLayout({ fullWidth: val })}
                     className={`flex-1 px-3 py-1.5 text-sm border ${
-                      layout.fullWidth === val ? "bg-blue-600 border-blue-600 text-white" : "border-gray-300 text-gray-700 hover:bg-gray-50"
+                      layout.fullWidth === val
+                        ? "bg-blue-600 border-blue-600 text-white"
+                        : "border-gray-300 text-gray-700 hover:bg-gray-50"
                     }`}
                   >
                     {name}
@@ -13413,42 +17250,89 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
                 ))}
               </div>
               <label className="flex items-center gap-2 text-sm text-gray-700 mt-3">
-                <input type="checkbox" checked={layout.showStockTab} onChange={(e) => updateLayout({ showStockTab: e.target.checked })} />
+                <input
+                  type="checkbox"
+                  checked={layout.showStockTab}
+                  onChange={(e) =>
+                    updateLayout({ showStockTab: e.target.checked })
+                  }
+                />
                 Show “Stock Alerts” tab
               </label>
             </section>
 
             <section>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Widgets (show, size, order)</h3>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                Widgets (show, size, order)
+              </h3>
               <div className="space-y-1.5">
                 {layout.widgets.map((w, i) => (
-                  <div key={w.id} className="flex items-center gap-2 border border-gray-200 rounded-lg px-2 py-1.5">
-                    <input type="checkbox" checked={w.visible} onChange={(e) => patchWidget(w.id, { visible: e.target.checked })} />
-                    <span className="flex-1 min-w-0 text-sm truncate">{DASH_WIDGET_NAMES[w.id]}</span>
+                  <div
+                    key={w.id}
+                    className="flex items-center gap-2 border border-gray-200 rounded-lg px-2 py-1.5"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={w.visible}
+                      onChange={(e) =>
+                        patchWidget(w.id, { visible: e.target.checked })
+                      }
+                    />
+                    <span className="flex-1 min-w-0 text-sm truncate">
+                      {DASH_WIDGET_NAMES[w.id]}
+                    </span>
                     <button
                       type="button"
-                      onClick={() => patchWidget(w.id, { size: w.size === "full" ? "half" : "full" })}
+                      onClick={() =>
+                        patchWidget(w.id, {
+                          size: w.size === "full" ? "half" : "full",
+                        })
+                      }
                       className="text-xs border border-gray-300 rounded px-2 py-0.5 text-gray-700 hover:bg-gray-50"
                       title="Full row or half row (half only applies on wide screens)"
                     >
                       {w.size === "full" ? "Full" : "Half"}
                     </button>
-                    <button type="button" disabled={i === 0} onClick={() => moveWidget(i, -1)} className="px-1 text-gray-500 disabled:opacity-30">▲</button>
-                    <button type="button" disabled={i === layout.widgets.length - 1} onClick={() => moveWidget(i, 1)} className="px-1 text-gray-500 disabled:opacity-30">▼</button>
+                    <button
+                      type="button"
+                      disabled={i === 0}
+                      onClick={() => moveWidget(i, -1)}
+                      className="px-1 text-gray-500 disabled:opacity-30"
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      disabled={i === layout.widgets.length - 1}
+                      onClick={() => moveWidget(i, 1)}
+                      className="px-1 text-gray-500 disabled:opacity-30"
+                    >
+                      ▼
+                    </button>
                   </div>
                 ))}
               </div>
             </section>
 
             <div className="flex gap-2 pt-2">
-              <button type="button" onClick={resetLayout} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              <button
+                type="button"
+                onClick={resetLayout}
+                className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
                 Reset to default
               </button>
-              <button type="button" onClick={() => setPanelOpen(false)} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700">
+              <button
+                type="button"
+                onClick={() => setPanelOpen(false)}
+                className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700"
+              >
                 Done
               </button>
             </div>
-            <p className="text-xs text-gray-400">Saved automatically on this device.</p>
+            <p className="text-xs text-gray-400">
+              Saved automatically on this device.
+            </p>
           </div>
         </div>
       )}
@@ -13456,142 +17340,147 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
   );
 }
 
-
 function AppShell() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-    const { openMode, can, hasRight } = useAuth();
-    // Login not enforced yet (AUTH_REQUIRED=false): keep the old behaviour. Enforced: decided by the role.
-    const isAdmin = openMode
-      ? location.pathname.startsWith("/admin")
-      : ACCOUNTING_AREAS.some((a) => can(a, "view"));
-    const viewParam = searchParams.get("view");
-    const viewBlocked =
-      !!viewParam && !viewAllowed(viewParam, can, hasRight, openMode);
-    const canDashboard =
-      openMode || (can("reports", "view") && hasRight("view_reports"));
+  const { openMode, can, hasRight } = useAuth();
+  // Login not enforced yet (AUTH_REQUIRED=false): keep the old behaviour. Enforced: decided by the role.
+  const isAdmin = openMode
+    ? location.pathname.startsWith("/admin")
+    : ACCOUNTING_AREAS.some((a) => can(a, "view"));
+  const viewParam = searchParams.get("view");
+  const viewBlocked =
+    !!viewParam && !viewAllowed(viewParam, can, hasRight, openMode);
+  const canDashboard =
+    openMode || (can("reports", "view") && hasRight("view_reports"));
   const [refreshToken, setRefreshToken] = useState(0);
   const refresh = () => setRefreshToken((n) => n + 1);
   const [quickBillToken, setQuickBillToken] = useState(0);
   const [quickIssuedToken, setQuickIssuedToken] = useState(0);
 
-  const goNewBill = () => { setSearchParams({ view: "bill" }); setQuickBillToken((n) => n + 1); };
-  const goNewIssued = () => { setSearchParams({ view: "issued" }); setQuickIssuedToken((n) => n + 1); };
+  const goNewBill = () => {
+    setSearchParams({ view: "bill" });
+    setQuickBillToken((n) => n + 1);
+  };
+  const goNewIssued = () => {
+    setSearchParams({ view: "issued" });
+    setQuickIssuedToken((n) => n + 1);
+  };
 
-    let page;
-    if (viewBlocked) {
-      page = <NoAccess />;
-    } else if (searchParams.get("view") === "bill" && isAdmin) {
-      page = <BillPage go={setSearchParams} autoCreateToken={quickBillToken} />;
-    } else if (searchParams.get("view") === "issued" && isAdmin) {
-      page = (
-        <IssuedPage go={setSearchParams} autoCreateToken={quickIssuedToken} />
-      );
-    } else if (searchParams.get("view") === "accounting" && isAdmin) {
-      page = searchParams.get("account") ? (
-        <AccountDetail
-          accountId={searchParams.get("account")}
-          go={setSearchParams}
-          fromParam={searchParams.get("from")}
-        />
-      ) : (
-        <AccountingPage isAdmin={isAdmin} go={setSearchParams} />
-      );
-    } else if (searchParams.get("view") === "journals" && isAdmin) {
-      page = <JournalsPage isAdmin={isAdmin} go={setSearchParams} />;
-    } else if (searchParams.get("view") === "customers" && isAdmin) {
-      page = <CustomersPage isAdmin={isAdmin} go={setSearchParams} />;
-    } else if (searchParams.get("view") === "quotes" && isAdmin) {
-      page = (
-        <SalesDocumentsPage
-          key="quote"
-          isAdmin={isAdmin}
-          go={setSearchParams}
-          docType="quote"
-        />
-      );
-    } else if (searchParams.get("view") === "salesorders" && isAdmin) {
-      page = (
-        <SalesDocumentsPage
-          key="sales_order"
-          isAdmin={isAdmin}
-          go={setSearchParams}
-          docType="sales_order"
-        />
-      );
-    } else if (searchParams.get("view") === "creditnotes" && isAdmin) {
-      page = <CreditNotesPage isAdmin={isAdmin} go={setSearchParams} />;
-    } else if (searchParams.get("view") === "invoices" && isAdmin) {
-      page = <InvoicesPage isAdmin={isAdmin} go={setSearchParams} />;
-    } else if (searchParams.get("view") === "payments" && isAdmin) {
-      page = <PaymentsPage isAdmin={isAdmin} go={setSearchParams} />;
-    } else if (searchParams.get("view") === "purchases" && isAdmin) {
-      page = <PurchaseBillsPage isAdmin={isAdmin} go={setSearchParams} />;
-    } else if (searchParams.get("view") === "vendorpayments" && isAdmin) {
-      page = <VendorPaymentsPage isAdmin={isAdmin} go={setSearchParams} />;
-    } else if (searchParams.get("view") === "taxes" && isAdmin) {
-      page = <TaxesPage isAdmin={isAdmin} go={setSearchParams} />;
-    } else if (searchParams.get("view") === "banking" && isAdmin) {
-      page = (
-        <BankingPage
-          isAdmin={isAdmin}
-          go={setSearchParams}
-          accountId={searchParams.get("account")}
-          reconcile={searchParams.get("reconcile")}
-        />
-      );
-    } else if (searchParams.get("view") === "reports" && isAdmin) {
-      page = <ReportsPage isAdmin={isAdmin} go={setSearchParams} />;
-    } else if (searchParams.get("view") === "dashboard" && isAdmin) {
-      page = (
-        <ZohoDashboard
-          isAdmin={isAdmin}
-          go={setSearchParams}
-          onProductAdded={refresh}
-        />
-      );
-    } else if (searchParams.get("view") === "vendors" && isAdmin) {
-      page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
-    } else if (searchParams.get("view") === "manage" && isAdmin) {
-      page = (
-        <ManagePage
-          go={setSearchParams}
-          refreshToken={refreshToken}
-          onProductAdded={refresh}
-        />
-      );
-    } else if (searchParams.get("view") === "inventory" && isAdmin) {
-      page = (
-        <InventoryView isAdmin={isAdmin} onBack={() => setSearchParams({})} />
-      );
-    } else if (searchParams.get("view") === "users") {
-      page = <UsersAdminPage />;
-    } else if (searchParams.get("view") === "audit") {
-      page = <AuditLogPage />;
-    } else if (searchParams.get("view") === "items") {
-      page = (
-        <ItemsPage
-          isAdmin={isAdmin}
-          itemId={searchParams.get("item")}
-          fromParam={searchParams.get("from")}
-          go={setSearchParams}
-          refreshToken={refreshToken}
-          onProductAdded={refresh}
-        />
-      );
-    } else if (isAdmin && canDashboard) {
-      page = (
-        <ZohoDashboard
-          isAdmin={isAdmin}
-          go={setSearchParams}
-          onProductAdded={refresh}
-        />
-      );
-    } else if (isAdmin) {
-      page = <WelcomeHome go={setSearchParams} />;
-    } else {
-      page = <InventoryView isAdmin={isAdmin} />;
-    }
+  let page;
+  if (viewBlocked) {
+    page = <NoAccess />;
+  } else if (searchParams.get("view") === "bill" && isAdmin) {
+    page = <BillPage go={setSearchParams} autoCreateToken={quickBillToken} />;
+  } else if (searchParams.get("view") === "issued" && isAdmin) {
+    page = (
+      <IssuedPage go={setSearchParams} autoCreateToken={quickIssuedToken} />
+    );
+  } else if (searchParams.get("view") === "accounting" && isAdmin) {
+    page = searchParams.get("account") ? (
+      <AccountDetail
+        accountId={searchParams.get("account")}
+        go={setSearchParams}
+        fromParam={searchParams.get("from")}
+      />
+    ) : (
+      <AccountingPage isAdmin={isAdmin} go={setSearchParams} />
+    );
+  } else if (searchParams.get("view") === "journals" && isAdmin) {
+    page = <JournalsPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "customers" && isAdmin) {
+    page = <CustomersPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "quotes" && isAdmin) {
+    page = (
+      <SalesDocumentsPage
+        key="quote"
+        isAdmin={isAdmin}
+        go={setSearchParams}
+        docType="quote"
+      />
+    );
+  } else if (searchParams.get("view") === "salesorders" && isAdmin) {
+    page = (
+      <SalesDocumentsPage
+        key="sales_order"
+        isAdmin={isAdmin}
+        go={setSearchParams}
+        docType="sales_order"
+      />
+    );
+  } else if (searchParams.get("view") === "creditnotes" && isAdmin) {
+    page = <CreditNotesPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "invoices" && isAdmin) {
+    page = <InvoicesPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "payments" && isAdmin) {
+    page = <PaymentsPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "purchases" && isAdmin) {
+    page = <PurchaseBillsPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "vendorpayments" && isAdmin) {
+    page = <VendorPaymentsPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "taxes" && isAdmin) {
+    page = <TaxesPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "banking" && isAdmin) {
+    page = (
+      <BankingPage
+        isAdmin={isAdmin}
+        go={setSearchParams}
+        accountId={searchParams.get("account")}
+        reconcile={searchParams.get("reconcile")}
+      />
+    );
+  } else if (searchParams.get("view") === "reports" && isAdmin) {
+    page = <ReportsPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "dashboard" && isAdmin) {
+    page = (
+      <ZohoDashboard
+        isAdmin={isAdmin}
+        go={setSearchParams}
+        onProductAdded={refresh}
+      />
+    );
+  } else if (searchParams.get("view") === "vendors" && isAdmin) {
+    page = <VendorsPage isAdmin={isAdmin} go={setSearchParams} />;
+  } else if (searchParams.get("view") === "manage" && isAdmin) {
+    page = (
+      <ManagePage
+        go={setSearchParams}
+        refreshToken={refreshToken}
+        onProductAdded={refresh}
+      />
+    );
+  } else if (searchParams.get("view") === "inventory" && isAdmin) {
+    page = (
+      <InventoryView isAdmin={isAdmin} onBack={() => setSearchParams({})} />
+    );
+  } else if (searchParams.get("view") === "users") {
+    page = <UsersAdminPage />;
+  } else if (searchParams.get("view") === "audit") {
+    page = <AuditLogPage />;
+  } else if (searchParams.get("view") === "items") {
+    page = (
+      <ItemsPage
+        isAdmin={isAdmin}
+        itemId={searchParams.get("item")}
+        fromParam={searchParams.get("from")}
+        go={setSearchParams}
+        refreshToken={refreshToken}
+        onProductAdded={refresh}
+      />
+    );
+  } else if (isAdmin && canDashboard) {
+    page = (
+      <ZohoDashboard
+        isAdmin={isAdmin}
+        go={setSearchParams}
+        onProductAdded={refresh}
+      />
+    );
+  } else if (isAdmin) {
+    page = <WelcomeHome go={setSearchParams} />;
+  } else {
+    page = <InventoryView isAdmin={isAdmin} />;
+  }
 
   return (
     <>
@@ -13629,11 +17518,14 @@ function NotFound() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Page not found</h1>
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">
+          Page not found
+        </h1>
         <p className="text-gray-500 mb-4">This page doesn't exist.</p>
-        <a href="/" className="text-blue-600 hover:underline text-sm">Go to HOME</a>
+        <a href="/" className="text-blue-600 hover:underline text-sm">
+          Go to HOME
+        </a>
       </div>
     </div>
   );
-
 }

@@ -158,3 +158,28 @@ html[data-theme] [class*="1f2640"] {
 html[data-theme] [class*="1f2640"] .bg-white {
   background-color: #fff;
 }
+/* Profit & Loss: print only the table */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .pl-statement,
+  .pl-statement * {
+    visibility: visible;
+  }
+
+  .pl-statement {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    border: 0;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  @page {
+    margin: 10mm;
+  }
+}
