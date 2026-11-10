@@ -2960,21 +2960,26 @@ function ProductFormBody({
 
   // Create Subitem form: "Subitem of" -> "+ New" opens a full form for the parent (a subitem of a
   // top-level item). When it saves, reload the parent list and select the new parent here.
-  const handleParentCreated = async (values, files) => {
-    const created = await createProduct(values, files);
-    const p = await getProducts();
-    const opts = buildParentOptions(p);
-    if (!opts.some((o) => o.id === created.id)) {
-      const extra = flattenParents(p).find((o) => o.id === created.id);
-      if (extra) opts.push(extra); // make sure the new parent is selectable
-    }
-    setParentOptions(opts);
-    setForm((prev) => ({
-      ...prev,
-      is_subitem: true,
-      parent_id: String(created.id),
-    }));
-  };
+    const handleParentCreated = async (values, files) => {
+      const created = await createProduct(values, files);
+      const p = await getProducts();
+      try {
+        setVendors(await getVendors()); // pick up vendors created in the parent form
+      } catch {
+        /* non-fatal */
+      }
+      const opts = buildParentOptions(p);
+      if (!opts.some((o) => o.id === created.id)) {
+        const extra = flattenParents(p).find((o) => o.id === created.id);
+        if (extra) opts.push(extra); // make sure the new parent is selectable
+      }
+      setParentOptions(opts);
+      setForm((prev) => ({
+        ...prev,
+        is_subitem: true,
+        parent_id: String(created.id),
+      }));
+    };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -3319,9 +3324,11 @@ function ProductFormBody({
             onSubmit={handleParentCreated}
             onClose={async () => {
               setCreatingParent(null);
-              // accounts made inside the parent's form must show up here too
+              // accounts AND vendors made inside the parent's form must show up here too
               try {
-                setAccounts(await getAccounts());
+                const [a, v] = await Promise.all([getAccounts(), getVendors()]);
+                setAccounts(a);
+                setVendors(v);
               } catch {
                 /* non-fatal */
               }
