@@ -10,6 +10,7 @@ class AccountBase(BaseModel):
     account_type: str  # any key of ACCOUNT_CATEGORY in account_types.py
     account_code: Optional[str] = None
     description: Optional[str] = None
+    parent_id: Optional[int] = None
 
 class AccountCreate(AccountBase):
     pass
@@ -19,6 +20,7 @@ class AccountUpdate(BaseModel):
     account_type: Optional[str] = None
     account_code: Optional[str] = None
     description: Optional[str] = None
+    parent_id: Optional[int] = None
 
 class AccountOut(AccountBase):
     model_config = ConfigDict(from_attributes=True)
@@ -31,6 +33,7 @@ class AccountSummary(AccountOut):
     item_count: int = 0
     category: str = ""
     ledger_balance: float = 0   # balance from journal entries
+    parent_name: Optional[str] = None
 
 class AccountItemValue(BaseModel):
     id: int

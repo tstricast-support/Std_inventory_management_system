@@ -10,6 +10,7 @@ class Account(Base):
     name = Column(String(150), nullable=False)
     account_type = Column(String(20), nullable=False)  # see account_types.py for every allowed value
     account_code = Column(String(30))                  # optional, e.g. "1000"
+    parent_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True)  # sub-account of
     description = Column(Text)
     created_at = Column(TIMESTAMP, server_default=func.now())
 

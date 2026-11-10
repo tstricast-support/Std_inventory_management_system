@@ -42,7 +42,11 @@ def add_account_columns():
     """create_all() never alters existing tables, so add the new chart-of-accounts columns by hand."""
     existing = [c["name"] for c in inspect(engine).get_columns("accounts")]
     with engine.begin() as conn:
-        for col, ddl in {"account_code": "VARCHAR(30)", "description": "TEXT"}.items():
+        for col, ddl in {
+            "account_code": "VARCHAR(30)",
+            "description": "TEXT",
+            "parent_id": "INTEGER REFERENCES accounts(id) ON DELETE SET NULL",
+        }.items():
             if col not in existing:
                 conn.execute(text(f"ALTER TABLE accounts ADD COLUMN {col} {ddl}"))
 

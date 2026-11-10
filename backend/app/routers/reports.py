@@ -64,14 +64,31 @@ def profit_and_loss(date_from: date | None = None, date_to: date | None = None, 
 
     sections, totals = [], {}
     for key, title, sign in PL_SECTIONS:
-        rows = []
-        for a in accounts:
-            if a.account_type != key:
-                continue
-            amount = sign * nets.get(a.id, Decimal("0"))
-            if amount != 0:
-                rows.append({"id": a.id, "name": a.name, "amount": float(amount)})
-        total = sum((Decimal(str(r["amount"])) for r in rows), Decimal("0"))
+        sec_accounts = [a for a in accounts if a.account_type == key]
+        own = {a.id: sign * nets.get(a.id, Decimal("0")) for a in sec_accounts}
+        by_id = {a.id: a for a in sec_accounts}
+        children = {}
+        for a in sec_accounts:
+            if a.parent_id in by_id:
+                children.setdefault(a.parent_id, []).append(a.id)
+
+        def rollup(aid):
+            return own[aid] + sum((rollup(c) for c in children.get(aid, [])), Decimal("0"))
+
+        # show every account with a non-zero amount, plus the parents above it
+        show = {aid for aid, v in own.items() if v != 0}
+        for aid in list(show):
+            p = by_id[aid].parent_id
+            while p in by_id and p not in show:
+                show.add(p)
+                p = by_id[p].parent_id
+
+        rows = [
+            {"id": a.id, "name": a.name, "parent_id": a.parent_id if a.parent_id in by_id else None,
+             "amount": float(own[a.id]), "total": float(rollup(a.id))}
+            for a in sec_accounts if a.id in show
+        ]
+        total = sum(own.values(), Decimal("0"))
         totals[key] = total
         sections.append({"key": key, "title": title, "accounts": rows, "total": float(total)})
 

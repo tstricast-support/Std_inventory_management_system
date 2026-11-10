@@ -6691,31 +6691,87 @@ const plPct = (cur, prev) => {
   return p < 0 ? `(${Math.abs(p).toFixed(1)}%)` : `${p.toFixed(1)}%`;
 };
 
+// Turn flat accounts into display lines: parent header, children, "Total <parent>"
+function planPLRows(items) {
+  const ids = new Set(items.map((i) => i.id));
+  const kids = new Map();
+  const roots = [];
+  [...items]
+    .sort((a, b) => compareNames(a.name, b.name))
+    .forEach((i) => {
+      if (i.parent_id && ids.has(i.parent_id)) {
+        if (!kids.has(i.parent_id)) kids.set(i.parent_id, []);
+        kids.get(i.parent_id).push(i);
+      } else {
+        roots.push(i);
+      }
+    });
+
+  const out = [];
+  const walk = (r, depth) => {
+    const ch = kids.get(r.id);
+    if (!ch) {
+      out.push({ key: `r-${r.id}`, label: r.name, cur: r.cur, prev: r.prev, depth, kind: "item" });
+      return;
+    }
+    out.push({ key: `h-${r.id}`, label: r.name, depth, kind: "header" });
+    if (r.curOwn || r.prevOwn) {
+      out.push({
+        key: `o-${r.id}`,
+        label: `${r.name} (direct)`,
+        cur: r.curOwn,
+        prev: r.prevOwn,
+        depth: depth + 1,
+        kind: "item",
+      });
+    }
+    ch.forEach((c) => walk(c, depth + 1));
+    out.push({ key: `t-${r.id}`, label: `Total ${r.name}`, cur: r.cur, prev: r.prev, depth, kind: "subtotal" });
+  };
+  roots.forEach((r) => walk(r, 0));
+  return out;
+}
+
 function buildPL(cur, prev) {
-  const sec = (d, key) => (d.sections || []).find((s) => s.key === key) || { accounts: [], total: 0, title: key };
+  const sec = (d, key) =>
+    (d.sections || []).find((s) => s.key === key) || {
+      accounts: [],
+      total: 0,
+      title: key,
+    };
   const group = (key) => {
     const c = sec(cur, key);
     const p = sec(prev, key);
     const map = new Map();
-    (c.accounts || []).forEach((a) => map.set(a.id, { id: a.id, name: a.name, cur: a.amount, prev: 0 }));
-    (p.accounts || []).forEach((a) => {
-      const r = map.get(a.id);
-      if (r) r.prev = a.amount;
-      else map.set(a.id, { id: a.id, name: a.name, cur: 0, prev: a.amount });
-    });
-    return { key, title: c.title || p.title, rows: [...map.values()], cur: c.total || 0, prev: p.total || 0 };
-  };
-  const block = (keys) => {
-    const groups = keys.map(group);
+    const put = (a, side) => {
+      const r = map.get(a.id) || {
+        id: a.id,
+        name: a.name,
+        parent_id: a.parent_id ?? null,
+        cur: 0,
+        prev: 0,
+        curOwn: 0,
+        prevOwn: 0,
+      };
+      r[side] = a.total ?? a.amount;
+      r[`${side}Own`] = a.amount;
+      map.set(a.id, r);
+    };
+    (c.accounts || []).forEach((a) => put(a, "cur"));
+    (p.accounts || []).forEach((a) => put(a, "prev"));
     return {
-      groups,
-      cur: groups.reduce((s, g) => s + g.cur, 0),
-      prev: groups.reduce((s, g) => s + g.prev, 0),
+      key,
+      rows: planPLRows([...map.values()]),
+      cur: c.total || 0,
+      prev: p.total || 0,
     };
   };
   return {
-    revenue: block(["income", "other_income"]),
-    expenses: block(["cogs", "expense", "other_expense"]),
+    income: group("income"),
+    cogs: group("cogs"),
+    expense: group("expense"),
+    otherIncome: group("other_income"),
+    otherExpense: group("other_expense"),
     gross: { cur: cur.gross_profit, prev: prev.gross_profit },
     operating: { cur: cur.operating_profit, prev: prev.operating_profit },
     net: { cur: cur.net_profit, prev: prev.net_profit },
@@ -6725,18 +6781,41 @@ function buildPL(cur, prev) {
 const PL_NAVY = "bg-[#0a2a5e] text-[#fff]";
 const PL_BAND = "bg-[#dbe8fb] text-[#0a2a5e]";
 
-// kind = item | total | grand
-function PLRow({ label, cur, prev, kind = "item" }) {
+// kind = item | header | subtotal | total | grand
+function PLRow({ label, cur, prev, kind = "item", depth = 0 }) {
   const num = "px-3 py-1.5 text-sm text-right whitespace-nowrap tabular-nums";
+
+  if (kind === "header") {
+    return (
+      <tr className="text-[#0f172a] font-semibold">
+        <td colSpan={5} className="py-1.5 text-sm" style={{ paddingLeft: 12 + depth * 20 }}>
+          {label}
+        </td>
+      </tr>
+    );
+  }
+
   const rowCls =
     kind === "grand"
       ? `${PL_NAVY} font-bold`
       : kind === "total"
       ? `${PL_BAND} font-bold`
+      : kind === "subtotal"
+      ? "border-y border-[#dbe4f3] font-semibold text-[#0f172a]"
       : "border-b border-[#dbe4f3] text-[#0f172a]";
+
+  const pad =
+    kind === "item"
+      ? { paddingLeft: 24 + depth * 20 }
+      : kind === "subtotal"
+      ? { paddingLeft: 12 + depth * 20 }
+      : undefined;
+
   return (
     <tr className={rowCls}>
-      <td className={`px-3 py-1.5 text-sm ${kind === "item" ? "pl-6" : ""}`}>{label}</td>
+      <td className="px-3 py-1.5 text-sm" style={pad}>
+        {label}
+      </td>
       <td className={num}>{plNum(cur)}</td>
       <td className={num}>{plNum(prev)}</td>
       <td className={num}>{plNum(cur - prev)}</td>
@@ -6758,31 +6837,36 @@ function ProfitLossReport() {
   const [to, setTo] = useState(localIso());
   const [prevFrom, prevTo] = previousPeriod(from, to);
 
-  const { data, loading, error } = useReport(
-    async () => {
-      const [cur, prev] = await Promise.all([getProfitLoss(from, to), getProfitLoss(prevFrom, prevTo)]);
-      return { cur, prev };
-    },
-    [from, to],
-  );
+  const { data, loading, error } = useReport(async () => {
+    const [cur, prev] = await Promise.all([
+      getProfitLoss(from, to),
+      getProfitLoss(prevFrom, prevTo),
+    ]);
+    return { cur, prev };
+  }, [from, to]);
 
   const pl = data ? buildPL(data.cur, data.prev) : null;
 
-  const renderGroups = (blk) =>
-    blk.groups
-      .filter((g) => g.rows.length > 0)
-      .map((g) => (
-        <Fragment key={g.key}>
-          <tr>
-            <td colSpan={5} className="px-3 pt-2 pb-0.5 text-xs font-semibold uppercase tracking-wide text-[#64748b]">
-              {g.title}
-            </td>
-          </tr>
-          {g.rows.map((r) => (
-            <PLRow key={`${g.key}-${r.id}`} label={r.name} cur={r.cur} prev={r.prev} />
-          ))}
-        </Fragment>
-      ));
+  // QuickBooks style section: grey band, parent + sub-accounts, then "Total ..."
+  const section = (title, grp, totalLabel, always = false) => {
+    if (!always && grp.rows.length === 0 && !grp.cur && !grp.prev) return null;
+    return (
+      <>
+        <PLBand>{title}</PLBand>
+        {grp.rows.map((r) => (
+          <PLRow
+            key={`${grp.key}-${r.key}`}
+            label={r.label}
+            cur={r.cur}
+            prev={r.prev}
+            depth={r.depth}
+            kind={r.kind}
+          />
+        ))}
+        <PLRow kind="total" label={totalLabel} cur={grp.cur} prev={grp.prev} />
+      </>
+    );
+  };
 
   return (
     <>
@@ -6853,49 +6937,40 @@ function ProfitLossReport() {
                   </tr>
                 </thead>
                 <tbody>
-                  <PLBand>Revenue</PLBand>
-                  {renderGroups(pl.revenue)}
+                  {section("Income", pl.income, "Total Income", true)}
+                  {section("Cost of Goods Sold", pl.cogs, "Total COGS", true)}
                   <PLRow
                     kind="total"
-                    label="Total Revenue"
-                    cur={pl.revenue.cur}
-                    prev={pl.revenue.prev}
-                  />
-
-                  <tr>
-                    <td colSpan={5} className="h-3" />
-                  </tr>
-
-                  <PLBand>Expenses</PLBand>
-                  {renderGroups(pl.expenses)}
-                  <PLRow
-                    kind="total"
-                    label="Total Expenses"
-                    cur={pl.expenses.cur}
-                    prev={pl.expenses.prev}
-                  />
-
-                  <tr>
-                    <td colSpan={5} className="h-3" />
-                  </tr>
-
-                  <PLRow
                     label="Gross Profit"
                     cur={pl.gross.cur}
                     prev={pl.gross.prev}
                   />
+
+                  {section("Expense", pl.expense, "Total Expense", true)}
                   <PLRow
-                    label="Operating Profit"
+                    kind="total"
+                    label="Net Operating Income"
                     cur={pl.operating.cur}
                     prev={pl.operating.prev}
                   />
+
+                  {section(
+                    "Other Income",
+                    pl.otherIncome,
+                    "Total Other Income",
+                  )}
+                  {section(
+                    "Other Expense",
+                    pl.otherExpense,
+                    "Total Other Expense",
+                  )}
 
                   <tr>
                     <td colSpan={5} className="h-2" />
                   </tr>
                   <PLRow
                     kind="grand"
-                    label="Net Profit / (Loss)"
+                    label="Net Income"
                     cur={pl.net.cur}
                     prev={pl.net.prev}
                   />
@@ -9618,6 +9693,28 @@ function useAccountLayout() {
   return [layout, update, reset];
 }
 
+
+function orderAccountTree(list) {
+  const ids = new Set(list.map((a) => a.id));
+  const kids = new Map();
+  const roots = [];
+  list.forEach((a) => {
+    if (a.parent_id && ids.has(a.parent_id)) {
+      if (!kids.has(a.parent_id)) kids.set(a.parent_id, []);
+      kids.get(a.parent_id).push(a);
+    } else {
+      roots.push(a);
+    }
+  });
+  const out = [];
+  const walk = (a, depth) => {
+    out.push({ ...a, _depth: depth, _isParent: kids.has(a.id) });
+    (kids.get(a.id) || []).forEach((c) => walk(c, depth + 1));
+  };
+  roots.forEach((r) => walk(r, 0));
+  return out;
+}
+
 function AccountingPage({ isAdmin, go }) {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -9713,9 +9810,9 @@ function AccountingPage({ isAdmin, go }) {
     ? ACCOUNT_TYPES.map((tp) => ({
         key: tp.key,
         title: tp.label,
-        list: rows.filter((a) => a.account_type === tp.key),
+        list: orderAccountTree(rows.filter((a) => a.account_type === tp.key)),
       })).filter((s) => s.list.length > 0)
-    : [{ key: "all", title: null, list: rows }];
+    : [{ key: "all", title: null, list: orderAccountTree(rows) }];
 
   const cell = (key, a, selected) => {
     const sub = selected ? t.selSub : t.sub;
@@ -9724,7 +9821,15 @@ function AccountingPage({ isAdmin, go }) {
       case "code":
         return a.account_code || "";
       case "name":
-        return <span className="font-medium">{a.name}</span>;
+        return (
+          <span
+            className={a._isParent ? "font-semibold" : "font-medium"}
+            style={{ paddingLeft: (a._depth || 0) * 18 }}
+          >
+            {a._depth > 0 && <span className="mr-1 opacity-60">↳</span>}
+            {a.name}
+          </span>
+        );
       case "type":
         return ACCOUNT_TYPE_NAMES[a.account_type] || a.account_type;
       case "description":
@@ -10253,9 +10358,18 @@ function AccountForm({ initialData, onClose, onSubmit }) {
     account_type: initialData?.account_type || "cogs",
     account_code: initialData?.account_code || "",
     description: initialData?.description || "",
+    parent_id: initialData?.parent_id || "",
   });
+  const [allAccounts, setAllAccounts] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    getAccountsSummary()
+      .then(setAllAccounts)
+      .catch(() => {});
+  }, []);
+
   const handleChange = (field, value) =>
     setForm((prev) => ({ ...prev, [field]: value }));
 
@@ -10263,11 +10377,15 @@ function AccountForm({ initialData, onClose, onSubmit }) {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
+    const payload = {
+      ...form,
+      parent_id: form.parent_id ? Number(form.parent_id) : null,
+    };
     try {
       if (isEditMode) {
-        await onSubmit(initialData.id, form);
+        await onSubmit(initialData.id, payload);
       } else {
-        await onSubmit(form);
+        await onSubmit(payload);
       }
       onClose();
     } catch (err) {
@@ -10305,7 +10423,10 @@ function AccountForm({ initialData, onClose, onSubmit }) {
             </label>
             <select
               value={form.account_type}
-              onChange={(e) => handleChange("account_type", e.target.value)}
+              onChange={(e) => {
+                handleChange("account_type", e.target.value);
+                handleChange("parent_id", "");
+              }}
               className={fieldCls}
             >
               {ACCOUNT_GROUPS.map((g) => (
@@ -10317,6 +10438,29 @@ function AccountForm({ initialData, onClose, onSubmit }) {
                   ))}
                 </optgroup>
               ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">
+              Sub-account of (optional)
+            </label>
+            <select
+              value={form.parent_id}
+              onChange={(e) => handleChange("parent_id", e.target.value)}
+              className={fieldCls}
+            >
+              <option value="">— None (main account) —</option>
+              {allAccounts
+                .filter(
+                  (a) =>
+                    a.account_type === form.account_type &&
+                    a.id !== initialData?.id,
+                )
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
             </select>
           </div>
           <input

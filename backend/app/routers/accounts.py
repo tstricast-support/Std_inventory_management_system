@@ -10,6 +10,21 @@ router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 VALID_TYPES = set(ACCOUNT_CATEGORY)
 
 
+def _validate_parent(db: Session, parent_id, account_type: str, self_id: int | None = None):
+    """A sub-account must have the same type as its parent, and the tree can't loop."""
+    if parent_id is None:
+        return
+    parent = db.query(models.Account).get(parent_id)
+    if not parent:
+        raise HTTPException(400, "Parent account not found")
+    if parent.account_type != account_type:
+        raise HTTPException(400, "A sub-account must have the same account type as its parent")
+    node = parent
+    while node is not None:
+        if self_id is not None and node.id == self_id:
+            raise HTTPException(400, "An account can't be a sub-account of itself or of its own sub-account")
+        node = db.query(models.Account).get(node.parent_id) if node.parent_id else None
+
 @router.get("/", response_model=list[schemas.AccountOut])
 def list_accounts(account_type: str | None = None, db: Session = Depends(get_db)):
     query = db.query(models.Account)
@@ -22,6 +37,7 @@ def list_accounts(account_type: str | None = None, db: Session = Depends(get_db)
 def create_account(payload: schemas.AccountCreate, db: Session = Depends(get_db)):
     if payload.account_type not in VALID_TYPES:
         raise HTTPException(400, f"account_type must be one of {sorted(VALID_TYPES)}")
+    _validate_parent(db, payload.parent_id, payload.account_type)
     existing = db.query(models.Account).filter(
         models.Account.name == payload.name,
         models.Account.account_type == payload.account_type,
@@ -53,6 +69,11 @@ def update_account(account_id: int, payload: schemas.AccountUpdate, db: Session 
     ).first()
     if existing:
         raise HTTPException(400, "Account already exists")
+    
+    new_parent = data.get("parent_id", account.parent_id)
+    _validate_parent(db, new_parent, new_type, account_id)
+    if new_type != account.account_type and db.query(models.Account).filter(models.Account.parent_id == account_id).first():
+        raise HTTPException(400, "This account has sub-accounts, so its type can't be changed")
 
     for field, value in data.items():
         setattr(account, field, value)
@@ -101,7 +122,9 @@ def accounts_summary(db: Session = Depends(get_db)):
     """Every account with its item value, number of linked items and journal (ledger) balance."""
     nets = ledger_net(db)
     result = []
-    for a in db.query(models.Account).order_by(models.Account.name).all():
+    all_accounts = db.query(models.Account).order_by(models.Account.name).all()
+    name_of = {x.id: x.name for x in all_accounts}
+    for a in all_accounts:
         count, total = 0, 0
         link = _link_column(a.account_type)
         if link is not None:
@@ -115,6 +138,7 @@ def accounts_summary(db: Session = Depends(get_db)):
             "created_at": a.created_at, "total_value": float(total), "item_count": count,
             "category": ACCOUNT_CATEGORY.get(a.account_type, ""),
             "ledger_balance": _ledger_balance(a.account_type, nets.get(a.id, 0.0)),
+            "parent_id": a.parent_id, "parent_name": name_of.get(a.parent_id),
         })
     return result
 
@@ -144,6 +168,7 @@ def account_detail(account_id: int, db: Session = Depends(get_db)):
         "created_at": a.created_at,
         "total_value": sum(i["value"] for i in items), "item_count": len(items),
         "category": ACCOUNT_CATEGORY.get(a.account_type, ""),
+        "parent_id": a.parent_id,
         "ledger_balance": _ledger_balance(a.account_type, ledger_net(db).get(a.id, 0.0)),
         "value_basis": "price" if a.account_type == "income" else "cost",
         "items": items,
@@ -157,6 +182,8 @@ def delete_account(account_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Account not found")
     if db.query(models.JournalLine).filter(models.JournalLine.account_id == account_id).first():
         raise HTTPException(400, "This account has journal entries, so it can't be deleted")
+    if db.query(models.Account).filter(models.Account.parent_id == account_id).first():
+        raise HTTPException(400, "This account has sub-accounts. Move or delete them first")
     db.delete(account)
     db.commit()
     return {"message": "Deleted"}
