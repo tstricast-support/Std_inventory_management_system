@@ -2431,97 +2431,282 @@ function VendorSelect({ vendors, value, onChange, onCreateVendor }) {
   );
 }
 
-// ---------- ParentItemSelect ("Subitem of" dropdown with a + New button) ----------
-//   onCreateParent(name) -> "+ New" shows a small name box and creates the parent right there
-//   onNew()              -> "+ New" hands over to the caller (used to open a full form)
+// ---------- "Not Found" prompt (same question QuickBooks asks) ----------
+function NotFoundDialog({ noun, text, busy, allowQuickAdd = true, onQuickAdd, onSetUp, onCancel }) {
+  const btn =
+    "w-full border border-gray-300 rounded px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:opacity-50";
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center p-4"
+      style={{ zIndex: 70 }}
+    >
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-sm p-5">
+        <h3 className="text-base font-semibold mb-2">{noun} Not Found</h3>
+        <p className="text-sm text-gray-700 mb-4">
+          The {noun.toLowerCase()} <b>"{text}"</b> doesn't exist yet. Do you
+          want to:
+        </p>
+        <div className="space-y-2">
+          {allowQuickAdd && (
+            <button type="button" disabled={busy} onClick={onQuickAdd} className={btn}>
+              {busy ? "Adding..." : "Quick Add"}
+              <span className="block text-[11px] font-normal text-gray-500">
+                Create it now with just the name
+              </span>
+            </button>
+          )}
+          <button type="button" disabled={busy} onClick={onSetUp} className={btn}>
+            Set Up
+            <span className="block text-[11px] font-normal text-gray-500">
+              Open the full form to fill in all details
+            </span>
+          </button>
+          <button type="button" disabled={busy} onClick={onCancel} className={btn}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- ComboWithCreate: type-or-pick box; unknown text -> Quick Add / Set Up / Cancel ----------
+//   options: [{ id, name, label }]      value: selected id (string)
+//   onQuickAdd(name) -> created record  onSetUp(name) -> opens the full form
+function ComboWithCreate({
+  options,
+  value,
+  onChange,
+  placeholder,
+  disabled,
+  noun,
+  allowQuickAdd = true,
+  onQuickAdd,
+  onSetUp,
+}) {
+  const listId = useRef("dl-" + Math.random().toString(36).slice(2)).current;
+  const selected = options.find((o) => String(o.id) === String(value));
+  const [text, setText] = useState(selected?.label || "");
+  const [askFor, setAskFor] = useState(null); // the unknown text being asked about
+  const [busy, setBusy] = useState(false);
+
+  // keep the box in sync when the selected id changes (picked, created, form reset)
+  useEffect(() => {
+    setText(selected?.label || "");
+  }, [value, selected?.label]);
+
+  const findMatch = (t) => {
+    const q = t.trim().toLowerCase();
+    if (!q) return null;
+    const byLabel = options.find((o) => (o.label || "").toLowerCase() === q);
+    if (byLabel) return byLabel;
+    const byName = options.filter((o) => (o.name || "").toLowerCase() === q);
+    return byName.length === 1 ? byName[0] : null;
+  };
+
+  const commit = () => {
+    if (askFor) return;
+    const t = text.trim();
+    if (!t) {
+      if (value) onChange("");
+      return;
+    }
+    const m = findMatch(t);
+    if (m) {
+      if (String(m.id) !== String(value)) onChange(String(m.id));
+      return;
+    }
+    setAskFor(t); // not in the list -> ask
+  };
+
+  const cancelAsk = () => {
+    setAskFor(null);
+    setText(selected?.label || ""); // put back what was selected before
+  };
+
+  const quickAdd = async () => {
+    setBusy(true);
+    try {
+      const created = await onQuickAdd(askFor);
+      onChange(String(created.id));
+      setAskFor(null);
+    } catch (err) {
+      alert(err.message);
+      cancelAsk();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setUp = () => {
+    const name = askFor;
+    setAskFor(null);
+    onSetUp(name);
+  };
+
+  return (
+    <>
+      <input
+        list={listId}
+        disabled={disabled}
+        value={text}
+        placeholder={placeholder}
+        onChange={(e) => {
+          setText(e.target.value);
+          const m = findMatch(e.target.value);
+          if (m) onChange(String(m.id)); // picked an existing one
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          }
+        }}
+        className="w-full min-w-0 border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
+      />
+      <datalist id={listId}>
+        {options.map((o) => (
+          <option key={o.id} value={o.label} />
+        ))}
+      </datalist>
+      {askFor && (
+        <NotFoundDialog
+          noun={noun}
+          text={askFor}
+          busy={busy}
+          allowQuickAdd={allowQuickAdd}
+          onQuickAdd={quickAdd}
+          onSetUp={setUp}
+          onCancel={cancelAsk}
+        />
+      )}
+    </>
+  );
+}
+
+// ---------- ParentItemSelect ("Subitem of" box) ----------
+//   onCreateParent(name) -> Quick Add: creates a bare parent item from just a name
+//   onNew(name)          -> Set Up: caller opens the full item form
 function ParentItemSelect({
   options,
   value,
   onChange,
   onCreateParent,
   onNew,
+  allowQuickAdd = true,
   placeholder = "Select parent item...",
   disabled,
 }) {
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [saving, setSaving] = useState(false);
+  return (
+    <ComboWithCreate
+      noun="Item"
+      disabled={disabled}
+      placeholder={placeholder}
+      allowQuickAdd={allowQuickAdd}
+      options={options.map((p) => ({
+        id: p.id,
+        name: p.name,
+        label: p.label || p.name,
+      }))}
+      value={value}
+      onChange={onChange}
+      onQuickAdd={onCreateParent}
+      onSetUp={onNew}
+    />
+  );
+}
 
-  const handleCreate = async () => {
-    if (!newName.trim()) return;
+// ---------- AccountSetupModal (the "Set Up" form for a new account) ----------
+// No <form> tag on purpose: it sits inside the item <form>, and a nested submit would save the item.
+const ACCOUNT_TYPE_LABELS = {
+  cogs: "Cost of Goods Sold",
+  income: "Income",
+  asset: "Inventory Asset",
+};
+
+function AccountSetupModal({ accountType, initialName, onSave, onClose }) {
+  const [name, setName] = useState(initialName || "");
+  const [code, setCode] = useState("");
+  const [desc, setDesc] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const cls =
+    "w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  const save = async () => {
+    if (!name.trim()) return setError("Account name is required");
     setSaving(true);
+    setError(null);
     try {
-      const created = await onCreateParent(newName.trim());
-      onChange(String(created.id));
-      setNewName("");
-      setCreating(false);
+      await onSave({
+        name: name.trim(),
+        account_code: code.trim() || null,
+        description: desc.trim() || null,
+      });
     } catch (err) {
-      alert(err.message);
-    } finally {
+      setError(err.message);
       setSaving(false);
     }
   };
 
-  if (creating) {
-    return (
-      <div className="flex flex-1 min-w-0 gap-2">
-        <input
-          autoFocus
-          placeholder="New parent item name"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) =>
-            e.key === "Enter" && (e.preventDefault(), handleCreate())
-          }
-          className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-        <button
-          type="button"
-          onClick={handleCreate}
-          disabled={saving}
-          className="shrink-0 bg-blue-600 text-white px-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-        >
-          {saving ? "..." : "Add"}
-        </button>
-        <button
-          type="button"
-          onClick={() => setCreating(false)}
-          className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm hover:bg-gray-50"
-        >
-          ✕
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-1 min-w-0 gap-2">
-      <select
-        disabled={disabled}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
-      >
-        <option value="">{placeholder}</option>
-        {options.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.label || p.name}
-          </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => (onNew ? onNew() : setCreating(true))}
-        className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
-      >
-        + New
-      </button>
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center p-4"
+      style={{ zIndex: 70 }}
+    >
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-5">
+        <h3 className="text-base font-semibold mb-3">New Account</h3>
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded px-3 py-2 mb-3">
+            {error}
+          </div>
+        )}
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-gray-600 mb-0.5">Account Type</label>
+            <input
+              disabled
+              value={ACCOUNT_TYPE_LABELS[accountType] || accountType}
+              className={cls + " bg-gray-100 text-gray-500"}
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-600 mb-0.5">Account Name</label>
+            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} className={cls} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-600 mb-0.5">Number (optional)</label>
+            <input value={code} onChange={(e) => setCode(e.target.value)} className={cls} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-600 mb-0.5">Description (optional)</label>
+            <textarea rows={2} value={desc} onChange={(e) => setDesc(e.target.value)} className={cls} />
+          </div>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 border border-gray-300 rounded py-1.5 text-sm font-medium hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={save}
+            className="flex-1 bg-blue-600 text-white rounded py-1.5 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+          >
+            {saving ? "Saving..." : "Save & Close"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
-// ---------- AccountSelect ----------
+// ---------- AccountSelect (COGS / Income / Asset box) ----------
 function AccountSelect({
   accounts,
   accountType,
@@ -2530,80 +2715,35 @@ function AccountSelect({
   placeholder,
   onCreateAccount,
 }) {
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [saving, setSaving] = useState(false);
-  const options = accounts.filter((a) => a.account_type === accountType);
-
-  const handleCreate = async () => {
-    if (!newName.trim()) return;
-    setSaving(true);
-    try {
-      const created = await onCreateAccount(newName.trim(), accountType);
-      onChange(String(created.id));
-      setNewName("");
-      setCreating(false);
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (creating) {
-    return (
-      <div className="flex gap-2">
-        <input
-          autoFocus
-          placeholder="New account name"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) =>
-            e.key === "Enter" && (e.preventDefault(), handleCreate())
-          }
-          className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-        <button
-          type="button"
-          onClick={handleCreate}
-          disabled={saving}
-          className="shrink-0 bg-blue-600 text-white px-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-        >
-          {saving ? "..." : "Add"}
-        </button>
-        <button
-          type="button"
-          onClick={() => setCreating(false)}
-          className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm hover:bg-gray-50"
-        >
-          ✕
-        </button>
-      </div>
-    );
-  }
+  const [setupName, setSetupName] = useState(null); // not null = "Set Up" form is open
+  const options = accounts
+    .filter((a) => a.account_type === accountType)
+    .map((a) => ({ id: a.id, name: a.name, label: a.name }));
 
   return (
-    <div className="flex gap-2">
-      <select
+    <>
+      <ComboWithCreate
+        noun="Account"
+        placeholder={placeholder}
+        options={options}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-      >
-        <option value="">{placeholder}</option>
-        {options.map((a) => (
-          <option key={a.id} value={a.id}>
-            {a.name}
-          </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        onClick={() => setCreating(true)}
-        className="shrink-0 border border-gray-300 px-3 rounded-lg text-sm font-medium hover:bg-gray-50 whitespace-nowrap"
-      >
-        + New
-      </button>
-    </div>
+        onChange={onChange}
+        onQuickAdd={(name) => onCreateAccount(name, accountType)}
+        onSetUp={(name) => setSetupName(name)}
+      />
+      {setupName !== null && (
+        <AccountSetupModal
+          accountType={accountType}
+          initialName={setupName}
+          onClose={() => setSetupName(null)}
+          onSave={async (extra) => {
+            const created = await onCreateAccount(extra.name, accountType, extra);
+            onChange(String(created.id));
+            setSetupName(null);
+          }}
+        />
+      )}
+    </>
   );
 }
 
@@ -2703,13 +2843,14 @@ function ProductFormBody({
   onClose,
   onImagesChanged,
   kind = "item",
+  initialName = "",
 }) {
   const isEditMode = Boolean(initialData);
   const parentKind = kind === "subitem" ? "sub" : "top"; // which items are offered as parents
   const requireParent = kind === "subitem" || kind === "under-item"; // Subitem of is ticked and locked
   const [form, setForm] = useState({
     item_type: initialData?.item_type || "Inventory Part",
-    name: initialData?.name || "",
+    name: initialData?.name || initialName || "",
     manufacturer_part_number: initialData?.manufacturer_part_number || "",
     is_subitem: requireParent || Boolean(initialData?.parent_id),
     parent_id: initialData?.parent_id ? String(initialData.parent_id) : "",
@@ -2742,7 +2883,7 @@ function ProductFormBody({
   const [vendors, setVendors] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [parentOptions, setParentOptions] = useState([]);
-  const [creatingParent, setCreatingParent] = useState(false); // "+ New" next to Subitem of
+  const [creatingParent, setCreatingParent] = useState(null); // null = closed; string = "Set Up" form open
   const [imageFiles, setImageFiles] = useState([]);
   const [images, setImages] = useState(initialData?.images || []);
   const [submitting, setSubmitting] = useState(false);
@@ -2788,8 +2929,12 @@ function ProductFormBody({
     return created;
   };
 
-  const handleCreateAccount = async (name, accountType) => {
-    const created = await createAccount({ name, account_type: accountType });
+  const handleCreateAccount = async (name, accountType, extra = {}) => {
+    const created = await createAccount({
+      name,
+      account_type: accountType,
+      ...extra, // account_code / description from the "Set Up" form
+    });
     setAccounts((prev) => [...prev, created]);
     return created;
   };
@@ -2818,7 +2963,12 @@ function ProductFormBody({
   const handleParentCreated = async (values, files) => {
     const created = await createProduct(values, files);
     const p = await getProducts();
-    setParentOptions(buildParentOptions(p));
+    const opts = buildParentOptions(p);
+    if (!opts.some((o) => o.id === created.id)) {
+      const extra = flattenParents(p).find((o) => o.id === created.id);
+      if (extra) opts.push(extra); // make sure the new parent is selectable
+    }
+    setParentOptions(opts);
     setForm((prev) => ({
       ...prev,
       is_subitem: true,
@@ -2849,10 +2999,16 @@ function ProductFormBody({
     }
   };
 
+  const inp =
+    "w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const lbl = "block text-xs text-gray-600 mb-0.5";
+  const box = "border border-gray-300 rounded p-3 space-y-2";
+  const boxTitle = "text-xs font-bold text-gray-600 uppercase tracking-wide";
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl p-5 max-h-[92vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-3">
           {isEditMode
             ? "Edit Item"
             : requireParent
@@ -2861,295 +3017,315 @@ function ProductFormBody({
         </h2>
 
         {error && (
-          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+          <div className="bg-red-50 text-red-600 text-sm rounded px-3 py-2 mb-3">
             {error}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* ---- TYPE ---- */}
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Type</label>
-            <select
-              value={form.item_type}
-              onChange={(e) => handleChange("item_type", e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {ITEM_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* ---- Item Name/Number + Subitem of ---- */}
-          <input
-            required
-            placeholder="Item Name/Number"
-            value={form.name}
-            onChange={(e) => handleChange("name", e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-2 text-sm text-gray-700 whitespace-nowrap cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.is_subitem}
-                disabled={requireParent}
-                onChange={(e) => handleChange("is_subitem", e.target.checked)}
-                className="rounded border-gray-300"
-              />
-              Subitem of
-            </label>
-            <ParentItemSelect
-              disabled={!form.is_subitem}
-              options={parentOptions}
-              value={form.parent_id}
-              onChange={(val) => handleChange("parent_id", val)}
-              placeholder={
-                parentKind === "sub"
-                  ? "Select parent subitem..."
-                  : "Select parent item..."
-              }
-              onCreateParent={handleCreateParent}
-              onNew={
-                parentKind === "sub" ? () => setCreatingParent(true) : undefined
-              }
-            />
-          </div>
-
-          <input
-            placeholder="Manufacturer's Part Number"
-            value={form.manufacturer_part_number}
-            onChange={(e) =>
-              handleChange("manufacturer_part_number", e.target.value)
-            }
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-
-          {/* ---- PURCHASE INFORMATION ---- */}
-          <div className="border border-gray-200 rounded-lg p-3 space-y-2">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase">
-              Purchase Information
-            </h3>
-            <textarea
-              placeholder="Description on Purchase Transactions"
-              rows={2}
-              value={form.purchase_description}
-              onChange={(e) =>
-                handleChange("purchase_description", e.target.value)
-              }
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Cost</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={form.cost}
-                  onChange={(e) => handleChange("cost", e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+        <form onSubmit={handleSubmit}>
+          <div className="flex flex-col md:flex-row gap-4">
+            {/* ================= LEFT: all the sections ================= */}
+            <div className="flex-1 min-w-0 space-y-3">
+              {/* ---- TYPE ---- */}
+              <div className={box}>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className={boxTitle}>Type</span>
+                  <select
+                    value={form.item_type}
+                    onChange={(e) => handleChange("item_type", e.target.value)}
+                    className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {ITEM_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-gray-500">
+                    Use for goods you purchase, track as inventory, and resell.
+                  </span>
+                </div>
               </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">
-                  Preferred Vendor
-                </label>
-                <VendorSelect
-                  vendors={vendors}
-                  value={form.preferred_vendor_id}
-                  onChange={(val) => handleChange("preferred_vendor_id", val)}
-                  onCreateVendor={handleCreateVendor}
-                />
+
+              {/* ---- Item Name | Subitem of | Manufacturer's Part Number (one row) ---- */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                <div>
+                  <label className={lbl}>Item Name/Number</label>
+                  <input
+                    required
+                    value={form.name}
+                    onChange={(e) => handleChange("name", e.target.value)}
+                    className={inp}
+                  />
+                </div>
+                <div>
+                  <label className="flex items-center gap-1.5 text-xs text-gray-600 mb-0.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.is_subitem}
+                      disabled={requireParent}
+                      onChange={(e) =>
+                        handleChange("is_subitem", e.target.checked)
+                      }
+                      className="rounded border-gray-300"
+                    />
+                    Subitem of
+                  </label>
+                  <ParentItemSelect
+                    disabled={!form.is_subitem}
+                    options={parentOptions}
+                    value={form.parent_id}
+                    onChange={(val) => handleChange("parent_id", val)}
+                    placeholder={
+                      parentKind === "sub"
+                        ? "Select parent subitem..."
+                        : "Select parent item..."
+                    }
+                    allowQuickAdd={parentKind !== "sub"}
+                    onCreateParent={handleCreateParent}
+                    onNew={(name) => setCreatingParent(name)}
+                  />
+                </div>
+                <div>
+                  <label className={lbl}>Manufacturer's Part Number</label>
+                  <input
+                    value={form.manufacturer_part_number}
+                    onChange={(e) =>
+                      handleChange("manufacturer_part_number", e.target.value)
+                    }
+                    className={inp}
+                  />
+                </div>
               </div>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                COGS Account
-              </label>
-              <AccountSelect
-                accounts={accounts}
-                accountType="cogs"
-                placeholder="Select COGS account..."
-                value={form.cogs_account_id}
-                onChange={(val) => handleChange("cogs_account_id", val)}
-                onCreateAccount={handleCreateAccount}
-              />
-            </div>
-          </div>
 
-          {/* ---- SALES INFORMATION ---- */}
-          <div className="border border-gray-200 rounded-lg p-3 space-y-2">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase">
-              Sales Information
-            </h3>
-            <textarea
-              placeholder="Description on Sales Transactions"
-              rows={2}
-              value={form.description}
-              onChange={(e) => handleChange("description", e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Sales Price
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.price}
-                onChange={(e) => handleChange("price", e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Income Account
-              </label>
-              <AccountSelect
-                accounts={accounts}
-                accountType="income"
-                placeholder="Select income account..."
-                value={form.income_account_id}
-                onChange={(val) => handleChange("income_account_id", val)}
-                onCreateAccount={handleCreateAccount}
-              />
-            </div>
-          </div>
+              {/* ---- PURCHASE (left) | SALES (right) ---- */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className={box}>
+                  <h3 className={boxTitle}>Purchase Information</h3>
+                  <div>
+                    <label className={lbl}>
+                      Description on Purchase Transactions
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={form.purchase_description}
+                      onChange={(e) =>
+                        handleChange("purchase_description", e.target.value)
+                      }
+                      className={inp}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className={lbl}>Cost</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={form.cost}
+                        onChange={(e) => handleChange("cost", e.target.value)}
+                        className={inp}
+                      />
+                    </div>
+                    <div>
+                      <label className={lbl}>Preferred Vendor</label>
+                      <VendorSelect
+                        vendors={vendors}
+                        value={form.preferred_vendor_id}
+                        onChange={(val) =>
+                          handleChange("preferred_vendor_id", val)
+                        }
+                        onCreateVendor={handleCreateVendor}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={lbl}>COGS Account</label>
+                    <AccountSelect
+                      accounts={accounts}
+                      accountType="cogs"
+                      placeholder="Select COGS account..."
+                      value={form.cogs_account_id}
+                      onChange={(val) => handleChange("cogs_account_id", val)}
+                      onCreateAccount={handleCreateAccount}
+                    />
+                  </div>
+                </div>
 
-          {/* ---- INVENTORY INFORMATION ---- */}
-          <div className="border border-gray-200 rounded-lg p-3 space-y-2">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase">
-              Inventory Information
-            </h3>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Asset Account
-              </label>
-              <AccountSelect
-                accounts={accounts}
-                accountType="asset"
-                placeholder="Select asset account..."
-                value={form.asset_account_id}
-                onChange={(val) => handleChange("asset_account_id", val)}
-                onCreateAccount={handleCreateAccount}
-              />
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">
-                  Reorder Point (Min)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  value={form.reorder_min}
-                  onChange={(e) => handleChange("reorder_min", e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+                <div className={box}>
+                  <h3 className={boxTitle}>Sales Information</h3>
+                  <div>
+                    <label className={lbl}>
+                      Description on Sales Transactions
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={form.description}
+                      onChange={(e) =>
+                        handleChange("description", e.target.value)
+                      }
+                      className={inp}
+                    />
+                  </div>
+                  <div>
+                    <label className={lbl}>Sales Price</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={form.price}
+                      onChange={(e) => handleChange("price", e.target.value)}
+                      className={inp}
+                    />
+                  </div>
+                  <div>
+                    <label className={lbl}>Income Account</label>
+                    <AccountSelect
+                      accounts={accounts}
+                      accountType="income"
+                      placeholder="Select income account..."
+                      value={form.income_account_id}
+                      onChange={(val) => handleChange("income_account_id", val)}
+                      onCreateAccount={handleCreateAccount}
+                    />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Max</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={form.reorder_max}
-                  onChange={(e) => handleChange("reorder_max", e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+
+              {/* ---- INVENTORY INFORMATION (one row) ---- */}
+              <div className={box}>
+                <h3 className={boxTitle}>Inventory Information</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="col-span-2 md:col-span-1">
+                    <label className={lbl}>Asset Account</label>
+                    <AccountSelect
+                      accounts={accounts}
+                      accountType="asset"
+                      placeholder="Select asset account..."
+                      value={form.asset_account_id}
+                      onChange={(val) => handleChange("asset_account_id", val)}
+                      onCreateAccount={handleCreateAccount}
+                    />
+                  </div>
+                  <div>
+                    <label className={lbl}>Reorder Point (Min)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.reorder_min}
+                      onChange={(e) =>
+                        handleChange("reorder_min", e.target.value)
+                      }
+                      className={inp}
+                    />
+                  </div>
+                  <div>
+                    <label className={lbl}>Max</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.reorder_max}
+                      onChange={(e) =>
+                        handleChange("reorder_max", e.target.value)
+                      }
+                      className={inp}
+                    />
+                  </div>
+                  <div>
+                    <label className={lbl}>On Hand</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.quantity}
+                      onChange={(e) => handleChange("quantity", e.target.value)}
+                      className={inp}
+                    />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">
-                  On Hand
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  value={form.quantity}
-                  onChange={(e) => handleChange("quantity", e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+
+              {/* ---- SKU + images (one row) ---- */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
+                <div>
+                  <label className={lbl}>SKU (optional)</label>
+                  <input
+                    value={form.sku}
+                    onChange={(e) => handleChange("sku", e.target.value)}
+                    className={inp}
+                  />
+                </div>
+                <div>
+                  {!isEditMode && (
+                    <>
+                      <label className={lbl}>Product images</label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={handleFileChange}
+                        className="w-full text-sm"
+                      />
+                    </>
+                  )}
+                  {isEditMode && (
+                    <ImageManager
+                      productId={initialData.id}
+                      images={images}
+                      onChange={(imgs) => {
+                        setImages(imgs);
+                        onImagesChanged?.();
+                      }}
+                    />
+                  )}
+                </div>
               </div>
+
+              {isEditMode && (
+                <p className="text-xs text-gray-400">
+                  "On Hand" here is a manual override (use it for corrections).
+                  To receive new stock, use the "Add stock" button on the
+                  product card instead - it logs the addition with a timestamp
+                  under Stock History.
+                </p>
+              )}
             </div>
-          </div>
 
-          {/* ---- existing app fields: SKU ---- */}
-          <input
-            placeholder="SKU (optional)"
-            value={form.sku}
-            onChange={(e) => handleChange("sku", e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-
-          {!isEditMode && (
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">
-                Product images
-              </label>
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handleFileChange}
-                className="w-full text-sm"
-              />
+            {/* ================= RIGHT: OK / Cancel column (like QuickBooks) ================= */}
+            <div className="md:w-32 flex flex-row md:flex-col gap-2 md:self-start">
+              <button
+                type="submit"
+                disabled={submitting}
+                className="flex-1 md:flex-none bg-blue-600 text-white rounded py-1.5 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                {submitting ? "Saving..." : isEditMode ? "Save Changes" : "OK"}
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 md:flex-none border border-gray-300 rounded py-1.5 text-sm font-medium hover:bg-gray-50"
+              >
+                Cancel
+              </button>
             </div>
-          )}
-
-          {isEditMode && (
-            <ImageManager
-              productId={initialData.id}
-              images={images}
-              onChange={(imgs) => {
-                setImages(imgs);
-                onImagesChanged?.();
-              }}
-            />
-          )}
-
-          {isEditMode && (
-            <p className="text-xs text-gray-400">
-              "On Hand" here is a manual override (use it for corrections). To
-              receive new stock, use the "Add stock" button on the product card
-              instead - it logs the addition with a timestamp under Stock
-              History.
-            </p>
-          )}
-
-          <div className="flex gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-            >
-              {submitting
-                ? "Saving..."
-                : isEditMode
-                  ? "Save Changes"
-                  : "Save Item"}
-            </button>
           </div>
         </form>
 
-        {/* Create Subitem: "+ New" opens this same form for the parent (a subitem of a top-level item).
+        {/* "Set Up" for Subitem of: opens this same form for the parent item.
             Rendered OUTSIDE the <form> above so its submit doesn't reach this form. */}
-        {creatingParent && (
+        {creatingParent !== null && (
           <ProductFormBody
-            kind="under-item"
+            kind={parentKind === "sub" ? "under-item" : "item"}
+            initialName={creatingParent}
             onSubmit={handleParentCreated}
-            onClose={() => setCreatingParent(false)}
+            onClose={async () => {
+              setCreatingParent(null);
+              // accounts made inside the parent's form must show up here too
+              try {
+                setAccounts(await getAccounts());
+              } catch {
+                /* non-fatal */
+              }
+            }}
           />
         )}
       </div>
