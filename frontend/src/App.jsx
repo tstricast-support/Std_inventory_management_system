@@ -4003,18 +4003,42 @@ const APP_THEMES = [
 ];
 const APP_ACCENTS = [
   { id: "blue", name: "Blue", color: "#2563eb" },
-  { id: "green", name: "Green", color: "#16a34a" },
+  { id: "indigo", name: "Indigo", color: "#4f46e5" },
   { id: "purple", name: "Purple", color: "#9333ea" },
-  { id: "orange", name: "Orange", color: "#ea580c" },
-  { id: "teal", name: "Teal", color: "#0d9488" },
+  { id: "pink", name: "Pink", color: "#db2777" },
   { id: "rose", name: "Rose", color: "#e11d48" },
+  { id: "red", name: "Red", color: "#dc2626" },
+  { id: "orange", name: "Orange", color: "#ea580c" },
+  { id: "amber", name: "Amber", color: "#d97706" },
+  { id: "green", name: "Green", color: "#16a34a" },
+  { id: "emerald", name: "Emerald", color: "#059669" },
+  { id: "teal", name: "Teal", color: "#0d9488" },
+  { id: "cyan", name: "Cyan", color: "#0891b2" },
+  { id: "slate", name: "Slate", color: "#475569" },
+];
+// Sidebar colours. All are dark so the white sidebar text stays readable.
+// "auto" = follow the theme; "accent" = a dark shade of the chosen accent colour.
+const APP_SIDEBARS = [
+  { id: "auto", name: "Theme default", color: null },
+  { id: "accent", name: "Match accent", color: "var(--color-blue-800)" },
+  { id: "navy", name: "Navy", color: "#1f2640" },
+  { id: "midnight", name: "Midnight", color: "#0b1220" },
+  { id: "ocean", name: "Ocean", color: "#0f3a5f" },
+  { id: "slate", name: "Slate", color: "#334155" },
+  { id: "black", name: "Black", color: "#111111" },
+  { id: "forest", name: "Forest", color: "#14532d" },
+  { id: "teal", name: "Teal", color: "#134e4a" },
+  { id: "indigo", name: "Indigo", color: "#312e81" },
+  { id: "purple", name: "Purple", color: "#3b1d6e" },
+  { id: "maroon", name: "Maroon", color: "#7f1d1d" },
+  { id: "brown", name: "Brown", color: "#3f2a1d" },
 ];
 const APP_SIZES = [
   ["small", "Small"],
   ["normal", "Normal"],
   ["large", "Large"],
 ];
-const APP_THEME_DEFAULT = { theme: "light", accent: "blue", size: "normal" };
+const APP_THEME_DEFAULT = { theme: "light", accent: "blue", size: "normal", sidebar: "auto" };
 
 function loadAppTheme() {
   try {
@@ -4030,6 +4054,9 @@ function loadAppTheme() {
         size: APP_SIZES.some(([id]) => id === s.size)
           ? s.size
           : APP_THEME_DEFAULT.size,
+        sidebar: APP_SIDEBARS.some((x) => x.id === s.sidebar)
+          ? s.sidebar 
+          : APP_THEME_DEFAULT.sidebar,
       };
     }
   } catch (e) {
@@ -4043,6 +4070,9 @@ function applyAppTheme(s) {
   el.setAttribute("data-theme", s.theme);
   el.setAttribute("data-accent", s.accent);
   el.setAttribute("data-size", s.size);
+  const sb = APP_SIDEBARS.find((x) => x.id === s.sidebar);
+  if (sb && sb.color) el.style.setProperty("--sidebar-bg", sb.color);
+  else el.style.removeProperty("--sidebar-bg"); // "auto" → theme default from index.css
 }
 applyAppTheme(loadAppTheme()); // runs once when the app loads, before the first screen is drawn
 
@@ -4163,6 +4193,33 @@ function ThemePanel() {
               </button>
             ))}
           </div>
+        </section>
+        <section>
+          <h3 className={label}>Sidebar colour</h3>
+          <div className="flex flex-wrap gap-3">
+            {APP_SIDEBARS.map((x) => (
+              <button
+                key={x.id}
+                type="button"
+                title={x.name}
+                aria-label={x.name}
+                onClick={() => change({ sidebar: x.id })}
+                className={`w-9 h-9 rounded-md border border-gray-300 flex items-center justify-center text-white text-sm ${
+                  s.sidebar === x.id ? "ring-2 ring-offset-2 ring-gray-400" : ""
+                }`}
+                style={{
+                  background:
+                    x.color ||
+                    "linear-gradient(135deg, #1f2640 50%, #0f3a5f 50%)", // "Theme default" swatch
+                }}
+              >
+                {s.sidebar === x.id ? "✓" : x.id === "accent" ? "A" : ""}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-400 mt-2">
+            {APP_SIDEBARS.find((x) => x.id === s.sidebar)?.name}
+          </p>
         </section>
 
         <div className="flex gap-2 pt-2">
