@@ -1,7 +1,9 @@
-from datetime import date
+import calendar
+from bisect import bisect_right
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 from .. import models
 from ..account_types import ACCOUNT_CATEGORY
@@ -98,6 +100,268 @@ def profit_and_loss(date_from: date | None = None, date_to: date | None = None, 
     return {
         "date_from": date_from, "date_to": date_to, "sections": sections,
         "gross_profit": float(gross), "operating_profit": float(operating), "net_profit": float(net),
+    }
+
+
+# =====================================================================================================
+# PROFIT & LOSS v2  (QuickBooks-style: columns by day/week/month/quarter/year, customer filter,
+# show-zero accounts, drill-down to transactions, and the journal behind each transaction)
+# =====================================================================================================
+PL_GROUP_BY = {"total", "day", "week", "month", "quarter", "year"}
+
+SOURCE_LABELS = {
+    None: "Journal",
+    "invoice": "Invoice",
+    "credit_note": "Credit Note",
+    "payment": "Payment",
+    "purchase_bill": "Bill",
+    "vendor_payment": "Bill Payment",
+    "bank_opening": "Opening Balance",
+}
+
+
+def _source_label(source_type: str | None) -> str:
+    if source_type in SOURCE_LABELS:
+        return SOURCE_LABELS[source_type]
+    if (source_type or "").startswith("bank_"):
+        return "Bank"
+    return (source_type or "").replace("_", " ").title()
+
+
+def _period_end(d: date, group_by: str) -> date:
+    if group_by == "day":
+        return d
+    if group_by == "week":                      # weeks run Monday - Sunday
+        return d + timedelta(days=6 - d.weekday())
+    if group_by == "month":
+        return date(d.year, d.month, calendar.monthrange(d.year, d.month)[1])
+    if group_by == "quarter":
+        m = ((d.month - 1) // 3) * 3 + 3
+        return date(d.year, m, calendar.monthrange(d.year, m)[1])
+    return date(d.year, 12, 31)
+
+
+def _columns(date_from: date, date_to: date, group_by: str) -> list[dict]:
+    if group_by == "total":
+        return [{"key": "total", "label": "Total", "from": date_from, "to": date_to}]
+    cols, cur = [], date_from
+    while cur <= date_to:
+        end = min(_period_end(cur, group_by), date_to)
+        if group_by == "day":
+            label = cur.strftime("%d %b") if date_from.year == date_to.year else cur.strftime("%d %b %y")
+        elif group_by == "week":
+            label = f"{cur:%d %b}" if cur == end else f"{cur:%d %b} - {end:%d %b}"
+        elif group_by == "month":
+            label = cur.strftime("%b %Y")
+        elif group_by == "quarter":
+            label = f"Q{(cur.month - 1) // 3 + 1} {cur.year}"
+        else:
+            label = str(cur.year)
+        cols.append({"key": f"{cur.isoformat()}", "label": label, "from": cur, "to": end})
+        cur = end + timedelta(days=1)
+        if len(cols) > 400:
+            raise HTTPException(400, "Too many columns for this date range - pick a longer grouping (e.g. Month).")
+    return cols
+
+
+def _customer_filter(query, customer_id: int | None):
+    """Keep only journals that came from this customer's invoices / credit notes."""
+    if not customer_id:
+        return query
+    inv = select(models.Invoice.id).where(models.Invoice.customer_id == customer_id)
+    cn = select(models.CreditNote.id).where(models.CreditNote.customer_id == customer_id)
+    return query.filter(or_(
+        and_(models.Journal.source_type == "invoice", models.Journal.source_id.in_(inv)),
+        and_(models.Journal.source_type == "credit_note", models.Journal.source_id.in_(cn)),
+    ))
+
+
+@router.get("/profit-and-loss/columns")
+def profit_and_loss_columns(
+    date_from: date | None = None,
+    date_to: date | None = None,
+    group_by: str = "total",
+    customer_id: int | None = None,
+    show_zero: bool = False,
+    db: Session = Depends(get_db),
+):
+    if group_by not in PL_GROUP_BY:
+        raise HTTPException(400, "group_by must be one of: " + ", ".join(sorted(PL_GROUP_BY)))
+    date_to = date_to or date.today()
+    date_from = date_from or date(date_to.year, 1, 1)
+    if date_from > date_to:
+        raise HTTPException(400, "'From' date is after 'To' date")
+
+    cols = _columns(date_from, date_to, group_by)
+    n = len(cols)
+    starts = [c["from"] for c in cols]
+    zero = [Decimal("0")] * n
+
+    query = (
+        db.query(
+            models.JournalLine.account_id,
+            models.Journal.journal_date,
+            func.coalesce(func.sum(models.JournalLine.debit), 0),
+            func.coalesce(func.sum(models.JournalLine.credit), 0),
+        )
+        .join(models.Journal, models.JournalLine.journal_id == models.Journal.id)
+        .filter(models.Journal.journal_date >= date_from, models.Journal.journal_date <= date_to)
+    )
+    query = _customer_filter(query, customer_id)
+    nets: dict[int, list[Decimal]] = {}
+    for aid, jdate, deb, cred in query.group_by(models.JournalLine.account_id, models.Journal.journal_date).all():
+        i = bisect_right(starts, jdate) - 1
+        nets.setdefault(aid, [Decimal("0")] * n)[i] += _money(deb) - _money(cred)
+
+    accounts = db.query(models.Account).order_by(models.Account.name).all()
+    add = lambda a, b: [x + y for x, y in zip(a, b)]  # noqa: E731
+
+    sections, totals = [], {}
+    for key, title, sign in PL_SECTIONS:
+        sec_accounts = [a for a in accounts if a.account_type == key]
+        by_id = {a.id: a for a in sec_accounts}
+        own = {a.id: [sign * v + 0 for v in nets.get(a.id, zero)] for a in sec_accounts}
+        children: dict[int, list[int]] = {}
+        for a in sec_accounts:
+            if a.parent_id in by_id:
+                children.setdefault(a.parent_id, []).append(a.id)
+        memo: dict[int, list[Decimal]] = {}
+
+        def rollup(aid, children=children, own=own, memo=memo):
+            if aid not in memo:
+                tot = list(own[aid])
+                for c in children.get(aid, []):
+                    tot = add(tot, rollup(c))
+                memo[aid] = tot
+            return memo[aid]
+
+        show = set(by_id) if show_zero else {aid for aid, v in own.items() if any(x != 0 for x in v)}
+        for aid in list(show):                       # keep the parents above every shown account
+            p = by_id[aid].parent_id
+            while p in by_id and p not in show:
+                show.add(p)
+                p = by_id[p].parent_id
+
+        rows = [{
+            "id": a.id, "name": a.name, "account_code": a.account_code,
+            "parent_id": a.parent_id if a.parent_id in by_id else None,
+            "own": [float(x) for x in own[a.id]],
+            "own_sum": float(sum(own[a.id], Decimal("0"))),
+            "total": [float(x) for x in rollup(a.id)],
+            "sum": float(sum(rollup(a.id), Decimal("0"))),
+        } for a in sec_accounts if a.id in show]
+
+        col_total = list(zero)
+        for v in own.values():
+            col_total = add(col_total, v)
+        totals[key] = col_total
+        sections.append({
+            "key": key, "title": title, "accounts": rows,
+            "totals": [float(x) for x in col_total], "sum": float(sum(col_total, Decimal("0"))),
+        })
+
+    gross = [i - c for i, c in zip(totals["income"], totals["cogs"])]
+    operating = [g - e for g, e in zip(gross, totals["expense"])]
+    other_net = [i - e for i, e in zip(totals["other_income"], totals["other_expense"])]
+    net = add(operating, other_net)
+    pack = lambda v: {"cols": [float(x) for x in v], "sum": float(sum(v, Decimal("0")))}  # noqa: E731
+    return {
+        "date_from": date_from, "date_to": date_to, "group_by": group_by, "customer_id": customer_id,
+        "columns": cols, "sections": sections,
+        "gross": pack(gross), "operating": pack(operating), "other_net": pack(other_net), "net": pack(net),
+    }
+
+
+@router.get("/profit-and-loss/transactions")
+def profit_and_loss_transactions(
+    account_id: int,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    include_children: bool = True,
+    customer_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    """The journal lines behind one Profit & Loss account (what QuickBooks shows when you click a number)."""
+    date_to = date_to or date.today()
+    date_from = date_from or date(date_to.year, 1, 1)
+
+    account = db.query(models.Account).get(account_id)
+    if not account:
+        raise HTTPException(404, "Account not found")
+    signs = {key: sign for key, _title, sign in PL_SECTIONS}
+    if account.account_type not in signs:
+        raise HTTPException(400, "This is not a Profit & Loss account")
+    sign = signs[account.account_type]
+
+    same_type = db.query(models.Account).filter(models.Account.account_type == account.account_type).all()
+    names = {a.id: a.name for a in same_type}
+    ids = {account.id}
+    if include_children:
+        grew = True
+        while grew:
+            grew = False
+            for a in same_type:
+                if a.parent_id in ids and a.id not in ids:
+                    ids.add(a.id)
+                    grew = True
+
+    query = (
+        db.query(models.JournalLine, models.Journal)
+        .join(models.Journal, models.JournalLine.journal_id == models.Journal.id)
+        .filter(models.JournalLine.account_id.in_(ids))
+        .filter(models.Journal.journal_date >= date_from, models.Journal.journal_date <= date_to)
+    )
+    query = _customer_filter(query, customer_id)
+    lines = query.order_by(models.Journal.journal_date, models.Journal.id, models.JournalLine.id).all()
+
+    rows, total = [], Decimal("0")
+    for line, journal in lines:
+        amount = sign * (_money(line.debit) - _money(line.credit))
+        total += amount
+        rows.append({
+            "id": line.id,
+            "journal_id": journal.id,
+            "date": journal.journal_date,
+            "type": _source_label(journal.source_type),
+            "source_type": journal.source_type,
+            "source_id": journal.source_id,
+            "number": journal.journal_number,
+            "name": journal.reference or "",
+            "memo": line.description or journal.notes or "",
+            "account": names.get(line.account_id, ""),
+            "amount": float(amount),
+        })
+    return {
+        "account": {"id": account.id, "name": account.name},
+        "date_from": date_from, "date_to": date_to,
+        "rows": rows, "total": float(total),
+    }
+
+
+@router.get("/journal/{journal_id}")
+def journal_detail(journal_id: int, db: Session = Depends(get_db)):
+    """One posting with every debit / credit line (QuickBooks 'Transaction Journal')."""
+    j = (
+        db.query(models.Journal)
+        .options(joinedload(models.Journal.lines).joinedload(models.JournalLine.account))
+        .filter(models.Journal.id == journal_id)
+        .first()
+    )
+    if not j:
+        raise HTTPException(404, "Transaction not found")
+    lines = [{
+        "account": l.account.name if l.account else "",
+        "account_type": l.account.account_type if l.account else "",
+        "description": l.description or "",
+        "debit": float(_money(l.debit)),
+        "credit": float(_money(l.credit)),
+    } for l in j.lines]
+    return {
+        "id": j.id, "number": j.journal_number, "date": j.journal_date,
+        "reference": j.reference or "", "notes": j.notes or "",
+        "source_type": j.source_type, "source_id": j.source_id, "type": _source_label(j.source_type),
+        "lines": lines,
+        "total_debit": sum(l["debit"] for l in lines), "total_credit": sum(l["credit"] for l in lines),
     }
 
 

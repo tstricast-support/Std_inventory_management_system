@@ -1761,7 +1761,7 @@ function RestockModal({ product, onSubmit, onClose }) {
           <h2 className="text-lg font-semibold">Add Stock</h2>
         </div>
         <p className="text-sm text-gray-500 mb-4">
-          {product.name} — currently {product.quantity} in stock
+          {product.name} - currently {product.quantity} in stock
         </p>
 
         {error && (
@@ -1954,7 +1954,7 @@ function RequestModal({ products, initialProductId, onSubmit, onClose }) {
     const ids = items.map((i) => Number(i.product_id));
     if (new Set(ids).size !== ids.length) {
       setError(
-        "Each product can only appear once — adjust the quantity instead",
+        "Each product can only appear once - adjust the quantity instead",
       );
       return;
     }
@@ -2339,7 +2339,7 @@ function ImageManager({ productId, images, onChange }) {
         />
       </label>
       <p className="text-[11px] text-gray-400 mt-1">
-        Images save straight away — no need to press Save Changes.
+        Images save straight away - no need to press Save Changes.
       </p>
     </div>
   );
@@ -2432,7 +2432,15 @@ function VendorSelect({ vendors, value, onChange, onCreateVendor }) {
 }
 
 // ---------- "Not Found" prompt (same question QuickBooks asks) ----------
-function NotFoundDialog({ noun, text, busy, allowQuickAdd = true, onQuickAdd, onSetUp, onCancel }) {
+function NotFoundDialog({
+  noun,
+  text,
+  busy,
+  allowQuickAdd = true,
+  onQuickAdd,
+  onSetUp,
+  onCancel,
+}) {
   const btn =
     "w-full border border-gray-300 rounded px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:opacity-50";
   return (
@@ -2448,20 +2456,35 @@ function NotFoundDialog({ noun, text, busy, allowQuickAdd = true, onQuickAdd, on
         </p>
         <div className="space-y-2">
           {allowQuickAdd && (
-            <button type="button" disabled={busy} onClick={onQuickAdd} className={btn}>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onQuickAdd}
+              className={btn}
+            >
               {busy ? "Adding..." : "Quick Add"}
               <span className="block text-[11px] font-normal text-gray-500">
                 Create it now with just the name
               </span>
             </button>
           )}
-          <button type="button" disabled={busy} onClick={onSetUp} className={btn}>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onSetUp}
+            className={btn}
+          >
             Set Up
             <span className="block text-[11px] font-normal text-gray-500">
               Open the full form to fill in all details
             </span>
           </button>
-          <button type="button" disabled={busy} onClick={onCancel} className={btn}>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+            className={btn}
+          >
             Cancel
           </button>
         </div>
@@ -2664,7 +2687,9 @@ function AccountSetupModal({ accountType, initialName, onSave, onClose }) {
         )}
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-gray-600 mb-0.5">Account Type</label>
+            <label className="block text-xs text-gray-600 mb-0.5">
+              Account Type
+            </label>
             <input
               disabled
               value={ACCOUNT_TYPE_LABELS[accountType] || accountType}
@@ -2672,16 +2697,36 @@ function AccountSetupModal({ accountType, initialName, onSave, onClose }) {
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-600 mb-0.5">Account Name</label>
-            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} className={cls} />
+            <label className="block text-xs text-gray-600 mb-0.5">
+              Account Name
+            </label>
+            <input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={cls}
+            />
           </div>
           <div>
-            <label className="block text-xs text-gray-600 mb-0.5">Number (optional)</label>
-            <input value={code} onChange={(e) => setCode(e.target.value)} className={cls} />
+            <label className="block text-xs text-gray-600 mb-0.5">
+              Number (optional)
+            </label>
+            <input
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              className={cls}
+            />
           </div>
           <div>
-            <label className="block text-xs text-gray-600 mb-0.5">Description (optional)</label>
-            <textarea rows={2} value={desc} onChange={(e) => setDesc(e.target.value)} className={cls} />
+            <label className="block text-xs text-gray-600 mb-0.5">
+              Description (optional)
+            </label>
+            <textarea
+              rows={2}
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              className={cls}
+            />
           </div>
         </div>
         <div className="flex gap-2 mt-4">
@@ -2737,7 +2782,11 @@ function AccountSelect({
           initialName={setupName}
           onClose={() => setSetupName(null)}
           onSave={async (extra) => {
-            const created = await onCreateAccount(extra.name, accountType, extra);
+            const created = await onCreateAccount(
+              extra.name,
+              accountType,
+              extra,
+            );
             onChange(String(created.id));
             setSetupName(null);
           }}
@@ -2960,26 +3009,21 @@ function ProductFormBody({
 
   // Create Subitem form: "Subitem of" -> "+ New" opens a full form for the parent (a subitem of a
   // top-level item). When it saves, reload the parent list and select the new parent here.
-    const handleParentCreated = async (values, files) => {
-      const created = await createProduct(values, files);
-      const p = await getProducts();
-      try {
-        setVendors(await getVendors()); // pick up vendors created in the parent form
-      } catch {
-        /* non-fatal */
-      }
-      const opts = buildParentOptions(p);
-      if (!opts.some((o) => o.id === created.id)) {
-        const extra = flattenParents(p).find((o) => o.id === created.id);
-        if (extra) opts.push(extra); // make sure the new parent is selectable
-      }
-      setParentOptions(opts);
-      setForm((prev) => ({
-        ...prev,
-        is_subitem: true,
-        parent_id: String(created.id),
-      }));
-    };
+  const handleParentCreated = async (values, files) => {
+    const created = await createProduct(values, files);
+    const p = await getProducts();
+    const opts = buildParentOptions(p);
+    if (!opts.some((o) => o.id === created.id)) {
+      const extra = flattenParents(p).find((o) => o.id === created.id);
+      if (extra) opts.push(extra); // make sure the new parent is selectable
+    }
+    setParentOptions(opts);
+    setForm((prev) => ({
+      ...prev,
+      is_subitem: true,
+      parent_id: String(created.id),
+    }));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -3324,11 +3368,9 @@ function ProductFormBody({
             onSubmit={handleParentCreated}
             onClose={async () => {
               setCreatingParent(null);
-              // accounts AND vendors made inside the parent's form must show up here too
+              // accounts made inside the parent's form must show up here too
               try {
-                const [a, v] = await Promise.all([getAccounts(), getVendors()]);
-                setAccounts(a);
-                setVendors(v);
+                setAccounts(await getAccounts());
               } catch {
                 /* non-fatal */
               }
@@ -4221,7 +4263,12 @@ const APP_SIZES = [
   ["normal", "Normal"],
   ["large", "Large"],
 ];
-const APP_THEME_DEFAULT = { theme: "light", accent: "blue", size: "normal", sidebar: "auto" };
+const APP_THEME_DEFAULT = {
+  theme: "light",
+  accent: "blue",
+  size: "normal",
+  sidebar: "auto",
+};
 
 function loadAppTheme() {
   try {
@@ -4238,7 +4285,7 @@ function loadAppTheme() {
           ? s.size
           : APP_THEME_DEFAULT.size,
         sidebar: APP_SIDEBARS.some((x) => x.id === s.sidebar)
-          ? s.sidebar 
+          ? s.sidebar
           : APP_THEME_DEFAULT.sidebar,
       };
     }
@@ -5139,13 +5186,13 @@ function ItemDetail({
             )}
 
             <dl className="mt-4 space-y-3 text-sm">
-              <DetailRow label="SKU" value={item.sku || "—"} />
+              <DetailRow label="SKU" value={item.sku || "-"} />
               {parentName && (
                 <DetailRow label="Subitem of" value={parentName} />
               )}
               {isAdmin && (
                 <>
-                  <DetailRow label="Type" value={item.item_type || "—"} />
+                  <DetailRow label="Type" value={item.item_type || "-"} />
                   {item.manufacturer_part_number && (
                     <DetailRow
                       label="Mfr. Part #"
@@ -5158,24 +5205,24 @@ function ItemDetail({
                   />
                   <DetailRow
                     label="COGS Account"
-                    value={item.cogs_account?.name || "—"}
+                    value={item.cogs_account?.name || "-"}
                   />
                   <DetailRow
                     label="Income Account"
-                    value={item.income_account?.name || "—"}
+                    value={item.income_account?.name || "-"}
                   />
                   <DetailRow
                     label="Asset Account"
-                    value={item.asset_account?.name || "—"}
+                    value={item.asset_account?.name || "-"}
                   />
                   <DetailRow
                     label="Preferred Vendor"
-                    value={item.preferred_vendor?.name || "—"}
+                    value={item.preferred_vendor?.name || "-"}
                   />
                   {(item.reorder_min != null || item.reorder_max != null) && (
                     <DetailRow
                       label="Reorder Point"
-                      value={`Min ${item.reorder_min ?? "—"} / Max ${item.reorder_max ?? "—"}`}
+                      value={`Min ${item.reorder_min ?? "-"} / Max ${item.reorder_max ?? "-"}`}
                     />
                   )}
                 </>
@@ -5495,47 +5542,49 @@ function ItemsPage({
 
       <main className="p-4 sm:p-6 w-full max-w-6xl flex items-start gap-6">
         <div className="flex-1 min-w-0 max-w-3xl">
-        <div className="mb-5">
-          <SearchBox
-            value={search}
-            onChange={setSearch}
-            placeholder="Search items..."
-          />
-          {isAdmin && (
-            <p className="text-xs text-gray-400 mt-1.5">
-              Hold an item to add stock
+          <div className="mb-5">
+            <SearchBox
+              value={search}
+              onChange={setSearch}
+              placeholder="Search items..."
+            />
+            {isAdmin && (
+              <p className="text-xs text-gray-400 mt-1.5">
+                Hold an item to add stock
+              </p>
+            )}
+          </div>
+
+          {loading ? (
+            <p className="text-gray-400 text-center py-16">Loading...</p>
+          ) : error && products.length === 0 ? (
+            <p className="text-red-500 text-center py-16">{error}</p>
+          ) : products.length === 0 ? (
+            <p className="text-gray-400 text-center py-16">No items yet.</p>
+          ) : shownProducts.length === 0 ? (
+            <p className="text-gray-400 text-center py-16">
+              Nothing matches "{search.trim()}".
             </p>
+          ) : (
+            <div className="space-y-2">
+              {shownProducts.map((item) => (
+                <ItemRowWithSubitems
+                  key={item.id}
+                  item={item}
+                  expanded={expandedIds.has(item.id)}
+                  onToggle={() => toggleExpanded(item.id)}
+                  onSelect={(id) => go({ view: "items", item: String(id) })}
+                  forceOpen={Boolean(q)}
+                  isAdmin={isAdmin}
+                  onLongPress={(p) => setRestockingProduct(p)}
+                />
+              ))}
+            </div>
           )}
         </div>
-
-        {loading ? (
-          <p className="text-gray-400 text-center py-16">Loading...</p>
-        ) : error && products.length === 0 ? (
-          <p className="text-red-500 text-center py-16">{error}</p>
-        ) : products.length === 0 ? (
-          <p className="text-gray-400 text-center py-16">No items yet.</p>
-        ) : shownProducts.length === 0 ? (
-          <p className="text-gray-400 text-center py-16">
-            Nothing matches "{search.trim()}".
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {shownProducts.map((item) => (
-              <ItemRowWithSubitems
-                key={item.id}
-                item={item}
-                expanded={expandedIds.has(item.id)}
-                onToggle={() => toggleExpanded(item.id)}
-                onSelect={(id) => go({ view: "items", item: String(id) })}
-                forceOpen={Boolean(q)}
-                isAdmin={isAdmin}
-                onLongPress={(p) => setRestockingProduct(p)}
-              />
-            ))}
-          </div>
-        )}
-          </div>
-        <DesktopOnly><TopSoldItemsPanel /></DesktopOnly>
+        <DesktopOnly>
+          <TopSoldItemsPanel />
+        </DesktopOnly>
       </main>
 
       {restockingProduct && (
@@ -6671,7 +6720,9 @@ function ReportCard({ title, children }) {
 const dateInputCls =
   "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1";
 
-// ---------- Profit & Loss: table with current vs previous period ----------
+// ---------- Profit & Loss (QuickBooks style) ----------
+// columns: total / compare previous period or year / by day, week, month, quarter, year
+// click an account -> its entries grouped by day -> click an invoice (or bill / journal) -> full details
 const isoToDate = (iso) => new Date(`${iso}T00:00:00`);
 const addDays = (iso, n) => {
   const d = isoToDate(iso);
@@ -6684,12 +6735,35 @@ function previousPeriod(from, to) {
   const prevTo = addDays(from, -1);
   return [addDays(prevTo, -(len - 1)), prevTo];
 }
+const shiftYear = (iso, n) => {
+  const d = isoToDate(iso);
+  d.setFullYear(d.getFullYear() + n);
+  return localIso(d);
+};
 
+// ----- API -----
+const getPLColumns = (from, to, groupBy, customerId, showZero) =>
+  reportRequest(
+    `profit-and-loss/columns?date_from=${from}&date_to=${to}&group_by=${groupBy}&show_zero=${showZero}${customerId ? `&customer_id=${customerId}` : ""}`,
+    "Failed to load Profit & Loss",
+  );
+const getPLTransactions = (accountId, from, to, own, customerId) =>
+  reportRequest(
+    `profit-and-loss/transactions?account_id=${accountId}&date_from=${from}&date_to=${to}&include_children=${!own}${customerId ? `&customer_id=${customerId}` : ""}`,
+    "Failed to load transactions",
+  );
+const getPLJournal = (journalId) =>
+  reportRequest(`journal/${journalId}`, "Failed to load the transaction");
+
+// ----- number formatting -----
 const PL_DECIMALS = 2; // set to 0 to show whole rupees
 const plNum = (n) => {
   const v = Number(n || 0);
-  if (v === 0) return "-";
-  const s = Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: PL_DECIMALS, maximumFractionDigits: PL_DECIMALS });
+  if (Math.abs(v) < 0.005) return "-";
+  const s = Math.abs(v).toLocaleString(undefined, {
+    minimumFractionDigits: PL_DECIMALS,
+    maximumFractionDigits: PL_DECIMALS,
+  });
   return v < 0 ? `(${s})` : s;
 };
 const plPct = (cur, prev) => {
@@ -6697,107 +6771,292 @@ const plPct = (cur, prev) => {
   const p = ((cur - prev) / Math.abs(prev)) * 100;
   return p < 0 ? `(${Math.abs(p).toFixed(1)}%)` : `${p.toFixed(1)}%`;
 };
+// "% of Income" column
+const plShare = (value, income) => {
+  if (!income || !value) return "-";
+  const p = (value / income) * 100;
+  return p < 0 ? `(${Math.abs(p).toFixed(1)}%)` : `${p.toFixed(1)}%`;
+};
 
-// Turn flat accounts into display lines: parent header, children, "Total <parent>"
-function planPLRows(items) {
+// Turn flat accounts into display lines: parent header, children, "Total <parent>".
+// Each item has v (rolled-up numbers, one per value column) and vOwn (the account's own postings).
+// Every row carries `anc` = ids of the parent accounts it sits inside (used to collapse a parent).
+function planPLRows(items, sortMode, sortIdx) {
   const ids = new Set(items.map((i) => i.id));
   const kids = new Map();
   const roots = [];
-  [...items]
-    .sort((a, b) => compareNames(a.name, b.name))
-    .forEach((i) => {
-      if (i.parent_id && ids.has(i.parent_id)) {
-        if (!kids.has(i.parent_id)) kids.set(i.parent_id, []);
-        kids.get(i.parent_id).push(i);
-      } else {
-        roots.push(i);
-      }
-    });
+  const cmp =
+    sortMode === "amount"
+      ? (a, b) =>
+          (b.v[sortIdx] || 0) - (a.v[sortIdx] || 0) ||
+          compareNames(a.name, b.name)
+      : (a, b) => compareNames(a.name, b.name);
+  [...items].sort(cmp).forEach((i) => {
+    if (i.parent_id && ids.has(i.parent_id)) {
+      if (!kids.has(i.parent_id)) kids.set(i.parent_id, []);
+      kids.get(i.parent_id).push(i);
+    } else {
+      roots.push(i);
+    }
+  });
 
   const out = [];
-  const walk = (r, depth) => {
+  const walk = (r, depth, anc) => {
     const ch = kids.get(r.id);
     if (!ch) {
-      out.push({ key: `r-${r.id}`, label: r.name, cur: r.cur, prev: r.prev, depth, kind: "item" });
+      out.push({
+        key: `r-${r.id}`,
+        accountId: r.id,
+        label: r.name,
+        v: r.v,
+        depth,
+        kind: "item",
+        anc,
+      });
       return;
     }
-    out.push({ key: `h-${r.id}`, label: r.name, depth, kind: "header" });
-    if (r.curOwn || r.prevOwn) {
+    const inner = [...anc, r.id];
+    out.push({
+      key: `h-${r.id}`,
+      id: r.id,
+      label: r.name,
+      v: r.v,
+      depth,
+      kind: "header",
+      anc,
+    });
+    if (r.vOwn.some((x) => Math.abs(x) >= 0.005)) {
       out.push({
         key: `o-${r.id}`,
+        accountId: r.id,
+        own: true, // drill-down shows only this account's own postings
         label: `${r.name} (direct)`,
-        cur: r.curOwn,
-        prev: r.prevOwn,
+        v: r.vOwn,
         depth: depth + 1,
         kind: "item",
+        anc: inner,
       });
     }
-    ch.forEach((c) => walk(c, depth + 1));
-    out.push({ key: `t-${r.id}`, label: `Total ${r.name}`, cur: r.cur, prev: r.prev, depth, kind: "subtotal" });
+    ch.forEach((c) => walk(c, depth + 1, inner));
+    out.push({
+      key: `t-${r.id}`,
+      id: r.id,
+      label: `Total ${r.name}`,
+      v: r.v,
+      depth,
+      kind: "subtotal",
+      anc,
+    });
   };
-  roots.forEach((r) => walk(r, 0));
+  roots.forEach((r) => walk(r, 0, []));
   return out;
 }
 
-function buildPL(cur, prev) {
-  const sec = (d, key) =>
-    (d.sections || []).find((s) => s.key === key) || {
+// value columns: which API result (s) and which of its columns (c) feed each number; all = the Total column
+function plValueColumns(view, res, from, to) {
+  if (view === "prev" || view === "prevYear")
+    return [
+      {
+        label: "Current Period",
+        s: 0,
+        c: 0,
+        from: res.ranges[0][0],
+        to: res.ranges[0][1],
+      },
+      {
+        label: view === "prev" ? "Previous Period" : "Previous Year",
+        s: 1,
+        c: 0,
+        from: res.ranges[1][0],
+        to: res.ranges[1][1],
+      },
+    ];
+  if (view === "total") return [{ label: "Total", s: 0, c: 0, from, to }];
+  const cols = res.src[0].columns.map((c, i) => ({
+    label: c.label,
+    s: 0,
+    c: i,
+    from: c.from,
+    to: c.to,
+  }));
+  return [...cols, { label: "Total", s: 0, all: true, from, to }];
+}
+
+// every line of the statement in order (bands, accounts, totals) - used by the screen AND the CSV export
+function buildPLLines(res, vcs, sortMode) {
+  const { src } = res;
+  const pick = (arr, sum, vc) => (vc.all ? sum : (arr?.[vc.c] ?? 0));
+  const secOf = (s, key) =>
+    src[s].sections.find((x) => x.key === key) || {
       accounts: [],
-      total: 0,
-      title: key,
+      totals: [],
+      sum: 0,
     };
-  const group = (key) => {
-    const c = sec(cur, key);
-    const p = sec(prev, key);
-    const map = new Map();
-    const put = (a, side) => {
-      const r = map.get(a.id) || {
-        id: a.id,
-        name: a.name,
-        parent_id: a.parent_id ?? null,
-        cur: 0,
-        prev: 0,
-        curOwn: 0,
-        prevOwn: 0,
+  const secTotal = (key) =>
+    vcs.map((vc) => pick(secOf(vc.s, key).totals, secOf(vc.s, key).sum, vc));
+  const summary = (name) =>
+    vcs.map((vc) => pick(src[vc.s][name].cols, src[vc.s][name].sum, vc));
+  const sortIdx =
+    vcs.length > 2 || (vcs.length === 2 && vcs[1].all) ? vcs.length - 1 : 0;
+
+  const lines = [];
+  const section = (title, key, totalLabel, always) => {
+    const maps = src.map(
+      (r) =>
+        new Map(
+          r.sections.find((x) => x.key === key).accounts.map((a) => [a.id, a]),
+        ),
+    );
+    const ids = new Set();
+    maps.forEach((m) => m.forEach((_a, id) => ids.add(id)));
+    const items = [...ids].map((id) => {
+      const first = maps.map((m) => m.get(id)).find(Boolean);
+      const val = (vc, field, sumField) => {
+        const a = maps[vc.s].get(id);
+        return a ? (vc.all ? a[sumField] : (a[field][vc.c] ?? 0)) : 0;
       };
-      r[side] = a.total ?? a.amount;
-      r[`${side}Own`] = a.amount;
-      map.set(a.id, r);
-    };
-    (c.accounts || []).forEach((a) => put(a, "cur"));
-    (p.accounts || []).forEach((a) => put(a, "prev"));
-    return {
-      key,
-      rows: planPLRows([...map.values()]),
-      cur: c.total || 0,
-      prev: p.total || 0,
-    };
+      return {
+        id,
+        name: first.name,
+        parent_id: first.parent_id ?? null,
+        v: vcs.map((vc) => val(vc, "total", "sum")),
+        vOwn: vcs.map((vc) => val(vc, "own", "own_sum")),
+      };
+    });
+    const total = secTotal(key);
+    if (
+      !always &&
+      items.length === 0 &&
+      total.every((x) => Math.abs(x) < 0.005)
+    )
+      return false;
+    const secKey = `sec:${key}`;
+    lines.push({ kind: "band", key: secKey, secKey, label: title, v: total });
+    planPLRows(items, sortMode, sortIdx).forEach((r) =>
+      lines.push({ ...r, key: `${key}-${r.key}`, secKey }),
+    );
+    lines.push({
+      kind: "total",
+      key: `${key}-total`,
+      label: totalLabel,
+      v: total,
+    });
+    return true;
   };
+
+  section("Income", "income", "Total Income", true);
+  section("Cost of Goods Sold", "cogs", "Total COGS", true);
+  lines.push({
+    kind: "total",
+    key: "gross",
+    label: "Gross Profit",
+    v: summary("gross"),
+  });
+  section("Expense", "expense", "Total Expense", true);
+  lines.push({
+    kind: "total",
+    key: "operating",
+    label: "Net Operating Income",
+    v: summary("operating"),
+  });
+  const a = section(
+    "Other Income",
+    "other_income",
+    "Total Other Income",
+    false,
+  );
+  const b = section(
+    "Other Expense",
+    "other_expense",
+    "Total Other Expense",
+    false,
+  );
+  if (a || b)
+    lines.push({
+      kind: "total",
+      key: "other-net",
+      label: "Net Other Income",
+      v: summary("other_net"),
+    });
+  lines.push({
+    kind: "grand",
+    key: "net",
+    label: "Net Income",
+    v: summary("net"),
+  });
   return {
-    income: group("income"),
-    cogs: group("cogs"),
-    expense: group("expense"),
-    otherIncome: group("other_income"),
-    otherExpense: group("other_expense"),
-    gross: { cur: cur.gross_profit, prev: prev.gross_profit },
-    operating: { cur: cur.operating_profit, prev: prev.operating_profit },
-    net: { cur: cur.net_profit, prev: prev.net_profit },
+    lines,
+    income: secTotal("income"),
+    gross: summary("gross"),
+    net: summary("net"),
+    sortIdx,
   };
 }
 
 const PL_NAVY = "bg-[#0a2a5e] text-[#fff]";
 const PL_BAND = "bg-[#dbe8fb] text-[#0a2a5e]";
+const PL_NUM = "px-3 py-1.5 text-sm text-right whitespace-nowrap tabular-nums";
 
-// kind = item | header | subtotal | total | grand
-function PLRow({ label, cur, prev, kind = "item", depth = 0 }) {
-  const num = "px-3 py-1.5 text-sm text-right whitespace-nowrap tabular-nums";
+// the number cells of one line. dcols = what columns the table shows (val / var / varpct / pct)
+function PLCells({ v, dcols, incomeV, onCell }) {
+  return dcols.map((dc, k) => {
+    let txt;
+    if (dc.t === "val") txt = plNum(v[dc.i]);
+    else if (dc.t === "var") txt = plNum((v[0] || 0) - (v[1] || 0));
+    else if (dc.t === "varpct") txt = plPct(v[0] || 0, v[1] || 0);
+    else txt = plShare(v[dc.i], incomeV[dc.i]);
+    const clickable =
+      onCell && dc.t === "val" && Math.abs(v[dc.i] || 0) >= 0.005;
+    return (
+      <td key={k} className={PL_NUM}>
+        {clickable ? (
+          <button
+            type="button"
+            onClick={() => onCell(dc.i)}
+            title="Show the entries behind this number"
+            className="hover:underline hover:text-blue-700 print:no-underline"
+          >
+            {txt}
+          </button>
+        ) : (
+          txt
+        )}
+      </td>
+    );
+  });
+}
+
+// kind = item | header | subtotal | total | grand.  toggle/open = chevron (items: show entries, headers: collapse)
+function PLRow({ line, dcols, incomeV, toggle, open = false, onCell }) {
+  const { kind, label, depth = 0, v } = line;
+  const Chev = open ? ChevronDown : ChevronRight;
+  const labelNode = toggle ? (
+    <button
+      type="button"
+      onClick={toggle}
+      className="inline-flex items-center gap-1 text-left hover:underline print:no-underline"
+    >
+      <Chev size={14} className="shrink-0 print:hidden" />
+      {label}
+    </button>
+  ) : (
+    label
+  );
 
   if (kind === "header") {
     return (
-      <tr className="text-[#0f172a] font-semibold">
-        <td colSpan={5} className="py-1.5 text-sm" style={{ paddingLeft: 12 + depth * 20 }}>
-          {label}
+      <tr className="text-[#0f172a] font-semibold border-b border-[#eef2fa]">
+        <td
+          className="px-3 py-1.5 text-sm"
+          style={{ paddingLeft: 12 + depth * 20 }}
+        >
+          {labelNode}
         </td>
+        {open ? (
+          <td colSpan={dcols.length} />
+        ) : (
+          <PLCells v={v} dcols={dcols} incomeV={incomeV} />
+        )}
       </tr>
     );
   }
@@ -6806,187 +7065,881 @@ function PLRow({ label, cur, prev, kind = "item", depth = 0 }) {
     kind === "grand"
       ? `${PL_NAVY} font-bold`
       : kind === "total"
-      ? `${PL_BAND} font-bold`
-      : kind === "subtotal"
-      ? "border-y border-[#dbe4f3] font-semibold text-[#0f172a]"
-      : "border-b border-[#dbe4f3] text-[#0f172a]";
-
+        ? `${PL_BAND} font-bold`
+        : kind === "subtotal"
+          ? "border-y border-[#dbe4f3] font-semibold text-[#0f172a]"
+          : "border-b border-[#dbe4f3] text-[#0f172a]";
   const pad =
     kind === "item"
       ? { paddingLeft: 24 + depth * 20 }
       : kind === "subtotal"
-      ? { paddingLeft: 12 + depth * 20 }
-      : undefined;
+        ? { paddingLeft: 12 + depth * 20 }
+        : undefined;
 
   return (
     <tr className={rowCls}>
       <td className="px-3 py-1.5 text-sm" style={pad}>
-        {label}
+        {labelNode}
       </td>
-      <td className={num}>{plNum(cur)}</td>
-      <td className={num}>{plNum(prev)}</td>
-      <td className={num}>{plNum(cur - prev)}</td>
-      <td className={num}>{plPct(cur, prev)}</td>
+      <PLCells v={v} dcols={dcols} incomeV={incomeV} onCell={onCell} />
     </tr>
   );
 }
 
-function PLBand({ children }) {
+// grey section band ("Income", "Cost of Goods Sold"...). Collapsed -> shows the section total on the band.
+function PLBand({ line, dcols, incomeV, toggle, open }) {
+  const Chev = open ? ChevronDown : ChevronRight;
   return (
     <tr className={PL_BAND}>
-      <td colSpan={5} className="px-3 py-1.5 text-sm font-bold">{children}</td>
+      <td className="px-3 py-1.5 text-sm font-bold">
+        <button
+          type="button"
+          onClick={toggle}
+          className="inline-flex items-center gap-1 text-left"
+        >
+          <Chev size={14} className="shrink-0 print:hidden" />
+          {line.label}
+        </button>
+      </td>
+      {open ? (
+        <td colSpan={dcols.length} />
+      ) : (
+        <PLCells v={line.v} dcols={dcols} incomeV={incomeV} />
+      )}
     </tr>
   );
 }
 
+// the dropdown under an account: its entries for the chosen period, grouped by day. Click one to open it.
+function PLTransactions({
+  accountId,
+  own,
+  from,
+  to,
+  customerId,
+  span,
+  onOpen,
+}) {
+  const { data, loading, error } = useReport(
+    () => getPLTransactions(accountId, from, to, own, customerId),
+    [accountId, own, from, to, customerId],
+  );
+  const wrap = (content) => (
+    <tr className="bg-[#f6f9ff]">
+      <td
+        colSpan={span}
+        className="py-2 text-xs text-[#64748b]"
+        style={{ paddingLeft: 44 }}
+      >
+        {content}
+      </td>
+    </tr>
+  );
+  if (loading && !data) return wrap("Loading transactions...");
+  if (error) return wrap(<span className="text-red-500">{error}</span>);
+  if (!data || data.rows.length === 0)
+    return wrap("No transactions in this period.");
+
+  const days = [];
+  data.rows.forEach((r) => {
+    let d = days[days.length - 1];
+    if (!d || d.date !== r.date) {
+      d = { date: r.date, total: 0, rows: [] };
+      days.push(d);
+    }
+    d.rows.push(r);
+    d.total = Math.round((d.total + r.amount) * 100) / 100;
+  });
+
+  return (
+    <tr className="bg-[#f6f9ff]">
+      <td colSpan={span} className="py-2 pr-3" style={{ paddingLeft: 36 }}>
+        <div className="rounded-lg border border-[#dbe4f3] bg-white overflow-hidden text-xs text-[#334155]">
+          {days.map((d) => (
+            <div key={d.date}>
+              <div className="flex justify-between gap-3 px-3 py-1 bg-[#eaf1fd] font-semibold text-[#0f172a]">
+                <span>
+                  {formatJournalDate(d.date)}
+                  <span className="font-normal text-[#64748b]">
+                    {" "}
+                    · {d.rows.length}{" "}
+                    {d.rows.length === 1 ? "entry" : "entries"}
+                  </span>
+                </span>
+                <span className="tabular-nums">{plNum(d.total)}</span>
+              </div>
+              {d.rows.map((r) => (
+                <div
+                  key={r.id}
+                  className="flex justify-between gap-3 px-3 py-1 border-t border-[#eef2fa] hover:bg-[#f6f9ff]"
+                >
+                  <span className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => onOpen(r)}
+                      title="Open this transaction"
+                      className="font-medium text-blue-700 underline print:no-underline"
+                    >
+                      {r.type} {r.number}
+                    </button>
+                    {r.name ? ` · ${r.name}` : ""}
+                    {!own && r.account && r.account !== data.account.name
+                      ? ` · ${r.account}`
+                      : ""}
+                    {r.memo && (
+                      <span className="text-[#94a3b8]"> - {r.memo}</span>
+                    )}
+                  </span>
+                  <span className="tabular-nums shrink-0">
+                    {plNum(r.amount)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+          <div className="flex justify-between gap-3 px-3 py-1 border-t border-[#dbe4f3] font-semibold text-[#0f172a]">
+            <span>Total</span>
+            <span className="tabular-nums">{plNum(data.total)}</span>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// full details of one transaction: the invoice / bill itself + the accounting entries it posted
+function PLTransactionModal({ tx, onClose }) {
+  const [journal, setJournal] = useState(null);
+  const [doc, setDoc] = useState(null); // the invoice or purchase bill
+  const [error, setError] = useState(null);
+  const [pdfFor, setPdfFor] = useState(null);
+
+  useEffect(() => {
+    let off = false;
+    getPLJournal(tx.journal_id)
+      .then((j) => !off && setJournal(j))
+      .catch((e) => !off && setError(e.message));
+    const loadDoc =
+      tx.source_type === "invoice"
+        ? invoiceRequest(
+            String(tx.source_id),
+            "GET",
+            null,
+            "Failed to load the invoice",
+          )
+        : tx.source_type === "purchase_bill"
+          ? purchaseBillRequest(
+              String(tx.source_id),
+              "GET",
+              null,
+              "Failed to load the bill",
+            )
+          : null;
+    loadDoc?.then((d) => !off && setDoc(d)).catch(() => {});
+    return () => {
+      off = true;
+    };
+  }, [tx.journal_id]);
+
+  const isInvoice = tx.source_type === "invoice" && doc;
+  const isBill = tx.source_type === "purchase_bill" && doc;
+  const st = isInvoice ? invoiceStatus(doc) : null;
+  const th = "py-1.5 text-xs font-semibold text-gray-500";
+  const row = (k, val) =>
+    val ? (
+      <div className="flex justify-between gap-3 py-0.5">
+        <span className="text-gray-500">{k}</span>
+        <span className="text-gray-900 text-right">{val}</span>
+      </div>
+    ) : null;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200">
+          <h3 className="font-semibold text-gray-900 truncate">
+            {tx.type} {tx.number}
+            {tx.name && (
+              <span className="text-gray-400 font-normal"> · {tx.name}</span>
+            )}
+          </h3>
+          <div className="flex items-center gap-2 shrink-0">
+            {isInvoice && (
+              <button
+                type="button"
+                onClick={() => setPdfFor(doc)}
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+              >
+                View PDF
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-sm font-medium hover:bg-blue-700"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-y-auto p-4 space-y-5 text-sm">
+          {error && <p className="text-red-500">{error}</p>}
+          {!journal && !error && (
+            <p className="text-gray-400 text-center py-10">Loading...</p>
+          )}
+
+          {(isInvoice || isBill) && (
+            <section>
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  {isInvoice ? "Invoice" : "Bill"} details
+                </h4>
+                {st && (
+                  <span
+                    className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}
+                  >
+                    {st.label}
+                  </span>
+                )}
+              </div>
+              <div className="grid sm:grid-cols-2 gap-x-8">
+                {isInvoice ? (
+                  <>
+                    {row("Customer", doc.customer_name)}
+                    {row("Invoice date", formatJournalDate(doc.invoice_date))}
+                    {row("Due date", formatJournalDate(doc.due_date))}
+                    {row("PO / order no.", doc.order_number)}
+                  </>
+                ) : (
+                  <>
+                    {row("Vendor", doc.vendor_name)}
+                    {row("Vendor invoice no.", doc.vendor_ref)}
+                    {row("Bill date", formatJournalDate(doc.bill_date))}
+                    {row("Due date", formatJournalDate(doc.due_date))}
+                  </>
+                )}
+              </div>
+              {doc.notes && (
+                <p className="text-xs text-gray-500 mt-2">Notes: {doc.notes}</p>
+              )}
+
+              <table className="w-full mt-3">
+                <thead>
+                  <tr className="border-b border-gray-200 text-left">
+                    <th className={th}>Item</th>
+                    <th className={`${th} text-right`}>Qty</th>
+                    <th className={`${th} text-right`}>Rate</th>
+                    <th className={`${th} text-right`}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(doc.items || []).map((l) => (
+                    <tr key={l.id} className="border-b border-gray-100">
+                      <td className="py-1.5 pr-2">
+                        {l.description || l.item_name}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums">
+                        {l.quantity}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums">
+                        {formatRs(l.rate)}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums">
+                        {formatRs(l.amount)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="mt-2 ml-auto max-w-xs">
+                {isInvoice && row("Subtotal", formatRs(doc.subtotal))}
+                {isInvoice &&
+                  doc.discount_amount > 0 &&
+                  row("Discount", `- ${formatRs(doc.discount_amount)}`)}
+                <div className="flex justify-between gap-3 py-0.5 font-semibold">
+                  <span>Total</span>
+                  <span>{formatRs(doc.total)}</span>
+                </div>
+                {row("Paid", formatRs(doc.amount_paid))}
+                <div className="flex justify-between gap-3 py-0.5 font-semibold">
+                  <span>Balance due</span>
+                  <span>{formatRs(doc.balance_due)}</span>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {journal && (
+            <section>
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">
+                Accounting entries · {formatJournalDate(journal.date)}
+              </h4>
+              {!isInvoice &&
+                !isBill &&
+                (journal.reference || journal.notes) && (
+                  <p className="text-xs text-gray-500 mb-2">
+                    {[journal.reference, journal.notes]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                )}
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-200 text-left">
+                    <th className={th}>Account</th>
+                    <th className={th}>Description</th>
+                    <th className={`${th} text-right`}>Debit</th>
+                    <th className={`${th} text-right`}>Credit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {journal.lines.map((l, i) => (
+                    <tr key={i} className="border-b border-gray-100">
+                      <td className="py-1.5 pr-2">{l.account}</td>
+                      <td className="py-1.5 pr-2 text-gray-500">
+                        {l.description}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums">
+                        {l.debit ? formatRs(l.debit) : ""}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums">
+                        {l.credit ? formatRs(l.credit) : ""}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="font-semibold">
+                    <td className="py-1.5" colSpan={2}>
+                      Total
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">
+                      {formatRs(journal.total_debit)}
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">
+                      {formatRs(journal.total_credit)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+          )}
+        </div>
+      </div>
+      {pdfFor && (
+        <InvoicePreviewModal invoice={pdfFor} onClose={() => setPdfFor(null)} />
+      )}
+    </div>
+  );
+}
+
+const PL_PRESETS = [
+  ["today", "Today"],
+  ["yesterday", "Yesterday"],
+  ["week", "This Week"],
+  ["month", "This Month"],
+  ["lastMonth", "Last Month"],
+  ["quarter", "This Quarter"],
+  ["lastQuarter", "Last Quarter"],
+  ["year", "This Year (to date)"],
+  ["lastYear", "Last Year"],
+  ["last30", "Last 30 Days"],
+  ["last12", "Last 12 Months"],
+  ["custom", "Custom"],
+];
+function plPresetRange(key) {
+  const n = new Date();
+  const y = n.getFullYear();
+  const m = n.getMonth();
+  const q = Math.floor(m / 3) * 3;
+  const today = localIso(n);
+  if (key === "today") return [today, today];
+  if (key === "yesterday") return [addDays(today, -1), addDays(today, -1)];
+  if (key === "week") {
+    const mon = addDays(today, -((n.getDay() + 6) % 7)); // weeks run Monday - Sunday
+    return [mon, addDays(mon, 6)];
+  }
+  if (key === "month")
+    return [localIso(new Date(y, m, 1)), localIso(new Date(y, m + 1, 0))];
+  if (key === "lastMonth")
+    return [localIso(new Date(y, m - 1, 1)), localIso(new Date(y, m, 0))];
+  if (key === "quarter")
+    return [localIso(new Date(y, q, 1)), localIso(new Date(y, q + 3, 0))];
+  if (key === "lastQuarter")
+    return [localIso(new Date(y, q - 3, 1)), localIso(new Date(y, q, 0))];
+  if (key === "lastYear") return [`${y - 1}-01-01`, `${y - 1}-12-31`];
+  if (key === "last30") return [addDays(today, -29), today];
+  if (key === "last12") return [addDays(shiftYear(today, -1), 1), today];
+  return [`${y}-01-01`, today]; // year to date
+}
+
+const PL_VIEWS = [
+  ["total", "Total only"],
+  ["prev", "Compare: previous period"],
+  ["prevYear", "Compare: previous year"],
+  ["day", "Columns: by day"],
+  ["week", "Columns: by week"],
+  ["month", "Columns: by month"],
+  ["quarter", "Columns: by quarter"],
+  ["year", "Columns: by year"],
+];
+
 function ProfitLossReport() {
+  const [preset, setPreset] = useState("year");
   const [from, setFrom] = useState(`${new Date().getFullYear()}-01-01`);
   const [to, setTo] = useState(localIso());
-  const [prevFrom, prevTo] = previousPeriod(from, to);
+  const [view, setView] = useState("prev"); // see PL_VIEWS
+  const [customerId, setCustomerId] = useState("");
+  const [customers, setCustomers] = useState([]);
+  const [showZero, setShowZero] = useState(false);
+  const [showPct, setShowPct] = useState(false); // "% of Income" column
+  const [sortMode, setSortMode] = useState("name");
+  const [tick, setTick] = useState(0); // Refresh button
+  const [collapsed, setCollapsed] = useState(() => new Set()); // "sec:income" / "acc:12"
+  const [openRows, setOpenRows] = useState(() => new Map()); // line key -> value column whose entries are showing
+  const [txOpen, setTxOpen] = useState(null); // the transaction whose details are open
+
+  useEffect(() => {
+    getCustomers()
+      .then((c) =>
+        setCustomers(
+          [...c].sort((a, b) => compareNames(a.display_name, b.display_name)),
+        ),
+      )
+      .catch(() => {});
+  }, []);
 
   const { data, loading, error } = useReport(async () => {
-    const [cur, prev] = await Promise.all([
-      getProfitLoss(from, to),
-      getProfitLoss(prevFrom, prevTo),
-    ]);
-    return { cur, prev };
-  }, [from, to]);
+    const cust = customerId || null;
+    if (view === "prev" || view === "prevYear") {
+      const prevRange =
+        view === "prev"
+          ? previousPeriod(from, to)
+          : [shiftYear(from, -1), shiftYear(to, -1)];
+      const [cur, prev] = await Promise.all([
+        getPLColumns(from, to, "total", cust, showZero),
+        getPLColumns(prevRange[0], prevRange[1], "total", cust, showZero),
+      ]);
+      return { src: [cur, prev], ranges: [[from, to], prevRange] };
+    }
+    const cur = await getPLColumns(from, to, view, cust, showZero);
+    return { src: [cur], ranges: [[from, to]] };
+  }, [from, to, view, customerId, showZero, tick]);
 
-  const pl = data ? buildPL(data.cur, data.prev) : null;
+  const vcs = data ? plValueColumns(view, data, from, to) : [];
+  const built = data ? buildPLLines(data, vcs, sortMode) : null;
+  const multi = view !== "total" && view !== "prev" && view !== "prevYear"; // columns by period
 
-  // QuickBooks style section: grey band, parent + sub-accounts, then "Total ..."
-  const section = (title, grp, totalLabel, always = false) => {
-    if (!always && grp.rows.length === 0 && !grp.cur && !grp.prev) return null;
-    return (
-      <>
-        <PLBand>{title}</PLBand>
-        {grp.rows.map((r) => (
-          <PLRow
-            key={`${grp.key}-${r.key}`}
-            label={r.label}
-            cur={r.cur}
-            prev={r.prev}
-            depth={r.depth}
-            kind={r.kind}
-          />
-        ))}
-        <PLRow kind="total" label={totalLabel} cur={grp.cur} prev={grp.prev} />
-      </>
+  // what the table shows, left to right
+  const dcols = [];
+  if (data) {
+    vcs.forEach((vc, i) => dcols.push({ t: "val", i, label: vc.label, vc }));
+    if (view === "prev" || view === "prevYear") {
+      dcols.push(
+        { t: "var", label: "Variance" },
+        { t: "varpct", label: "Variance %" },
+      );
+    }
+    if (showPct)
+      dcols.push({ t: "pct", i: built.sortIdx, label: "% of Income" });
+  }
+  const span = dcols.length + 1;
+  const whole = multi ? vcs.length - 1 : 0; // the value column that covers the whole report period
+
+  const flip = (setter, key) =>
+    setter((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  const toggleRow = (key, col) =>
+    setOpenRows((prev) => {
+      const next = new Map(prev);
+      next.get(key) === col ? next.delete(key) : next.set(key, col);
+      return next;
+    });
+
+  const pickPreset = (key) => {
+    setPreset(key);
+    if (key !== "custom") {
+      const [f, t] = plPresetRange(key);
+      setFrom(f);
+      setTo(t);
+      setOpenRows(new Map());
+    }
+  };
+  const collapseAll = () => {
+    const all = new Set();
+    built?.lines.forEach((l) => {
+      if (l.kind === "band") all.add(l.secKey);
+      if (l.kind === "header") all.add(`acc:${l.id}`);
+    });
+    setCollapsed(all);
+    setOpenRows(new Map());
+  };
+
+  const exportCsv = () => {
+    if (!built) return;
+    const esc = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
+    const cell = (l, dc) =>
+      dc.t === "val"
+        ? (l.v[dc.i] || 0).toFixed(2)
+        : dc.t === "var"
+          ? ((l.v[0] || 0) - (l.v[1] || 0)).toFixed(2)
+          : dc.t === "varpct"
+            ? plPct(l.v[0] || 0, l.v[1] || 0)
+            : plShare(l.v[dc.i], built.income[dc.i]);
+    const rows = [
+      ["Profit & Loss"],
+      [`${from} to ${to}`],
+      [],
+      ["", ...dcols.map((d) => d.label)],
+      ...built.lines
+        .filter((l) => l.kind !== "header")
+        .map((l) => [
+          `${"   ".repeat(l.depth || 0)}${l.label}`,
+          ...dcols.map((dc) => cell(l, dc)),
+        ]),
+    ];
+    const blob = new Blob(
+      ["\ufeff" + rows.map((r) => r.map(esc).join(",")).join("\r\n")],
+      {
+        type: "text/csv;charset=utf-8",
+      },
     );
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `profit-and-loss_${from}_to_${to}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const btn =
+    "flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-gray-300 bg-white text-gray-700 hover:bg-gray-50";
+  const sel =
+    "border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1 bg-white";
+  const lastIdx = built ? built.sortIdx : 0;
+  const margin = (n, d) =>
+    d ? `${((n / d) * 100).toFixed(1)}% of income` : "";
+
+  const renderLine = (l) => {
+    if (l.kind === "band") {
+      return (
+        <PLBand
+          key={l.key}
+          line={l}
+          dcols={dcols}
+          incomeV={built.income}
+          open={!collapsed.has(l.secKey)}
+          toggle={() => flip(setCollapsed, l.secKey)}
+        />
+      );
+    }
+    if (l.secKey && collapsed.has(l.secKey)) return null;
+    if ((l.anc || []).some((id) => collapsed.has(`acc:${id}`))) return null;
+    if (l.kind === "subtotal" && collapsed.has(`acc:${l.id}`)) return null;
+
+    if (l.kind === "header") {
+      return (
+        <PLRow
+          key={l.key}
+          line={l}
+          dcols={dcols}
+          incomeV={built.income}
+          open={!collapsed.has(`acc:${l.id}`)}
+          toggle={() => flip(setCollapsed, `acc:${l.id}`)}
+        />
+      );
+    }
+    if (l.kind === "item") {
+      const col = openRows.get(l.key);
+      const isOpen = col !== undefined;
+      const vc = vcs[isOpen ? col : whole];
+      return (
+        <Fragment key={l.key}>
+          <PLRow
+            line={l}
+            dcols={dcols}
+            incomeV={built.income}
+            open={isOpen}
+            toggle={() => toggleRow(l.key, whole)}
+            onCell={(i) => toggleRow(l.key, i)}
+          />
+          {isOpen && (
+            <PLTransactions
+              accountId={l.accountId}
+              own={Boolean(l.own)}
+              from={vc.from}
+              to={vc.to}
+              customerId={customerId}
+              span={span}
+              onOpen={setTxOpen}
+            />
+          )}
+        </Fragment>
+      );
+    }
+    return <PLRow key={l.key} line={l} dcols={dcols} incomeV={built.income} />;
   };
 
   return (
     <>
-      <div className="flex flex-wrap items-end gap-3 mb-4 print:hidden">
-        <div className="grid grid-cols-2 gap-3 max-w-sm flex-1">
-          <label className="text-xs text-gray-500">
-            From
-            <input
-              type="date"
-              value={from}
-              max={to}
-              onChange={(e) => e.target.value && setFrom(e.target.value)}
-              className={dateInputCls}
-            />
-          </label>
-          <label className="text-xs text-gray-500">
-            To
-            <input
-              type="date"
-              value={to}
-              min={from}
-              onChange={(e) => e.target.value && setTo(e.target.value)}
-              className={dateInputCls}
-            />
-          </label>
-        </div>
-        <button
-          onClick={() => window.print()}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
-        >
-          <Printer size={16} /> Print / Save PDF
-        </button>
+      <div className="flex flex-wrap items-end gap-3 mb-3 print:hidden">
+        <label className="text-xs text-gray-500">
+          Report period
+          <select
+            value={preset}
+            onChange={(e) => pickPreset(e.target.value)}
+            className={`${sel} block`}
+          >
+            {PL_PRESETS.map(([k, l]) => (
+              <option key={k} value={k}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-gray-500">
+          From
+          <input
+            type="date"
+            value={from}
+            max={to}
+            onChange={(e) => {
+              if (!e.target.value) return;
+              setFrom(e.target.value);
+              setPreset("custom");
+              setOpenRows(new Map());
+            }}
+            className={`${sel} block`}
+          />
+        </label>
+        <label className="text-xs text-gray-500">
+          To
+          <input
+            type="date"
+            value={to}
+            min={from}
+            onChange={(e) => {
+              if (!e.target.value) return;
+              setTo(e.target.value);
+              setPreset("custom");
+              setOpenRows(new Map());
+            }}
+            className={`${sel} block`}
+          />
+        </label>
+        <label className="text-xs text-gray-500">
+          Columns
+          <select
+            value={view}
+            onChange={(e) => {
+              setView(e.target.value);
+              setOpenRows(new Map());
+            }}
+            className={`${sel} block`}
+          >
+            {PL_VIEWS.map(([k, l]) => (
+              <option key={k} value={k}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-gray-500">
+          Customer
+          <select
+            value={customerId}
+            onChange={(e) => {
+              setCustomerId(e.target.value);
+              setOpenRows(new Map());
+            }}
+            className={`${sel} block max-w-[200px]`}
+          >
+            <option value="">All customers</option>
+            {customers.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.display_name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-gray-500">
+          Sort rows
+          <select
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value)}
+            className={`${sel} block`}
+          >
+            <option value="name">Account name</option>
+            <option value="amount">Highest amount</option>
+          </select>
+        </label>
       </div>
 
+      <div className="flex flex-wrap items-center gap-3 mb-4 print:hidden">
+        <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          <input
+            type="checkbox"
+            checked={showPct}
+            onChange={(e) => setShowPct(e.target.checked)}
+          />
+          % of Income
+        </label>
+        <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          <input
+            type="checkbox"
+            checked={showZero}
+            onChange={(e) => setShowZero(e.target.checked)}
+          />
+          Show zero accounts
+        </label>
+        <div className="flex flex-wrap gap-2 ml-auto">
+          <button onClick={() => setCollapsed(new Set())} className={btn}>
+            Expand all
+          </button>
+          <button onClick={collapseAll} className={btn}>
+            Collapse all
+          </button>
+          <button onClick={() => setTick((t) => t + 1)} className={btn}>
+            Refresh
+          </button>
+          <button onClick={exportCsv} disabled={!built} className={btn}>
+            Export CSV
+          </button>
+          <button onClick={() => window.print()} className={btn}>
+            <Printer size={16} /> Print / Save PDF
+          </button>
+        </div>
+      </div>
+
+      {customerId && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 print:hidden">
+          Customer filter: only that customer's invoices and credit notes are
+          included. Bills, manual journals and other postings are left out.
+        </p>
+      )}
+
       <ReportBody loading={loading} error={error} data={data}>
-        {pl && (
-          <div className="pl-statement bg-[#fff] text-[#0f172a] rounded-xl border border-[#dbe4f3] p-4">
-            <p className="text-xs text-[#64748b] mb-3">
-              Accrual basis · {formatJournalDate(from)} to{" "}
-              {formatJournalDate(to)} · compared with{" "}
-              {formatJournalDate(prevFrom)} to {formatJournalDate(prevTo)}
-            </p>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] border-collapse">
-                <thead>
-                  <tr className={PL_NAVY}>
-                    <th className="px-3 py-2.5 text-left text-sm font-semibold rounded-tl-lg">
-                      Particulars
-                    </th>
-                    <th className="px-3 py-2.5 text-right text-sm font-semibold">
-                      Current Period
-                      <br />
-                      (Rs.)
-                    </th>
-                    <th className="px-3 py-2.5 text-right text-sm font-semibold">
-                      Previous Period
-                      <br />
-                      (Rs.)
-                    </th>
-                    <th className="px-3 py-2.5 text-right text-sm font-semibold">
-                      Variance
-                      <br />
-                      (Rs.)
-                    </th>
-                    <th className="px-3 py-2.5 text-right text-sm font-semibold rounded-tr-lg">
-                      Variance %
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {section("Income", pl.income, "Total Income", true)}
-                  {section("Cost of Goods Sold", pl.cogs, "Total COGS", true)}
-                  <PLRow
-                    kind="total"
-                    label="Gross Profit"
-                    cur={pl.gross.cur}
-                    prev={pl.gross.prev}
-                  />
-
-                  {section("Expense", pl.expense, "Total Expense", true)}
-                  <PLRow
-                    kind="total"
-                    label="Net Operating Income"
-                    cur={pl.operating.cur}
-                    prev={pl.operating.prev}
-                  />
-
-                  {section(
-                    "Other Income",
-                    pl.otherIncome,
-                    "Total Other Income",
-                  )}
-                  {section(
-                    "Other Expense",
-                    pl.otherExpense,
-                    "Total Other Expense",
-                  )}
-
-                  <tr>
-                    <td colSpan={5} className="h-2" />
-                  </tr>
-                  <PLRow
-                    kind="grand"
-                    label="Net Income"
-                    cur={pl.net.cur}
-                    prev={pl.net.prev}
-                  />
-                </tbody>
-              </table>
+        {built && (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 print:hidden">
+              {[
+                ["Income", built.income[lastIdx], ""],
+                [
+                  "Gross profit",
+                  built.gross[lastIdx],
+                  margin(built.gross[lastIdx], built.income[lastIdx]),
+                ],
+                [
+                  "Net income",
+                  built.net[lastIdx],
+                  margin(built.net[lastIdx], built.income[lastIdx]),
+                ],
+                [
+                  "Total expenses",
+                  built.income[lastIdx] - built.net[lastIdx],
+                  margin(
+                    built.income[lastIdx] - built.net[lastIdx],
+                    built.income[lastIdx],
+                  ),
+                ],
+              ].map(([label, value, sub]) => (
+                <div
+                  key={label}
+                  className="bg-white border border-gray-200 rounded-xl p-3"
+                >
+                  <p className="text-xs text-gray-400">{label}</p>
+                  <p
+                    className={`text-lg font-bold mt-0.5 ${value < 0 ? "text-red-600" : "text-gray-900"}`}
+                  >
+                    {formatRs(value)}
+                  </p>
+                  {sub && <p className="text-[11px] text-gray-400">{sub}</p>}
+                </div>
+              ))}
             </div>
-          </div>
+
+            <div className="pl-statement bg-[#fff] text-[#0f172a] rounded-xl border border-[#dbe4f3] p-4">
+              <div className="text-center mb-3">
+                <h2 className="text-xl font-bold">Profit &amp; Loss</h2>
+                <p className="text-sm font-semibold text-[#334155]">
+                  {formatJournalDate(from)} – {formatJournalDate(to)}
+                </p>
+                {(view === "prev" || view === "prevYear") && (
+                  <p className="text-xs text-[#64748b]">
+                    compared with {formatJournalDate(data.ranges[1][0])} to{" "}
+                    {formatJournalDate(data.ranges[1][1])}
+                  </p>
+                )}
+                {customerId && (
+                  <p className="text-xs text-[#64748b]">
+                    Customer:{" "}
+                    {
+                      customers.find((c) => String(c.id) === String(customerId))
+                        ?.display_name
+                    }
+                  </p>
+                )}
+              </div>
+              <p className="text-xs text-[#64748b] mb-2 print:hidden">
+                Click an account to see its daily entries
+                {multi ? " (or click a number for that column)" : ""}, then
+                click an invoice to open it.
+              </p>
+              <div className="overflow-x-auto">
+                <table
+                  className={`w-full border-collapse ${multi ? "min-w-max" : "min-w-[560px]"}`}
+                >
+                  <thead>
+                    <tr className={PL_NAVY}>
+                      <th className="px-3 py-2.5 text-left text-sm font-semibold rounded-tl-lg">
+                        Particulars
+                      </th>
+                      {dcols.map((dc, k) => (
+                        <th
+                          key={k}
+                          className={`px-3 py-2.5 text-right text-sm font-semibold whitespace-nowrap ${
+                            k === dcols.length - 1 ? "rounded-tr-lg" : ""
+                          }`}
+                        >
+                          {dc.label}
+                          {!multi && dc.t !== "varpct" && dc.t !== "pct" && (
+                            <>
+                              <br />
+                              (Rs.)
+                            </>
+                          )}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {built.lines.map((l, i) =>
+                      l.kind === "grand" ? (
+                        <Fragment key={l.key}>
+                          <tr>
+                            <td colSpan={span} className="h-2" />
+                          </tr>
+                          {renderLine(l)}
+                        </Fragment>
+                      ) : (
+                        renderLine(l)
+                      ),
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-[#64748b] mt-3">
+                Accrual basis · {new Date().toLocaleString()}
+              </p>
+            </div>
+          </>
         )}
       </ReportBody>
+
+      {txOpen && (
+        <PLTransactionModal tx={txOpen} onClose={() => setTxOpen(null)} />
+      )}
     </>
   );
 }
@@ -8756,7 +9709,9 @@ const CUSTOMER_TERMS = [
 // ---------- Monthly top-sellers side panels (Customers page + Items page, desktop only) ----------
 function useIsDesktop(minWidth = 1024) {
   const query = `(min-width: ${minWidth}px)`;
-  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+  const [matches, setMatches] = useState(
+    () => window.matchMedia(query).matches,
+  );
   useEffect(() => {
     const mq = window.matchMedia(query);
     const onChange = (e) => setMatches(e.matches);
@@ -8784,12 +9739,26 @@ const getMonthSales = (month) => {
 
 function useMonthSales() {
   const [month, setMonth] = useState(localIso().slice(0, 7));
-  const { data, loading, error } = useReport(() => getMonthSales(month), [month]);
+  const { data, loading, error } = useReport(
+    () => getMonthSales(month),
+    [month],
+  );
   return { month, setMonth, data, loading, error };
 }
 
 // rows: [{ key, name, meta, value, amount }]  (amount drives the bar length)
-function TopListPanel({ title, icon: Icon, month, onMonth, loading, error, data, rows, footer, empty }) {
+function TopListPanel({
+  title,
+  icon: Icon,
+  month,
+  onMonth,
+  loading,
+  error,
+  data,
+  rows,
+  footer,
+  empty,
+}) {
   if (error && !data) return null; // e.g. this user has no access to reports: just hide the panel
   const max = Math.max(...rows.map((r) => r.amount), 1);
   return (
@@ -8817,19 +9786,28 @@ function TopListPanel({ title, icon: Icon, month, onMonth, loading, error, data,
             <li key={r.key} className="flex items-start gap-3">
               <span
                 className={`shrink-0 w-6 h-6 rounded-full text-xs font-semibold flex items-center justify-center ${
-                  i === 0 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-500"
+                  i === 0
+                    ? "bg-amber-100 text-amber-700"
+                    : "bg-gray-100 text-gray-500"
                 }`}
               >
                 {i + 1}
               </span>
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between gap-2">
-                  <p className="text-sm font-medium text-gray-900 truncate">{r.name}</p>
-                  <p className="text-sm font-semibold text-gray-900 shrink-0">{r.value}</p>
+                  <p className="text-sm font-medium text-gray-900 truncate">
+                    {r.name}
+                  </p>
+                  <p className="text-sm font-semibold text-gray-900 shrink-0">
+                    {r.value}
+                  </p>
                 </div>
                 <p className="text-xs text-gray-400">{r.meta}</p>
                 <div className="h-1.5 rounded-full bg-gray-100 mt-1.5">
-                  <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.max(4, (r.amount / max) * 100)}%` }} />
+                  <div
+                    className="h-full rounded-full bg-blue-500"
+                    style={{ width: `${Math.max(4, (r.amount / max) * 100)}%` }}
+                  />
                 </div>
               </div>
             </li>
@@ -8837,7 +9815,11 @@ function TopListPanel({ title, icon: Icon, month, onMonth, loading, error, data,
         </ol>
       )}
 
-      {footer && rows.length > 0 && <p className="text-xs text-gray-500 border-t border-gray-100 mt-4 pt-3">{footer}</p>}
+      {footer && rows.length > 0 && (
+        <p className="text-xs text-gray-500 border-t border-gray-100 mt-4 pt-3">
+          {footer}
+        </p>
+      )}
     </aside>
   );
 }
@@ -8865,7 +9847,11 @@ function TopBuyersPanel() {
       data={data}
       rows={rows}
       empty="No sales in this month."
-      footer={data ? `${data.totals.customer_count} customers bought · total ${formatRs(data.totals.sales)}` : ""}
+      footer={
+        data
+          ? `${data.totals.customer_count} customers bought · total ${formatRs(data.totals.sales)}`
+          : ""
+      }
     />
   );
 }
@@ -8894,7 +9880,11 @@ function TopSoldItemsPanel() {
       data={data}
       rows={rows}
       empty="No items sold in this month."
-      footer={data ? `${data.totals.items_sold} items sold in ${data.totals.invoice_count} invoices` : ""}
+      footer={
+        data
+          ? `${data.totals.items_sold} items sold in ${data.totals.invoice_count} invoices`
+          : ""
+      }
     />
   );
 }
@@ -9425,7 +10415,7 @@ function AccountDetail({ accountId, go, fromParam }) {
           <>
             <div className="bg-white border border-gray-200 rounded-xl p-4">
               <dl className="space-y-2 text-sm">
-                <DetailRow label="Category" value={data.category || "—"} />
+                <DetailRow label="Category" value={data.category || "-"} />
                 {data.account_code && (
                   <DetailRow label="Account code" value={data.account_code} />
                 )}
@@ -9699,7 +10689,6 @@ function useAccountLayout() {
   const reset = () => setLayout(save(ACCT_LAYOUT_DEFAULT));
   return [layout, update, reset];
 }
-
 
 function orderAccountTree(list) {
   const ids = new Set(list.map((a) => a.id));
@@ -10456,7 +11445,7 @@ function AccountForm({ initialData, onClose, onSubmit }) {
               onChange={(e) => handleChange("parent_id", e.target.value)}
               className={fieldCls}
             >
-              <option value="">— None (main account) —</option>
+              <option value="">- None (main account) -</option>
               {allAccounts
                 .filter(
                   (a) =>
@@ -15013,7 +16002,7 @@ function CreateItemPanel({
     const name = form.name.trim();
     if (!name) return setError("Enter an item name");
     if (existingNames.includes(name.toLowerCase())) {
-      return setError("This item already exists — select it from the list");
+      return setError("This item already exists - select it from the list");
     }
     if (form.is_subitem && !form.parent_id) {
       return setError('Select the parent item, or untick "Subitem of"');
@@ -15103,7 +16092,7 @@ function CreateItemPanel({
       </div>
       <div>
         <label className="block text-xs text-gray-500 mb-1">
-          Images (optional — you can add them later)
+          Images (optional - you can add them later)
         </label>
         <input
           type="file"
@@ -15380,7 +16369,7 @@ function NewBillForm({ onBack, onSaved, editBill = null }) {
                 />
                 {billableItems.length === 0 && !showCreateItem && (
                   <p className="text-xs text-gray-400 mt-1.5">
-                    No items yet — use “Create Item” to add one.
+                    No items yet - use “Create Item” to add one.
                   </p>
                 )}
 
@@ -15842,14 +16831,14 @@ function ReviewIssuedModal({
             </p>
             <p className="text-xs text-amber-700 mb-2">
               These approved requests are for items in this list but are not
-              ticked. If they are part of this list, go back and tick them —
+              ticked. If they are part of this list, go back and tick them -
               otherwise they will be deducted a second time.
             </p>
             <ul className="text-xs text-amber-800 space-y-0.5">
               {warnings.map((w) => (
                 <li key={w.id}>
                   • {w.product?.name || `Product #${w.product_id}`} ×{" "}
-                  {w.quantity} — {w.requested_by || "unknown"}, approved{" "}
+                  {w.quantity} - {w.requested_by || "unknown"}, approved{" "}
                   {formatDateTime(w.resolved_at)}
                 </li>
               ))}
@@ -16114,7 +17103,7 @@ function NewIssuedForm({ onBack, onSaved }) {
             <span className="text-gray-500 font-normal">× {r.quantity}</span>
           </p>
           <p className="text-xs text-gray-400 truncate">
-            Requested by {r.requested_by || "—"} · approved{" "}
+            Requested by {r.requested_by || "-"} · approved{" "}
             {formatDateTime(r.resolved_at)}
           </p>
           {disabled && (
@@ -16185,8 +17174,8 @@ function NewIssuedForm({ onBack, onSaved }) {
                   searchPlaceholder="Search items..."
                   emptyText={
                     products.length
-                      ? "No item found — use “Create Product”"
-                      : "No products yet — use “Create Product”"
+                      ? "No item found - use “Create Product”"
+                      : "No products yet - use “Create Product”"
                   }
                 />
 
@@ -16714,7 +17703,7 @@ function IssuedPage({ go, autoCreateToken }) {
                                           `Product #${r.product_id}`}
                                       </p>
                                       <p className="text-xs text-gray-400 truncate">
-                                        {r.requested_by || "—"}
+                                        {r.requested_by || "-"}
                                         {r.resolved_at
                                           ? ` · approved ${formatDateTime(r.resolved_at)}`
                                           : ""}
