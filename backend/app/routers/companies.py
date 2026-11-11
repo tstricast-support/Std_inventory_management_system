@@ -12,6 +12,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import func, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from ..audit import log_audit_company
@@ -225,6 +226,64 @@ def update_company(company_id: int, payload: CompanyUpdate, request: Request,
     company = _managed_company(db, user, company_id)
     return _save_company(db, request, user, company, payload, payload.is_active)
 
+# ---------- delete (PERMANENT) ----------
+class DeleteCompanyIn(BaseModel):
+    confirm: str = Field(max_length=300)      # must be exactly:  delete <company name>
+
+
+@router.post("/companies/{company_id}/delete")
+def delete_company(company_id: int, payload: DeleteCompanyIn, request: Request,
+                   db: Session = Depends(get_public_db), ctx=Depends(get_user_and_company)):
+    """Permanently deletes ONE company: its whole schema co_<id> (every invoice, item, customer, ...), the company
+    row, everybody's access to it, and its pictures/logo in ImageKit. There is no undo, so:
+    needs 'manage_companies', the caller must have access to it, the confirmation text must match exactly,
+    you cannot delete the company you are working in, and you cannot delete the last active company."""
+    user, current_id = ctx
+    _require_manage(user)
+    company = _managed_company(db, user, company_id)
+    expected = f"delete {company.name}"
+    if (payload.confirm or "").strip() != expected:
+        raise HTTPException(400, f"To confirm, type exactly: {expected}")
+    if company.id == current_id:
+        raise HTTPException(400, "You are working inside this company. Open another company first, then delete this one.")
+    if company.is_active and db.query(Company.id).filter(
+            Company.is_active == True, Company.id != company.id).first() is None:  # noqa: E712
+        raise HTTPException(400, "You cannot delete the last active company.")
+
+    name, schema = company.name, schema_for(company.id)
+    S = quote_schema(schema)
+    file_ids = [company.logo_file_id] if company.logo_file_id else []
+    db.rollback()                                   # end the read transaction so it cannot block the DROP below
+
+    try:                                            # remember the ImageKit files BEFORE the data is gone
+        with engine.connect() as c:
+            file_ids += [r[0] for r in c.execute(text(f"SELECT file_id FROM {S}.product_images WHERE file_id IS NOT NULL"))]
+    except Exception:
+        log.warning("could not list product images of %s before deleting it", schema)
+
+    try:
+        with engine.begin() as conn:                # ONE transaction: the schema and the company row go together or not at all
+            conn.execute(text("SET LOCAL lock_timeout = '10s'"))
+            conn.execute(text(f"DROP SCHEMA IF EXISTS {S} CASCADE"))
+            conn.execute(text("DELETE FROM public.companies WHERE id = :i"), {"i": company_id})
+    except OperationalError:
+        log.exception("company %s is busy, delete cancelled", company_id)
+        raise HTTPException(409, "Someone is still working in this company. Try again in a minute. Nothing was deleted.")
+    except Exception:
+        log.exception("deleting company %s failed", company_id)
+        raise HTTPException(500, "Could not delete the company. Nothing was deleted.")
+
+    failed = 0
+    for fid in file_ids:                            # best effort: the data is already gone, a leftover picture is harmless
+        try:
+            delete_image(fid)
+        except Exception:
+            failed += 1
+            log.exception("could not delete ImageKit file %s of deleted company %s", fid, company_id)
+    # the deleted company's own audit log is gone with it, so the event is recorded in the company the user is in
+    log_audit_company(current_id, user, "company_deleted", "company", company_id,
+                      f"Company '{name}' (#{company_id}) permanently deleted", request)
+    return {"deleted": company_id, "name": name, "images_not_removed": failed}
 
 # ---------- profile of the CURRENT company ----------
 @router.get("/company/profile")

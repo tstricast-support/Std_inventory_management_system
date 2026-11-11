@@ -1,6 +1,3 @@
-// src/company.jsx  (NEW FILE)
-// Everything about "which company am I in": the profile (name/address/logo/footer), the sidebar header,
-// the Company profile page (view=company) and the "Create company" modal.
 import {
   createContext,
   useCallback,
@@ -10,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Building2, Plus, Upload, X } from "lucide-react";
+import { Building2, Plus, Trash2, Upload, X } from "lucide-react";
 import { BASE_URL, apiFetch, setAccessToken } from "./api.js";
 import { useAuth } from "./auth.jsx";
 import { clearCompanyProfileCache } from "./pdf.js";
@@ -397,6 +394,105 @@ export function CreateCompanyModal({ onClose, onCreated }) {
 }
 
 // ---------------------------------------------------------------------------
+// "Delete company" window: PERMANENT, you must type  delete <company name>
+// ---------------------------------------------------------------------------
+function DeleteCompanyModal({ target, onClose, onDeleted }) {
+  const phrase = `delete ${target.name}`;
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const matches = typed.trim() === phrase;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!matches || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await apiFetch(`${BASE_URL}/companies/${target.id}/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: typed.trim() }),
+      });
+      if (!res.ok)
+        throw new Error(await readError(res, "Could not delete the company"));
+      onDeleted?.(target);
+      onClose();
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 text-gray-900">
+      <form
+        onSubmit={submit}
+        className="w-full max-w-lg bg-white rounded-xl shadow-xl border border-gray-200"
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+          <h2 className="font-semibold text-red-700">Delete company</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="p-1 rounded hover:bg-gray-100"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="p-5 space-y-3 text-sm">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-800">
+            <p className="font-semibold">
+              This permanently deletes “{target.name}”.
+            </p>
+            <p className="mt-1">
+              All its items, customers, vendors, quotes, invoices, payments,
+              accounts, journals, banking, taxes, audit log and pictures will be
+              erased, and nobody can enter it again. This cannot be undone.
+            </p>
+          </div>
+          <p>
+            To confirm, type{" "}
+            <code className="px-1.5 py-0.5 rounded bg-gray-100 font-mono select-all">
+              {phrase}
+            </code>
+          </p>
+          <input
+            className={inputCls}
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            autoFocus
+            autoComplete="off"
+            spellCheck={false}
+            disabled={busy}
+            placeholder={phrase}
+          />
+          {error && <p className="text-red-600">{error}</p>}
+        </div>
+        <div className="flex justify-end gap-2 px-5 pb-5">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="px-4 py-2 rounded-lg border border-gray-300 text-sm hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!matches || busy}
+            className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm hover:bg-red-700 disabled:opacity-40"
+          >
+            {busy ? "Deleting..." : "Delete forever"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Company profile page (?view=company)
 // ---------------------------------------------------------------------------
 export function CompanyProfilePage() {
@@ -408,6 +504,7 @@ export function CompanyProfilePage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ ok: true, text: "" });
   const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState(null); // the company in the "Delete company" window
   const [all, setAll] = useState([]);
 
   useEffect(() => {
@@ -586,6 +683,18 @@ export function CompanyProfilePage() {
                 >
                   {c.is_active ? "Deactivate" : "Re-activate"}
                 </button>
+                <button
+                  onClick={() => setDeleting(c)}
+                  disabled={c.id === company.id}
+                  title={
+                    c.id === company.id
+                      ? "Switch to another company first"
+                      : "Delete this company forever"
+                  }
+                  className="inline-flex items-center gap-1 text-red-600 hover:underline disabled:opacity-40 disabled:no-underline"
+                >
+                  <Trash2 size={13} /> Delete
+                </button>
               </li>
             ))}
           </ul>
@@ -596,6 +705,17 @@ export function CompanyProfilePage() {
         <CreateCompanyModal
           onClose={() => setCreating(false)}
           onCreated={loadAll}
+        />
+      )}
+      {deleting && (
+        <DeleteCompanyModal
+          target={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={async (c) => {
+            setMsg({ ok: true, text: `Company "${c.name}" was deleted.` });
+            await loadAll();
+            await reload();
+          }}
         />
       )}
     </div>
