@@ -266,6 +266,18 @@ const getSalesSummary = (from, to) =>
     `sales-summary?date_from=${from}&date_to=${to}&top=10`,
     "Failed to load Sales Summary",
   );
+
+const getDailyReport = (from, to) =>
+  reportRequest(
+    `daily-sales-collection?date_from=${from}&date_to=${to}`,
+    "Failed to load the daily report",
+  );
+const getDailyDetail = (day) =>
+  reportRequest(
+    `daily-sales-collection/detail?day=${day}`,
+    "Failed to load the day's transactions",
+  );
+
 const getAgeing = (kind, asOf) =>
   reportRequest(
     `${kind}-ageing?as_of=${asOf}`,
@@ -6819,15 +6831,17 @@ const localIso = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 const REPORT_TABS = [
+  ["daily", "Daily Sales & Collection"],
   ["pl", "Profit & Loss"],
   ["sales", "Sales Summary"],
   ["bs", "Balance Sheet"],
   ["ar", "Receivables Ageing"],
   ["ap", "Payables Ageing"],
+  ["graphs", "Graphs"],
 ];
 
 function ReportsPage({ isAdmin, go }) {
-  const [report, setReport] = useState("pl");
+  const [report, setReport] = useState("daily");
   return (
     <div className="min-h-screen bg-gray-50">
       <AppHeader
@@ -6852,11 +6866,13 @@ function ReportsPage({ isAdmin, go }) {
             </button>
           ))}
         </div>
+        {report === "daily" && <DailySalesReport />}
         {report === "pl" && <ProfitLossReport />}
         {report === "sales" && <SalesSummaryReport />}
         {report === "bs" && <BalanceSheetReport />}
         {report === "ar" && <AgeingReport key="ar" kind="receivables" />}
         {report === "ap" && <AgeingReport key="ap" kind="payables" />}
+        {report === "graphs" && <SalesGraphsReport />}
       </main>
     </div>
   );
@@ -8154,6 +8170,628 @@ function ProfitLossReport() {
       {txOpen && (
         <PLTransactionModal tx={txOpen} onClose={() => setTxOpen(null)} />
       )}
+    </>
+  );
+}
+
+// =====================================================================================================
+// Date range filter (Today / Yesterday / Last 7 days / This month / This year / Custom + From / To + Done)
+// =====================================================================================================
+const DATE_PRESETS = [
+  ["today", "Today"],
+  ["yesterday", "Yesterday"],
+  ["last7", "Last 7 days"],
+  ["month", "This month"],
+  ["year", "This year"],
+  ["custom", "Custom"],
+];
+
+// preset -> [from, to] as YYYY-MM-DD strings
+function presetRange(preset) {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const d = now.getDate();
+  if (preset === "yesterday") {
+    const x = localIso(new Date(y, m, d - 1));
+    return [x, x];
+  }
+  if (preset === "last7") return [localIso(new Date(y, m, d - 6)), localIso()];
+  if (preset === "month") return [localIso(new Date(y, m, 1)), localIso()];
+  if (preset === "year") return [`${y}-01-01`, localIso()];
+  return [localIso(), localIso()]; // today
+}
+
+// const [range, setRange] = useDateRange("month")  ->  range = { preset, from, to }
+function useDateRange(initial = "today") {
+  return useState(() => {
+    const [from, to] = presetRange(initial);
+    return { preset: initial, from, to };
+  });
+}
+
+function DateRangeFilter({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [draftFrom, setDraftFrom] = useState(value.from);
+  const [draftTo, setDraftTo] = useState(value.to);
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => {
+      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  const label =
+    (DATE_PRESETS.find(([k]) => k === value.preset) || [])[1] || "Custom";
+  const rangeText =
+    value.from === value.to
+      ? formatJournalDate(value.from)
+      : `${formatJournalDate(value.from)} - ${formatJournalDate(value.to)}`;
+  const showCustom = value.preset === "custom";
+
+  const pick = (key) => {
+    if (key === "custom") {
+      setDraftFrom(value.from);
+      setDraftTo(value.to);
+      onChange({ preset: "custom", from: value.from, to: value.to });
+      return;
+    }
+    const [from, to] = presetRange(key);
+    onChange({ preset: key, from, to });
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative inline-block mb-4" ref={boxRef}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm hover:bg-gray-50"
+      >
+        <span className="font-semibold text-slate-900">{label}</span>
+        <span className="text-gray-500">{rangeText}</span>
+        <ChevronDown size={14} className="text-gray-400" />
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-2 w-72 bg-white border border-gray-200 rounded-xl shadow-lg p-3">
+          <div className="grid grid-cols-2 gap-2">
+            {DATE_PRESETS.map(([key, text]) => (
+              <button
+                key={key}
+                onClick={() => pick(key)}
+                className={`px-2 py-2 rounded-lg text-sm font-medium border ${
+                  value.preset === key
+                    ? "bg-slate-900 text-white border-slate-900"
+                    : "bg-white text-slate-800 border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+          {showCustom && (
+            <>
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <label className="text-xs text-gray-500">
+                  From
+                  <input
+                    type="date"
+                    value={draftFrom}
+                    max={draftTo}
+                    onChange={(e) => e.target.value && setDraftFrom(e.target.value)}
+                    className={dateInputCls}
+                  />
+                </label>
+                <label className="text-xs text-gray-500">
+                  To
+                  <input
+                    type="date"
+                    value={draftTo}
+                    min={draftFrom}
+                    onChange={(e) => e.target.value && setDraftTo(e.target.value)}
+                    className={dateInputCls}
+                  />
+                </label>
+              </div>
+              <button
+                onClick={() => {
+                  onChange({ preset: "custom", from: draftFrom, to: draftTo });
+                  setOpen(false);
+                }}
+                className="mt-3 px-4 py-2 rounded-lg text-sm font-semibold bg-slate-900 text-white"
+              >
+                Done
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================================================
+// Small SVG charts (no chart library needed): XYChart (line / bar), PieChart (donut), HBarList
+// =====================================================================================================
+const CHART_COLORS = [
+  "#0f766e", "#c2410c", "#2563eb", "#7c3aed", "#db2777",
+  "#ca8a04", "#059669", "#64748b", "#dc2626", "#0891b2",
+];
+
+const shortNum = (n) => {
+  const a = Math.abs(n);
+  if (a >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, "")}M`;
+  if (a >= 1e3) return `${(n / 1e3).toFixed(1).replace(/\.0$/, "")}k`;
+  return String(Math.round(n));
+};
+
+function niceMax(v) {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+}
+
+// labels: ["11-02", ...]   series: [{ name, color, values: [..] }]   type: "line" | "bar"
+function XYChart({ labels, series, type = "line" }) {
+  const [hover, setHover] = useState(null);
+  const W = 720, H = 300;
+  const pad = { l: 52, r: 16, t: 22, b: 34 };
+  const iw = W - pad.l - pad.r;
+  const ih = H - pad.t - pad.b;
+  const n = labels.length;
+  if (n === 0) return <p className="text-sm text-gray-400">Nothing to show.</p>;
+
+  const max = niceMax(Math.max(...series.flatMap((s) => s.values), 0));
+  const y = (v) => pad.t + ih - (v / max) * ih;
+  const slot = iw / n;
+  const x = (i) =>
+    type === "bar"
+      ? pad.l + slot * i + slot / 2
+      : pad.l + (n === 1 ? iw / 2 : (iw / (n - 1)) * i);
+  const step = Math.ceil(n / 8);
+  const showValues = n <= 10;
+  const barW = Math.min((slot * 0.7) / series.length, 36);
+
+  return (
+    <div className="relative w-full">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" onMouseLeave={() => setHover(null)}>
+        {[0, 1, 2, 3, 4].map((t) => {
+          const v = (max / 4) * t;
+          return (
+            <g key={t}>
+              <line x1={pad.l} x2={W - pad.r} y1={y(v)} y2={y(v)} stroke="#e5e7eb" strokeDasharray="3 3" />
+              <text x={pad.l - 6} y={y(v) + 3} textAnchor="end" fontSize="10" fill="#6b7280">
+                {shortNum(v)}
+              </text>
+            </g>
+          );
+        })}
+        {labels.map((l, i) =>
+          i % step === 0 ? (
+            <text key={i} x={x(i)} y={H - 12} textAnchor="middle" fontSize="10" fill="#6b7280">
+              {l}
+            </text>
+          ) : null,
+        )}
+        {hover !== null && (
+          <line x1={x(hover)} x2={x(hover)} y1={pad.t} y2={pad.t + ih} stroke="#9ca3af" />
+        )}
+        {type === "line" &&
+          series.map((s, si) => {
+            const color = s.color || CHART_COLORS[si];
+            const pts = s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+            return (
+              <g key={s.name}>
+                {n > 1 && <polyline points={pts} fill="none" stroke={color} strokeWidth="2.2" strokeLinejoin="round" />}
+                {s.values.map((v, i) => (
+                  <g key={i}>
+                    <circle cx={x(i)} cy={y(v)} r={n > 40 ? 1.8 : 3.2} fill="#fff" stroke={color} strokeWidth="2" />
+                    {showValues && series.length <= 2 && (
+                      <text x={x(i)} y={y(v) + (si === 0 ? -8 : 14)} textAnchor="middle" fontSize="9" fontWeight="600" fill={color}>
+                        {shortNum(v)}
+                      </text>
+                    )}
+                  </g>
+                ))}
+              </g>
+            );
+          })}
+        {type === "bar" &&
+          series.map((s, si) => {
+            const color = s.color || CHART_COLORS[si];
+            return s.values.map((v, i) => {
+              const bx = x(i) - (barW * series.length) / 2 + barW * si;
+              return (
+                <g key={`${s.name}${i}`}>
+                  <rect x={bx} y={y(v)} width={barW - 1} height={Math.max(pad.t + ih - y(v), 0)} fill={color} rx="2" />
+                  {showValues && series.length <= 2 && v > 0 && (
+                    <text x={bx + barW / 2} y={y(v) - 4} textAnchor="middle" fontSize="9" fontWeight="600" fill={color}>
+                      {shortNum(v)}
+                    </text>
+                  )}
+                </g>
+              );
+            });
+          })}
+        {labels.map((_, i) => (
+          <rect
+            key={i}
+            x={type === "bar" ? pad.l + slot * i : x(i) - Math.max(slot / 2, 4)}
+            y={pad.t}
+            width={Math.max(slot, 8)}
+            height={ih}
+            fill="transparent"
+            onMouseEnter={() => setHover(i)}
+            onClick={() => setHover(i)}
+          />
+        ))}
+      </svg>
+      {hover !== null && (
+        <div
+          className="absolute top-2 z-10 bg-white border border-gray-300 rounded-lg shadow px-3 py-2 text-xs pointer-events-none"
+          style={{ left: `${Math.min(Math.max((x(hover) / W) * 100, 12), 78)}%` }}
+        >
+          <p className="font-semibold text-gray-900 mb-1">{labels[hover]}</p>
+          {series.map((s, si) => (
+            <p key={s.name} style={{ color: s.color || CHART_COLORS[si] }}>
+              {s.name}: {formatRs(s.values[hover])}
+            </p>
+          ))}
+        </div>
+      )}
+      <div className="flex justify-center gap-4 mt-1 text-xs text-gray-600">
+        {series.map((s, si) => (
+          <span key={s.name} className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-full" style={{ background: s.color || CHART_COLORS[si] }} />
+            {s.name}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// items: [{ label, value }]  - donut chart with a legend
+function PieChart({ items }) {
+  const data = items.filter((i) => i.value > 0);
+  const total = data.reduce((a, i) => a + i.value, 0);
+  if (total <= 0) return <p className="text-sm text-gray-400">Nothing to show.</p>;
+
+  const R = 80, r = 48, C = 100;
+  const pt = (rad, ang) => [C + rad * Math.cos(ang), C + rad * Math.sin(ang)];
+  let start = -Math.PI / 2;
+  const slices = data.map((it, i) => {
+    const share = it.value / total;
+    const end = start + share * Math.PI * 2;
+    const large = share > 0.5 ? 1 : 0;
+    const [x1, y1] = pt(R, start), [x2, y2] = pt(R, end);
+    const [x3, y3] = pt(r, end), [x4, y4] = pt(r, start);
+    const d =
+      share >= 0.9999
+        ? `M ${C} ${C - R} A ${R} ${R} 0 1 1 ${C - 0.01} ${C - R} L ${C - 0.01} ${C - r} A ${r} ${r} 0 1 0 ${C} ${C - r} Z`
+        : `M ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${r} ${r} 0 ${large} 0 ${x4} ${y4} Z`;
+    start = end;
+    return { ...it, d, share, color: CHART_COLORS[i % CHART_COLORS.length] };
+  });
+
+  return (
+    <div className="flex flex-wrap items-center gap-4">
+      <svg viewBox="0 0 200 200" className="w-40 h-40 shrink-0">
+        {slices.map((s) => (
+          <path key={s.label} d={s.d} fill={s.color}>
+            <title>{`${s.label}: ${formatRs(s.value)} (${(s.share * 100).toFixed(1)}%)`}</title>
+          </path>
+        ))}
+        <text x={C} y={C - 2} textAnchor="middle" fontSize="11" fill="#6b7280">Total</text>
+        <text x={C} y={C + 14} textAnchor="middle" fontSize="13" fontWeight="700" fill="#111827">
+          {shortNum(total)}
+        </text>
+      </svg>
+      <div className="flex-1 min-w-[160px] space-y-1.5 text-xs">
+        {slices.map((s) => (
+          <div key={s.label} className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: s.color }} />
+            <span className="flex-1 truncate text-gray-700">{s.label}</span>
+            <span className="text-gray-900">{formatRs(s.value)}</span>
+            <span className="w-12 text-right text-gray-400">{(s.share * 100).toFixed(1)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// items: [{ label, value }] - horizontal bars
+function HBarList({ items }) {
+  const max = Math.max(...items.map((i) => i.value), 1);
+  if (items.length === 0) return <p className="text-sm text-gray-400">Nothing to show.</p>;
+  return (
+    <div className="space-y-1.5">
+      {items.map((it, i) => (
+        <div key={it.label} className="flex items-center gap-2 text-xs">
+          <span className="w-32 shrink-0 truncate text-gray-600">{it.label}</span>
+          <div className="flex-1 bg-gray-100 rounded h-4 overflow-hidden">
+            <div
+              className="h-4"
+              style={{
+                width: `${Math.max((it.value / max) * 100, 1)}%`,
+                background: CHART_COLORS[i % CHART_COLORS.length],
+              }}
+            />
+          </div>
+          <span className="w-28 shrink-0 text-right text-gray-900">{formatRs(it.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// =====================================================================================================
+// Daily Sales & Collection report (the default Reports page)
+// =====================================================================================================
+function DayDetail({ day }) {
+  const { data, loading, error } = useReport(() => getDailyDetail(day), [day]);
+  return (
+    <ReportBody loading={loading} error={error} data={data}>
+      {data && (
+        <div className="grid md:grid-cols-2 gap-4 text-xs">
+          <div>
+            <p className="font-semibold text-gray-500 mb-1">Invoices</p>
+            {data.invoices.length === 0 ? (
+              <p className="text-gray-400">None</p>
+            ) : (
+              data.invoices.map((i) => (
+                <div key={i.id} className="flex justify-between gap-2 py-0.5">
+                  <span className="text-gray-700 truncate">{i.number} · {i.customer}</span>
+                  <span className="text-gray-900 shrink-0">{formatRs(i.total)}</span>
+                </div>
+              ))
+            )}
+          </div>
+          <div>
+            <p className="font-semibold text-gray-500 mb-1">Payments received</p>
+            {data.payments.length === 0 ? (
+              <p className="text-gray-400">None</p>
+            ) : (
+              data.payments.map((p) => (
+                <div key={p.id} className="flex justify-between gap-2 py-0.5">
+                  <span className="text-gray-700 truncate">{p.number} · {p.customer} ({p.mode})</span>
+                  <span className="text-gray-900 shrink-0">{formatRs(p.amount)}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </ReportBody>
+  );
+}
+
+function DailySalesReport() {
+  const [range, setRange] = useDateRange("month");
+  const [hideEmpty, setHideEmpty] = useState(true);
+  const [openDay, setOpenDay] = useState(null);
+  const { data, loading, error } = useReport(
+    () => getDailyReport(range.from, range.to),
+    [range.from, range.to],
+  );
+
+  const stat = (label, value, tone) => (
+    <div className="bg-white border border-gray-200 rounded-xl p-3">
+      <p className="text-xs text-gray-400">{label}</p>
+      <p className={`text-lg font-bold mt-0.5 ${tone === "bad" ? "text-red-600" : tone === "good" ? "text-green-700" : "text-gray-900"}`}>
+        {value}
+      </p>
+    </div>
+  );
+  const th = "px-3 py-2 text-right font-medium whitespace-nowrap";
+  const td = "px-3 py-2 text-right whitespace-nowrap";
+
+  return (
+    <>
+      <DateRangeFilter value={range} onChange={setRange} />
+      <ReportBody loading={loading} error={error} data={data}>
+        {data && (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              {stat("Sales (invoices)", formatRs(data.totals.sales))}
+              {stat("Returns (credit notes)", formatRs(data.totals.returns), data.totals.returns > 0 ? "bad" : undefined)}
+              {stat("Collection (payments)", formatRs(data.totals.collection), "good")}
+              {stat(
+                "Net sales - collection",
+                formatRs(data.totals.difference),
+                data.totals.difference > 0 ? "bad" : undefined,
+              )}
+            </div>
+
+            {data.by_mode.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-4 text-xs">
+                {data.by_mode.map((m) => (
+                  <span key={m.mode} className="bg-white border border-gray-200 rounded-full px-3 py-1 text-gray-600">
+                    {m.mode}: <b className="text-gray-900">{formatRs(m.amount)}</b>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <label className="flex items-center gap-2 text-xs text-gray-500 mb-2">
+              <input type="checkbox" checked={hideEmpty} onChange={(e) => setHideEmpty(e.target.checked)} />
+              Hide days with no sales or collection
+            </label>
+
+            <ReportCard>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-gray-400 border-b border-gray-100">
+                      <th className="px-3 py-2 text-left font-medium">Date</th>
+                      <th className={th}>Invoices</th>
+                      <th className={th}>Sales</th>
+                      <th className={th}>Returns</th>
+                      <th className={th}>Net sales</th>
+                      <th className={th}>Payments</th>
+                      <th className={th}>Collection</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.rows
+                      .filter((r) => !hideEmpty || r.invoices || r.payments || r.returns)
+                      .map((r) => (
+                        <Fragment key={r.date}>
+                          <tr
+                            onClick={() => setOpenDay(openDay === r.date ? null : r.date)}
+                            className="border-b border-gray-50 cursor-pointer hover:bg-gray-50"
+                          >
+                            <td className="px-3 py-2 text-left whitespace-nowrap text-gray-900">
+                              {formatJournalDate(r.date)}
+                            </td>
+                            <td className={td}>{r.invoices}</td>
+                            <td className={td}>{formatRs(r.sales)}</td>
+                            <td className={`${td} ${r.returns > 0 ? "text-red-600" : ""}`}>{formatRs(r.returns)}</td>
+                            <td className={td}>{formatRs(r.net_sales)}</td>
+                            <td className={td}>{r.payments}</td>
+                            <td className={`${td} text-green-700`}>{formatRs(r.collection)}</td>
+                          </tr>
+                          {openDay === r.date && (
+                            <tr className="bg-gray-50">
+                              <td colSpan={7} className="px-3 py-3">
+                                <DayDetail day={r.date} />
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      ))}
+                    <tr className="font-semibold border-t border-gray-200">
+                      <td className="px-3 py-2 text-left">Total</td>
+                      <td className={td}>{data.totals.invoices}</td>
+                      <td className={td}>{formatRs(data.totals.sales)}</td>
+                      <td className={td}>{formatRs(data.totals.returns)}</td>
+                      <td className={td}>{formatRs(data.totals.net_sales)}</td>
+                      <td className={td}>{data.totals.payments}</td>
+                      <td className={`${td} text-green-700`}>{formatRs(data.totals.collection)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-gray-400 mt-2">Tap a day to see its invoices and payments. Void invoices are not counted.</p>
+            </ReportCard>
+          </>
+        )}
+      </ReportBody>
+    </>
+  );
+}
+
+
+function groupDaily(rows, mode) {
+  if (mode === "day")
+    return rows.map((r) => ({ label: r.date.slice(5), sales: r.sales, collection: r.collection, returns: r.returns }));
+  const map = new Map();
+  for (const r of rows) {
+    const d = new Date(`${r.date}T00:00:00`);
+    let key, label;
+    if (mode === "month") {
+      key = r.date.slice(0, 7);
+      label = d.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+    } else {
+      const mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7));
+      key = localIso(mon);
+      label = mon.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+    }
+    const g = map.get(key) || { label, sales: 0, collection: 0, returns: 0 };
+    g.sales += r.sales;
+    g.collection += r.collection;
+    g.returns += r.returns;
+    map.set(key, g);
+  }
+  return [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([, g]) => g);
+}
+
+function SalesGraphsReport() {
+  const [range, setRange] = useDateRange("month");
+  const [kind, setKind] = useState("line"); // "line" | "bar"
+  const [groupBy, setGroupBy] = useState("auto");
+  const daily = useReport(() => getDailyReport(range.from, range.to), [range.from, range.to]);
+  const summary = useReport(() => getSalesSummary(range.from, range.to), [range.from, range.to]);
+
+  const pill = (active) =>
+    `px-3 py-1 rounded-lg text-xs font-medium border ${
+      active ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+    }`;
+
+  const ready = daily.data && summary.data;
+  let trend = [];
+  let custPie = [];
+  let paidPie = [];
+  if (ready) {
+    const dayCount = daily.data.rows.length;
+    const usedGroup = groupBy === "auto" ? (dayCount <= 31 ? "day" : dayCount <= 120 ? "week" : "month") : groupBy;
+    trend = groupDaily(daily.data.rows, usedGroup);
+    const top = summary.data.top_customers.slice(0, 6);
+    custPie = top.map((c) => ({ label: c.customer_name, value: c.sales }));
+    const others = summary.data.totals.sales - top.reduce((a, c) => a + c.sales, 0);
+    if (others > 0.005) custPie.push({ label: "Others", value: others });
+    const unpaid = Math.max(summary.data.totals.outstanding, 0);
+    paidPie = [
+      { label: "Paid", value: Math.max(summary.data.totals.sales - unpaid, 0) },
+      { label: "Still unpaid", value: unpaid },
+    ];
+  }
+
+  return (
+    <>
+      <DateRangeFilter value={range} onChange={setRange} />
+      <ReportBody
+        loading={daily.loading || summary.loading}
+        error={daily.error || summary.error}
+        data={ready ? true : null}
+      >
+        {ready && (
+          <>
+            <ReportCard title="Sales vs collection">
+              <div className="flex flex-wrap gap-2 mb-3">
+                <button onClick={() => setKind("line")} className={pill(kind === "line")}>Line</button>
+                <button onClick={() => setKind("bar")} className={pill(kind === "bar")}>Bar</button>
+                <span className="w-2" />
+                {[["auto", "Auto"], ["day", "Daily"], ["week", "Weekly"], ["month", "Monthly"]].map(([k, t]) => (
+                  <button key={k} onClick={() => setGroupBy(k)} className={pill(groupBy === k)}>{t}</button>
+                ))}
+              </div>
+              <XYChart
+                type={kind}
+                labels={trend.map((t) => t.label)}
+                series={[
+                  { name: "Sales", color: "#0f766e", values: trend.map((t) => t.sales) },
+                  { name: "Collection", color: "#c2410c", values: trend.map((t) => t.collection) },
+                ]}
+              />
+            </ReportCard>
+
+            <div className="grid md:grid-cols-2 gap-4">
+              <ReportCard title="Sales by customer (share)">
+                <PieChart items={custPie} />
+              </ReportCard>
+              <ReportCard title="Collection by payment mode">
+                <PieChart items={daily.data.by_mode.map((m) => ({ label: m.mode, value: m.amount }))} />
+              </ReportCard>
+              <ReportCard title="Top 10 selling items (sales)">
+                <HBarList items={summary.data.top_products.map((p) => ({ label: p.item_name, value: p.sales }))} />
+              </ReportCard>
+              <ReportCard title="Invoices in this period: paid vs unpaid">
+                <PieChart items={paidPie} />
+              </ReportCard>
+            </div>
+
+            <ReportCard title="Top 10 customers (sales)">
+              <HBarList items={summary.data.top_customers.map((c) => ({ label: c.customer_name, value: c.sales }))} />
+            </ReportCard>
+          </>
+        )}
+      </ReportBody>
     </>
   );
 }

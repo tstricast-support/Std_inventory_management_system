@@ -632,3 +632,104 @@ def sales_summary(
             for k, v in sorted(trend.items())
         ],
     }
+
+
+# ---------------------------------------------------------------- Daily Sales & Collection
+@router.get("/daily-sales-collection")
+def daily_sales_collection(
+    date_from: date | None = None,
+    date_to: date | None = None,
+    db: Session = Depends(get_db),
+):
+    """One row per day: invoices raised (sales), credit notes (returns) and payments received (collection)."""
+    date_to = date_to or date.today()
+    date_from = date_from or date_to
+    if date_from > date_to:
+        raise HTTPException(400, "Start date must be on or before the end date")
+    if (date_to - date_from).days > 731:
+        raise HTTPException(400, "Please pick a range of 2 years or less")
+
+    days: dict[date, dict] = {}
+    cur = date_from
+    while cur <= date_to:
+        days[cur] = {"date": cur.isoformat(), "invoices": 0, "sales": Decimal("0"),
+                     "returns": Decimal("0"), "payments": 0, "collection": Decimal("0")}
+        cur += timedelta(days=1)
+
+    for d, count, total in (
+        db.query(models.Invoice.invoice_date, func.count(models.Invoice.id), func.coalesce(func.sum(models.Invoice.total), 0))
+        .filter(models.Invoice.status != "void",
+                models.Invoice.invoice_date >= date_from, models.Invoice.invoice_date <= date_to)
+        .group_by(models.Invoice.invoice_date).all()
+    ):
+        if d in days:
+            days[d]["invoices"] = count
+            days[d]["sales"] = _money(total)
+
+    for d, total in (
+        db.query(models.CreditNote.credit_date, func.coalesce(func.sum(models.CreditNote.total), 0))
+        .filter(models.CreditNote.status != "void",
+                models.CreditNote.credit_date >= date_from, models.CreditNote.credit_date <= date_to)
+        .group_by(models.CreditNote.credit_date).all()
+    ):
+        if d in days:
+            days[d]["returns"] = _money(total)
+
+    for d, count, total in (
+        db.query(models.Payment.payment_date, func.count(models.Payment.id), func.coalesce(func.sum(models.Payment.amount), 0))
+        .filter(models.Payment.payment_date >= date_from, models.Payment.payment_date <= date_to)
+        .group_by(models.Payment.payment_date).all()
+    ):
+        if d in days:
+            days[d]["payments"] = count
+            days[d]["collection"] = _money(total)
+
+    by_mode = [
+        {"mode": mode or "Other", "amount": float(_money(total))}
+        for mode, total in (
+            db.query(models.Payment.payment_mode, func.coalesce(func.sum(models.Payment.amount), 0))
+            .filter(models.Payment.payment_date >= date_from, models.Payment.payment_date <= date_to)
+            .group_by(models.Payment.payment_mode).all()
+        )
+    ]
+    by_mode.sort(key=lambda m: m["amount"], reverse=True)
+
+    rows = [
+        {**r, "sales": float(r["sales"]), "returns": float(r["returns"]), "collection": float(r["collection"]),
+         "net_sales": float(r["sales"] - r["returns"])}
+        for r in days.values()
+    ]
+    sales = sum((days[d]["sales"] for d in days), Decimal("0"))
+    returns = sum((days[d]["returns"] for d in days), Decimal("0"))
+    collection = sum((days[d]["collection"] for d in days), Decimal("0"))
+    return {
+        "date_from": date_from, "date_to": date_to, "rows": rows, "by_mode": by_mode,
+        "totals": {
+            "invoices": sum(d["invoices"] for d in days.values()),
+            "payments": sum(d["payments"] for d in days.values()),
+            "sales": float(sales), "returns": float(returns), "net_sales": float(sales - returns),
+            "collection": float(collection), "difference": float(sales - returns - collection),
+        },
+    }
+
+
+@router.get("/daily-sales-collection/detail")
+def daily_sales_collection_detail(day: date, db: Session = Depends(get_db)):
+    """The invoices and payments behind one day of the daily report."""
+    invoices = (
+        db.query(models.Invoice).options(joinedload(models.Invoice.customer))
+        .filter(models.Invoice.status != "void", models.Invoice.invoice_date == day)
+        .order_by(models.Invoice.id).all()
+    )
+    payments = (
+        db.query(models.Payment).options(joinedload(models.Payment.customer))
+        .filter(models.Payment.payment_date == day)
+        .order_by(models.Payment.id).all()
+    )
+    return {
+        "day": day,
+        "invoices": [{"id": i.id, "number": i.invoice_number, "customer": i.customer_name,
+                      "total": float(_money(i.total)), "paid": float(_money(i.amount_paid))} for i in invoices],
+        "payments": [{"id": p.id, "number": p.payment_number, "customer": p.customer_name,
+                      "mode": p.payment_mode, "amount": float(_money(p.amount))} for p in payments],
+    }
