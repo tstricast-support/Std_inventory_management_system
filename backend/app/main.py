@@ -3,150 +3,13 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import inspect, text
-from app.account_types import DEFAULT_ACCOUNTS
-from app.database import Base, engine
 from app.auth import IS_PRODUCTION, require_area, validate_auth_settings
 from app.security import SecurityMiddleware
 import app.audit_events  
-from app.auth_setup import seed_system_roles, bootstrap_owner
-from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments,sales_documents,credit_notes,taxes,banking,reports,dashboard,product_import,auth,users,audit_log
-Base.metadata.create_all(bind=engine) 
-
-
-def add_accounting_columns():
-    """create_all() never alters existing tables, so add the new item/accounting columns by hand."""
-    existing = [c["name"] for c in inspect(engine).get_columns("products")]
-    new_columns = {
-        "item_type": "VARCHAR(30) NOT NULL DEFAULT 'Inventory Part'",
-        "purchase_description": "TEXT",
-        "cost": "NUMERIC(10,2) NOT NULL DEFAULT 0",
-        "manufacturer_part_number": "VARCHAR(100)",
-        "reorder_min": "INTEGER",
-        "reorder_max": "INTEGER",
-        "parent_id": "INTEGER REFERENCES products(id) ON DELETE CASCADE",
-        "cogs_account_id": "INTEGER REFERENCES accounts(id) ON DELETE SET NULL",
-        "income_account_id": "INTEGER REFERENCES accounts(id) ON DELETE SET NULL",
-        "asset_account_id": "INTEGER REFERENCES accounts(id) ON DELETE SET NULL",
-        "preferred_vendor_id": "INTEGER REFERENCES vendors(id) ON DELETE SET NULL",
-    }
-    with engine.begin() as conn:
-        for col, ddl in new_columns.items():
-            if col not in existing:
-                conn.execute(text(f"ALTER TABLE products ADD COLUMN {col} {ddl}"))
-
-
-add_accounting_columns()
-
-def add_account_columns():
-    """create_all() never alters existing tables, so add the new chart-of-accounts columns by hand."""
-    existing = [c["name"] for c in inspect(engine).get_columns("accounts")]
-    with engine.begin() as conn:
-        for col, ddl in {
-            "account_code": "VARCHAR(30)",
-            "description": "TEXT",
-            "parent_id": "INTEGER REFERENCES accounts(id) ON DELETE SET NULL",
-        }.items():
-            if col not in existing:
-                conn.execute(text(f"ALTER TABLE accounts ADD COLUMN {col} {ddl}"))
-
-
-add_account_columns()
-
-
-def add_journal_columns():
-    """create_all() never alters existing tables, so add the journal source columns by hand."""
-    existing = [c["name"] for c in inspect(engine).get_columns("journals")]
-    with engine.begin() as conn:
-        for col, ddl in {"source_type": "VARCHAR(30)", "source_id": "INTEGER"}.items():
-            if col not in existing:
-                conn.execute(text(f"ALTER TABLE journals ADD COLUMN {col} {ddl}"))
-
-
-add_journal_columns()
-
-
-def add_reconciliation_column():
-    """Step 8B: journal_lines.reconciliation_id (create_all() only builds the new bank_reconciliations table)."""
-    existing = [c["name"] for c in inspect(engine).get_columns("journal_lines")]
-    if "reconciliation_id" not in existing:
-        with engine.begin() as conn:
-            conn.execute(text(
-                "ALTER TABLE journal_lines ADD COLUMN reconciliation_id INTEGER REFERENCES bank_reconciliations(id) ON DELETE SET NULL"
-            ))
-
-
-add_reconciliation_column()
-
-
-def add_invoice_discount_columns():
-    """Invoice discount: add the three discount columns to existing databases."""
-    existing = [c["name"] for c in inspect(engine).get_columns("invoices")]
-    new_columns = {
-        "discount_type": "VARCHAR(10) NOT NULL DEFAULT 'amount'",
-        "discount_value": "NUMERIC(12,2) NOT NULL DEFAULT 0",
-        "discount_amount": "NUMERIC(12,2) NOT NULL DEFAULT 0",
-    }
-    with engine.begin() as conn:
-        for col, ddl in new_columns.items():
-            if col not in existing:
-                conn.execute(text(f"ALTER TABLE invoices ADD COLUMN {col} {ddl}"))
-
-
-add_invoice_discount_columns()
-
-def seed_default_accounts():
-    """First start after the chart-of-accounts upgrade: add Zoho-style default accounts once."""
-    with engine.begin() as conn:
-        has_new_types = conn.execute(text(
-            "SELECT 1 FROM accounts WHERE account_type NOT IN ('cogs', 'income', 'asset') LIMIT 1"
-        )).first()
-        if has_new_types:
-            return
-        for name, account_type in DEFAULT_ACCOUNTS:
-            conn.execute(
-                text("INSERT INTO accounts (name, account_type) VALUES (:n, :t)"),
-                {"n": name, "t": account_type},
-            )
-
-
-seed_default_accounts()
-
-def seed_tax_accounts():
-    """Step 7: the two ledger accounts tax is posted to (added once, only if missing)."""
-    with engine.begin() as conn:
-        for name, account_type in [("Tax Payable", "current_liability"), ("Input Tax Credits", "other_current_asset")]:
-            exists = conn.execute(text("SELECT 1 FROM accounts WHERE name = :n"), {"n": name}).first()
-            if not exists:
-                conn.execute(
-                    text("INSERT INTO accounts (name, account_type) VALUES (:n, :t)"),
-                    {"n": name, "t": account_type},
-                )
-
-
-seed_tax_accounts()
-
-def add_created_by_columns():
-    """Login system: add a nullable created_by_id to every record type that should remember who made it."""
-    tables = [
-        "invoices", "payments", "journals", "purchase_bills", "vendor_payments",
-        "sales_documents", "credit_notes", "bills", "issued_lists",
-    ]
-    insp = inspect(engine)
-    with engine.begin() as conn:
-        for table in tables:
-            existing = [c["name"] for c in insp.get_columns(table)]
-            if "created_by_id" not in existing:
-                conn.execute(text(
-                    f"ALTER TABLE {table} ADD COLUMN created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL"
-                ))
-
-
-add_created_by_columns()
-
+from app.company_init import run_startup
+from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments,sales_documents,credit_notes,taxes,banking,reports,dashboard,product_import,auth,users,audit_log,companies
 validate_auth_settings()
-seed_system_roles()
-bootstrap_owner()
+run_startup()      # shared tables + every company schema (create tables, column upgrades, seeds) + roles + first Owner
 
 
 # Category was removed in favor of QuickBooks-style "Subitem of" (parent_id).
@@ -193,7 +56,8 @@ def guard(area: str):
     return [Depends(require_area(area))]
 
 
-app.include_router(auth.router)   # login / refresh / logout live here and are NOT guarded by an area
+app.include_router(auth.router)   # login / refresh / logout / switch-company live here and are NOT guarded by an area
+app.include_router(companies.router)
 app.include_router(products.router, dependencies=guard("inventory"))
 app.include_router(product_import.router, dependencies=guard("inventory"))
 app.include_router(stock_movements.router, dependencies=guard("inventory"))
@@ -254,5 +118,3 @@ else:
     @app.get("/")
     def root():
         return {"message": "STD OPERATIONS API is running"}
-
-

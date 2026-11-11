@@ -17,7 +17,7 @@ from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatc
 from dotenv import load_dotenv
 
 from app.audit import get_client_ip, request_ctx
-from app.database import SessionLocal, get_db
+from app.database import get_public_db, public_session
 
 load_dotenv()
 
@@ -119,12 +119,13 @@ class TokenError(Exception):
     pass
 
 
-def create_access_token(user_id: int) -> str:
+def create_access_token(user_id: int, company_id: int) -> str:
     if len(JWT_SECRET) < 32:
         raise RuntimeError("JWT_SECRET is not set (min 32 characters). Cannot issue tokens.")
     now = utcnow().replace(tzinfo=timezone.utc)
     payload = {
         "sub": str(user_id),
+        "cid": int(company_id),          # the company this token works in (access is re-checked on every request)
         "typ": "access",
         "iat": now,
         "exp": now + timedelta(minutes=ACCESS_TOKEN_MINUTES),
@@ -133,16 +134,17 @@ def create_access_token(user_id: int) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-def decode_access_token(token: str) -> int:
-    """Returns the user id, or raises TokenError. Only HS256 is accepted."""
+def decode_access_token(token: str) -> tuple[int, int]:
+    """Returns (user_id, company_id), or raises TokenError. Only HS256 is accepted.
+    Tokens issued before multi-company have no company -> rejected -> the app silently refreshes."""
     if len(JWT_SECRET) < 32:
         raise TokenError("server not configured")
     try:
         data = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM], options={"require": ["exp", "sub"]})
         if data.get("typ") != "access":
             raise TokenError("wrong token type")
-        return int(data["sub"])
-    except (jwt.PyJWTError, ValueError) as exc:
+        return int(data["sub"]), int(data["cid"])
+    except (jwt.PyJWTError, ValueError, KeyError, TypeError) as exc:
         raise TokenError(str(exc)) from exc
 
 
@@ -170,15 +172,15 @@ def _unauthorized(detail: str = "Not authenticated") -> HTTPException:
 
 
 def _resolve_user(db: Session, creds: HTTPAuthorizationCredentials | None):
-    """Returns the active user behind a bearer token, or None (never raises)."""
+    """Returns (active user, company id in the token), or (None, None) (never raises)."""
     from app.models import Role, User  # local import: models must not depend on auth
 
     if creds is None or creds.scheme.lower() != "bearer":
-        return None
+        return None, None
     try:
-        user_id = decode_access_token(creds.credentials)
+        user_id, token_company_id = decode_access_token(creds.credentials)
     except TokenError:
-        return None
+        return None, None
     user = (
         db.query(User)
         .options(joinedload(User.role).joinedload(Role.permissions), joinedload(User.role).joinedload(Role.rights))
@@ -186,23 +188,112 @@ def _resolve_user(db: Session, creds: HTTPAuthorizationCredentials | None):
         .first()
     )
     if user is None or not user.is_active:
+        return None, None
+    return user, token_company_id
+
+
+# ---- companies: who may enter which one ----------------------------------------------------
+def accessible_companies(db: Session, user) -> list:
+    """Active companies this user may enter, oldest first."""
+    from app.models import Company, UserCompanyAccess
+
+    return (
+        db.query(Company)
+        .join(UserCompanyAccess, UserCompanyAccess.company_id == Company.id)
+        .filter(UserCompanyAccess.user_id == user.id, Company.is_active == True)  # noqa: E712
+        .order_by(Company.id)
+        .all()
+    )
+
+
+def has_company_access(db: Session, user_id: int, company_id: int) -> bool:
+    """Run on EVERY request, so removing access / deactivating a company takes effect at once."""
+    from app.models import Company, UserCompanyAccess
+
+    return db.query(UserCompanyAccess.id).join(Company, Company.id == UserCompanyAccess.company_id).filter(
+        UserCompanyAccess.user_id == user_id, UserCompanyAccess.company_id == company_id,
+        Company.is_active == True,  # noqa: E712
+    ).first() is not None
+
+
+def default_company_id(db: Session, user) -> int | None:
+    """The user's last-used company if they still have it, else their first one, else None."""
+    companies = accessible_companies(db, user)
+    if not companies:
         return None
-    return user
+    if user.last_company_id and any(c.id == user.last_company_id for c in companies):
+        return user.last_company_id
+    return companies[0].id
+
+
+def oldest_active_company_id(db: Session) -> int | None:
+    """Open mode (AUTH_REQUIRED=false) and system events that belong to no particular user."""
+    from app.models import Company
+
+    row = db.query(Company.id).filter(Company.is_active == True).order_by(Company.id).first()  # noqa: E712
+    return row[0] if row else None
+
+
+def _no_company_access() -> HTTPException:
+    return _forbidden("NO_COMPANY_ACCESS")
 
 
 def get_current_user(
+    request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_public_db),
 ):
     """Identity check used by the /api/auth endpoints (always enforced).
-    Re-reads the user from the DB on EVERY request, so deactivating a user blocks them at once."""
+    Re-reads the user AND the user-company access from the DB on EVERY request, so deactivating a user
+    or removing a company from them blocks them at once. Stores the company on request.state."""
     if creds is None:
         raise _unauthorized()
-    user = _resolve_user(db, creds)
+    user, company_id = _resolve_user(db, creds)
     if user is None:
         raise _unauthorized("Invalid or expired token")
+    if not has_company_access(db, user.id, company_id):
+        raise _no_company_access()
+    request.state.company_id = company_id
     return user
 
+
+
+def get_user_and_company(
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_public_db),
+):
+    """For the /api/companies and /api/company/* endpoints. Returns (user, company_id).
+    Logged in: same checks as get_current_user (user active + still has access to the token's company).
+    AUTH_REQUIRED=false and nobody (valid) logged in: returns (None, oldest active company) so the sidebar
+    name and the PDFs still work in open mode. Changing anything still needs a real user with a right."""
+    user, company_id = _resolve_user(db, creds)
+    if user is not None and has_company_access(db, user.id, company_id):
+        request.state.company_id = company_id
+        return user, company_id
+    if not AUTH_REQUIRED:
+        company_id = oldest_active_company_id(db)
+        if company_id is None:
+            raise _no_company_access()
+        request.state.company_id = company_id
+        return None, company_id
+    if user is None:
+        raise _unauthorized("Invalid or expired token" if creds is not None else "Not authenticated")
+    raise _no_company_access()
+
+def get_user_for_switch(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_public_db),
+):
+    """For POST /auth/switch-company only. Like get_current_user, but it does NOT require access to the company
+    in the token. Otherwise a person whose current company was deactivated (or taken away from them) could not
+    even leave it. Returns (user, company id in the token). The NEW company is access-checked in the endpoint."""
+    if creds is None:
+        raise _unauthorized()
+    user, token_company_id = _resolve_user(db, creds)
+    if user is None:
+        raise _unauthorized("Invalid or expired token")
+    return user, token_company_id
 
 def user_permissions(user) -> dict:
     """{area: level} for every area (missing = 'none')."""
@@ -222,22 +313,29 @@ def _forbidden(detail: str) -> HTTPException:
 
 
 def _authorize(area: str, method: str, route_path: str, creds):
-    """Runs in a worker thread. Returns (user_id, username) or (None, None) when auth is off and nobody is logged in."""
+    """Runs in a worker thread. Returns (user_id, username, company_id); user is (None, None) when auth is off and nobody is logged in."""
     from app.permissions import (
         AREA_ALL_RIGHT, AREA_READ_RIGHT, ALWAYS_ENFORCED_AREAS, LOOKUP_READS, METHOD_LEVEL, ROUTE_OVERRIDES, level_allows,
     )
 
-    db = SessionLocal()
+    db = public_session()
     try:
-        user = _resolve_user(db, creds)
+        user, company_id = _resolve_user(db, creds)
 
         if not AUTH_REQUIRED and area not in ALWAYS_ENFORCED_AREAS:   # switch is off: nothing is blocked, but remember who it was
-            return (user.id, user.username) if user else (None, None)
+            # open mode: use the company in the token if the user may enter it, otherwise the OLDEST active company
+            if user is None or not has_company_access(db, user.id, company_id):
+                company_id = oldest_active_company_id(db)
+                if company_id is None:
+                    raise _forbidden("NO_COMPANY_ACCESS")
+            return (user.id, user.username, company_id) if user else (None, None, company_id)
 
         if user is None:
             raise _unauthorized()
         if user.must_change_password:
             raise _forbidden("PASSWORD_CHANGE_REQUIRED")
+        if not has_company_access(db, user.id, company_id):
+            raise _no_company_access()
 
         perms = user_permissions(user)
         rights = set(user_rights(user))
@@ -267,7 +365,7 @@ def _authorize(area: str, method: str, route_path: str, creds):
                 raise _forbidden("You do not have permission to do this")
         if need_right and need_right not in rights:
             raise _forbidden(f"This needs the special right '{need_right}'")
-        return user.id, user.username
+        return user.id, user.username, company_id
     finally:
         db.close()
 
@@ -278,7 +376,8 @@ def require_area(area: str):
     async def dependency(request: Request, creds: HTTPAuthorizationCredentials | None = Depends(_bearer)):
         route = request.scope.get("route")
         route_path = getattr(route, "path", request.url.path)
-        user_id, username = await run_in_threadpool(_authorize, area, request.method, route_path, creds)
+        user_id, username, company_id = await run_in_threadpool(_authorize, area, request.method, route_path, creds)
+        request.state.company_id = company_id      # get_db() reads this; require_area runs BEFORE the endpoint's get_db
 
         method = request.method.upper()
         if route_path.endswith("/void"):
@@ -291,7 +390,7 @@ def require_area(area: str):
             action = "update"
         # set here (in the request's own task) so the endpoint's worker thread and the DB hooks can see it
         request_ctx.set({
-            "user_id": user_id, "username": username, "ip": get_client_ip(request),
+            "user_id": user_id, "username": username, "company_id": company_id, "ip": get_client_ip(request),
             "method": method, "route": route_path, "action": action,
         })
     return dependency

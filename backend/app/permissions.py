@@ -44,6 +44,7 @@ RIGHTS = [
     ("edit_closed_period", "Edit closed periods"),
     ("manage_users", "Manage users & roles"),
     ("view_cost_prices", "View cost prices"),
+    ("manage_companies", "Create & manage companies"),
 ]
 RIGHT_KEYS = [k for k, _ in RIGHTS]
 

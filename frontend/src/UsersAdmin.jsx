@@ -1,4 +1,3 @@
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, X, Copy, Check } from "lucide-react";
 import { BASE_URL, apiFetch } from "./api.js";
@@ -135,9 +134,10 @@ export function UsersAdminPage() {
 
 // ---------------------------------------- USERS ----------------------------------------
 function UsersTab() {
-  const { user: me } = useAuth();
+  const { user: me, reloadUser } = useAuth();
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [companies, setCompanies] = useState([]); // companies I may hand out
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -147,9 +147,14 @@ function UsersTab() {
 
   const load = useCallback(async () => {
     try {
-      const [u, r] = await Promise.all([call("/users/"), call("/roles/")]);
+      const [u, r, c] = await Promise.all([
+        call("/users/"),
+        call("/roles/"),
+        call("/companies"),
+      ]);
       setUsers(u);
       setRoles(r);
+      setCompanies(c);
       setError("");
     } catch (e) {
       setError(e.message);
@@ -200,6 +205,7 @@ function UsersTab() {
             <tr>
               <th className="px-4 py-2">User</th>
               <th className="px-4 py-2">Role</th>
+              <th className="px-4 py-2">Companies</th>
               <th className="px-4 py-2">Status</th>
               <th className="px-4 py-2">Last login</th>
               <th className="px-4 py-2">Actions</th>
@@ -208,7 +214,7 @@ function UsersTab() {
           <tbody className="divide-y divide-gray-100">
             {loading && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-gray-400">
+                <td colSpan={6} className="px-4 py-6 text-center text-gray-400">
                   Loading...
                 </td>
               </tr>
@@ -231,6 +237,15 @@ function UsersTab() {
                     <p className="text-xs text-gray-500">{u.username}</p>
                   </td>
                   <td className="px-4 py-3">{u.role?.name}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {(u.companies || []).map((c) => (
+                        <Badge key={c.id} tone="blue">
+                          {c.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 space-x-1 whitespace-nowrap">
                     {u.is_active ? (
                       <Badge tone="green">Active</Badge>
@@ -354,9 +369,11 @@ function UsersTab() {
         <UserFormModal
           user={form === "new" ? null : form}
           roles={roles}
+          companies={companies}
           onClose={() => setForm(null)}
           onSaved={async (result, created) => {
             setForm(null);
+            if (result?.id === me?.id) reloadUser().catch(() => {}); // my own company list may have changed
             setNotice(
               created ? `User ${result.username} created.` : "User updated.",
             );
@@ -376,18 +393,34 @@ function UsersTab() {
   );
 }
 
-function UserFormModal({ user, roles, onClose, onSaved }) {
+function UserFormModal({ user, roles, companies, onClose, onSaved }) {
   const isNew = !user;
+  const { user: me } = useAuth();
   const [username, setUsername] = useState("");
   const [fullName, setFullName] = useState(user?.full_name || "");
   const [roleId, setRoleId] = useState(user?.role?.id || roles[0]?.id || "");
   const [tempPassword, setTempPassword] = useState("");
+  // new user: start with the company I am working in; edit: the companies the user has now
+  const [companyIds, setCompanyIds] = useState(() =>
+    isNew
+      ? me?.company_id
+        ? [me.company_id]
+        : []
+      : (user.companies || []).map((c) => c.id),
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const toggleCompany = (id) =>
+    setCompanyIds((ids) =>
+      ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id],
+    );
 
   const submit = async (e) => {
     e.preventDefault();
     setError("");
+    if (companyIds.length === 0)
+      return setError("Choose at least one company for this user.");
     setBusy(true);
     try {
       if (isNew) {
@@ -398,13 +431,18 @@ function UserFormModal({ user, roles, onClose, onSaved }) {
             full_name: fullName,
             role_id: Number(roleId),
             temp_password: tempPassword || null,
+            company_ids: companyIds,
           },
         });
         await onSaved(created, true);
       } else {
         const updated = await call(`/users/${user.id}`, {
           method: "PUT",
-          body: { full_name: fullName, role_id: Number(roleId) },
+          body: {
+            full_name: fullName,
+            role_id: Number(roleId),
+            company_ids: companyIds,
+          },
         });
         await onSaved(updated, false);
       }
@@ -461,6 +499,31 @@ function UserFormModal({ user, roles, onClose, onSaved }) {
               </option>
             ))}
           </select>
+          <p className="text-xs text-gray-400 mt-1">
+            One role applies in every company this user can enter.
+          </p>
+        </div>
+        <div>
+          <label className={labelCls}>Companies this user can access *</label>
+          <div className="border border-gray-300 rounded-lg divide-y divide-gray-100 max-h-40 overflow-y-auto">
+            {(companies || []).map((c) => (
+              <label
+                key={c.id}
+                className="flex items-center gap-2 px-3 py-2 text-sm text-gray-900 cursor-pointer hover:bg-gray-50"
+              >
+                <input
+                  type="checkbox"
+                  checked={companyIds.includes(c.id)}
+                  onChange={() => toggleCompany(c.id)}
+                />
+                <span className="truncate">{c.name}</span>
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-gray-400 mt-1">
+            At least one. You can only choose companies you can enter yourself.
+            Removing a company blocks the user on their very next request.
+          </p>
         </div>
         {isNew && (
           <div>

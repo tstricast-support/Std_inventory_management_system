@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Numeric, Boolean, ForeignKey, TIMESTAMP, Date, func,Index
+from sqlalchemy import Column, Integer, String, Text, Numeric, Boolean, ForeignKey, TIMESTAMP, Date, func, Index, UniqueConstraint, text
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -10,8 +10,8 @@ class Account(Base):
     name = Column(String(150), nullable=False)
     account_type = Column(String(20), nullable=False)  # see account_types.py for every allowed value
     account_code = Column(String(30))                  # optional, e.g. "1000"
-    parent_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True)  # sub-account of
     description = Column(Text)
+    parent_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True)  # sub-account of
     created_at = Column(TIMESTAMP, server_default=func.now())
 
 
@@ -122,7 +122,7 @@ class StockMovement(Base):
 class Bill(Base):
     __tablename__ = "bills"
      
-    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     id = Column(Integer, primary_key=True, autoincrement=True)
     adder_name = Column(String(100), nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
@@ -144,7 +144,7 @@ class BillItem(Base):
 class IssuedList(Base):
     __tablename__ = "issued_lists"
 
-    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     id = Column(Integer, primary_key=True, autoincrement=True)
     issued_date = Column(Date, nullable=False)          # the day the items were taken
     description = Column(Text, nullable=True)
@@ -189,7 +189,7 @@ class Journal(Base):
     __tablename__ = "journals"
 
 
-    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     id = Column(Integer, primary_key=True, autoincrement=True)
     journal_number = Column(String(30), nullable=False, unique=True)   # JNL-0001, JNL-0002 ...
     journal_date = Column(Date, nullable=False)
@@ -242,7 +242,7 @@ class Invoice(Base):
     """A sales invoice. Saving it lowers stock and posts a journal (see routers/invoices.py)."""
     __tablename__ = "invoices"
 
-    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     id = Column(Integer, primary_key=True, autoincrement=True)
     invoice_number = Column(String(30), nullable=False, unique=True)   # INV-0001, INV-0002 ...
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
@@ -300,7 +300,7 @@ class Payment(Base):
     """Money received from a customer, applied to one or more of their invoices."""
     __tablename__ = "payments"
 
-    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     id = Column(Integer, primary_key=True, autoincrement=True)
     payment_number = Column(String(30), nullable=False, unique=True)   # PAY-0001, PAY-0002 ...
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
@@ -349,7 +349,7 @@ class PurchaseBill(Base):
     Not the same as the old `Bill` above, which is only the quick "restock several items" batch."""
     __tablename__ = "purchase_bills"
 
-    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     id = Column(Integer, primary_key=True, autoincrement=True)
     bill_number = Column(String(30), nullable=False, unique=True)   # PB-0001, PB-0002 ...
     vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=False)
@@ -401,7 +401,7 @@ class VendorPayment(Base):
     """Money paid to a vendor, applied to one or more of their bills."""
     __tablename__ = "vendor_payments"
 
-    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     id = Column(Integer, primary_key=True, autoincrement=True)
     payment_number = Column(String(30), nullable=False, unique=True)   # VPAY-0001, VPAY-0002 ...
     vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=False)
@@ -450,7 +450,7 @@ class SalesDocument(Base):
     """A quote or a sales order. Neither touches stock or the ledger - only the invoice made from it does."""
     __tablename__ = "sales_documents"
 
-    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     id = Column(Integer, primary_key=True, autoincrement=True)
     doc_type = Column(String(20), nullable=False)                      # "quote" or "sales_order"
     doc_number = Column(String(30), nullable=False, unique=True)       # QT-0001 / SO-0001 ...
@@ -502,7 +502,7 @@ class CreditNote(Base):
     """Money / goods given back to a customer. Posts a journal, can put stock back, and can be applied to invoices."""
     __tablename__ = "credit_notes"
 
-    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True)
     id = Column(Integer, primary_key=True, autoincrement=True)
     credit_number = Column(String(30), nullable=False, unique=True)    # CN-0001, CN-0002 ...
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
@@ -591,6 +591,7 @@ class Tax(Base):
 
 class Role(Base):
     __tablename__ = "roles"
+    __table_args__ = {"schema": "public"}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False, unique=True)
@@ -605,8 +606,9 @@ class Role(Base):
 class RolePermission(Base):
     """One cell of the permission grid: this role has `level` (none/view/create/full) on `area`."""
     __tablename__ = "role_permissions"
+    __table_args__ = {"schema": "public"}
 
-    role_id = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
+    role_id = Column(Integer, ForeignKey("public.roles.id", ondelete="CASCADE"), primary_key=True)
     area = Column(String(50), primary_key=True)
     level = Column(String(10), nullable=False, default="none", server_default="none")
 
@@ -616,8 +618,9 @@ class RolePermission(Base):
 class RoleRight(Base):
     """A special right (void_transactions, delete_records, ...) granted to a role."""
     __tablename__ = "role_rights"
+    __table_args__ = {"schema": "public"}
 
-    role_id = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
+    role_id = Column(Integer, ForeignKey("public.roles.id", ondelete="CASCADE"), primary_key=True)
     right_name = Column(String(50), primary_key=True)   # not called "right": that is an SQL keyword
 
     role = relationship("Role", back_populates="rights")
@@ -625,34 +628,77 @@ class RoleRight(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = {"schema": "public"}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String(100), nullable=False, unique=True)  # always stored lower-case (see auth.normalize_username)
     full_name = Column(String(150), nullable=False)
     password_hash = Column(String(255), nullable=False)          # argon2id hash, never the password
-    role_id = Column(Integer, ForeignKey("roles.id"), nullable=False)
+    role_id = Column(Integer, ForeignKey("public.roles.id"), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True, server_default="1")
     must_change_password = Column(Boolean, nullable=False, default=False, server_default="0")
     failed_attempts = Column(Integer, nullable=False, default=0, server_default="0")
     locked_until = Column(TIMESTAMP, nullable=True)
     last_login = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
+    # the company this user entered last (used as the default after login); NULL = none yet
+    last_company_id = Column(Integer, ForeignKey("public.companies.id", ondelete="SET NULL"), nullable=True)
 
+    # NOTE: one role per user for ALL companies. Per-company roles could be added later by moving
+    # user.role_id onto user_company_access (role_id per user+company pair).
     role = relationship("Role")
 
 
 class RefreshToken(Base):
     """Opaque refresh token, stored hashed. One row per device/login; rotated on every use."""
     __tablename__ = "refresh_tokens"
+    __table_args__ = {"schema": "public"}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False, index=True)
     token_hash = Column(String(64), nullable=False, unique=True)
     family_id = Column(String(36), nullable=False, index=True)   # all tokens from one login share it (reuse detection)
     expires_at = Column(TIMESTAMP, nullable=False)
     revoked = Column(Boolean, nullable=False, default=False, server_default="0")
     created_at = Column(TIMESTAMP, server_default=func.now())
     user_agent = Column(String(255))
+    # the company this login chain is working in; kept through refresh-token rotation
+    company_id = Column(Integer, ForeignKey("public.companies.id", ondelete="SET NULL"), nullable=True)
+
+
+class Company(Base):
+    """One company file. Its data lives in the PostgreSQL schema co_<id> (never built from user text)."""
+    __tablename__ = "companies"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(150), nullable=False)
+    address_lines = Column(Text)                  # one address line per text line
+    phone = Column(String(50))
+    email = Column(String(150))
+    logo_url = Column(Text)
+    logo_file_id = Column(String(100))
+    invoice_footer = Column(Text)
+    is_active = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    @property
+    def schema_name(self) -> str:
+        return f"co_{int(self.id)}"
+
+
+class UserCompanyAccess(Base):
+    """Which companies a user may enter. Checked on EVERY request."""
+    __tablename__ = "user_company_access"
+    __table_args__ = (
+        UniqueConstraint("user_id", "company_id", name="uq_user_company_access"),
+        {"schema": "public"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = Column(Integer, ForeignKey("public.companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(TIMESTAMP, server_default=func.now())
 
 
 class AuditLog(Base):
@@ -663,7 +709,7 @@ class AuditLog(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     created_at = Column(TIMESTAMP, server_default=func.now(), index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("public.users.id", ondelete="SET NULL"), nullable=True, index=True)
     username = Column(String(100))          # copied, so the log still reads well if a user is changed later
     action = Column(String(50), nullable=False)   # login, login_failed, create, update, void, delete, ...
     record_type = Column(String(50))

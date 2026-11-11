@@ -2,13 +2,42 @@
 // Needs:  npm install jspdf jspdf-autotable
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { BASE_URL, apiFetch } from "./api.js";
 
-// >>> EDIT THIS: the details printed at the top of every PDF
-const COMPANY = {
-  name: "I LAB std",
-  lines: ["NO 17/A", "Hollycross road, Gampaha", "Phone: +94 00 000 0000"],
-  logo: "/logos/i-lab-std.png", // a file in public/logos/ (or null for no logo)
-};
+// The company details (name, address, phone, email, logo, footer) come from the API: GET /company/profile.
+// Loaded once per session and kept here; call clearCompanyProfileCache() after the profile is edited.
+// (After switching company the page reloads, so the cache starts empty again.)
+let cachedCompany = null;
+let companyLoading = null;
+
+const EMPTY_COMPANY = { name: "", lines: [], footer: "", logo: null };
+
+function toPdfCompany(p) {
+  const lines = String(p.address_lines || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (p.phone) lines.push(`Phone: ${p.phone}`);
+  if (p.email) lines.push(`Email: ${p.email}`);
+  return { name: p.name || "", lines, footer: p.invoice_footer || "", logo: p.logo_url || null };
+}
+
+export function clearCompanyProfileCache() {
+  cachedCompany = null;
+}
+
+export async function loadCompanyProfile() {
+  if (cachedCompany) return cachedCompany;
+  if (!companyLoading) {
+    companyLoading = (async () => {
+      try {
+        const res = await apiFetch(`${BASE_URL}/company/profile`);
+        if (res.ok) cachedCompany = toPdfCompany(await res.json());
+      } catch {
+        /* offline / server error: the PDF is still made, just without company details */
+      }
+      return cachedCompany || EMPTY_COMPANY;
+    })().finally(() => { companyLoading = null; });
+  }
+  return companyLoading;
+}
 
 const money = (n) =>
   `Rs.${Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -52,7 +81,7 @@ async function loadImage(url, maxSize = 120) {
 }
 
 // images: { url -> { data, w, h } }.  Kept separate from loading so it is easy to test.
-export function renderPdf(spec, images = {}) {
+export function renderPdf(spec, images = {}, COMPANY = cachedCompany || EMPTY_COMPANY) {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -63,7 +92,7 @@ export function renderPdf(spec, images = {}) {
   // ---- header: logo + company (left), title (right) ----
   let leftY = M;
   let textX = M;
-  const logo = images[COMPANY.logo];
+  const logo = COMPANY.logo ? images[COMPANY.logo] : null;   // null when it could not be loaded: no logo, PDF still works
   if (logo) {
     const h = 16;
     const w = Math.min(40, (logo.w / logo.h) * h);
@@ -72,7 +101,7 @@ export function renderPdf(spec, images = {}) {
   }
   doc.setTextColor(...dark);
   doc.setFont("helvetica", "bold").setFontSize(13);
-  doc.text(COMPANY.name, textX, leftY + 4);
+  doc.text(COMPANY.name || "", textX, leftY + 4);
   doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(...grey);
   COMPANY.lines.forEach((l, i) => doc.text(l, textX, leftY + 9 + i * 4.2));
   const headerBottom = leftY + 9 + COMPANY.lines.length * 4.2;
@@ -123,7 +152,7 @@ export function renderPdf(spec, images = {}) {
   const hasPics = spec.items.some((it) => images[it.imageUrl]);
   autoTable(doc, {
     startY: y,
-    margin: { left: M, right: M },
+    margin: { left: M, right: M, bottom: COMPANY.footer ? 24 : 12 },
     head: [["#", "Item", "Qty", "Rate", "Amount"]],
     body: spec.items.map((it, i) => [
       String(i + 1),
@@ -159,7 +188,7 @@ export function renderPdf(spec, images = {}) {
 
   // ---- totals ----
   y = doc.lastAutoTable.finalY + 6;
-  if (y + spec.totals.length * 6 + 30 > pageH - 20) {
+  if (y + spec.totals.length * 6 + 30 > pageH - 26) {
     doc.addPage();
     y = M + 4;
   }
@@ -177,7 +206,7 @@ export function renderPdf(spec, images = {}) {
   // ---- notes ----
   if (spec.notes) {
     y += 4;
-    if (y + 20 > pageH - 20) { doc.addPage(); y = M + 4; }
+    if (y + 20 > pageH - 26) { doc.addPage(); y = M + 4; }
     doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(...grey);
     doc.text((spec.notesTitle || "NOTES").toUpperCase(), M, y);
     doc.setFont("helvetica", "normal").setFontSize(9.5).setTextColor(...dark);
@@ -185,10 +214,15 @@ export function renderPdf(spec, images = {}) {
     doc.text(wrapped, M, y + 5);
   }
 
-  // ---- page numbers ----
+  // ---- invoice footer (company setting) + page numbers ----
   const pages = doc.getNumberOfPages();
+  const footerLines = COMPANY.footer ? doc.splitTextToSize(String(COMPANY.footer), pageW - M * 2).slice(0, 3) : [];
   for (let p = 1; p <= pages; p++) {
     doc.setPage(p);
+    if (footerLines.length) {
+      doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(...grey);
+      doc.text(footerLines, pageW / 2, pageH - 8 - 4 - footerLines.length * 3.8, { align: "center" });
+    }
     doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(...grey);
     doc.text(`${spec.number}  -  Page ${p} of ${pages}`, pageW / 2, pageH - 8, { align: "center" });
   }
@@ -196,11 +230,12 @@ export function renderPdf(spec, images = {}) {
 }
 
 async function makePdf(spec) {
+  const company = await loadCompanyProfile();
   const urls = [...new Set(spec.items.map((i) => i.imageUrl).filter(Boolean))];
   const images = {};
   await Promise.all(urls.map(async (u) => { images[u] = await loadImage(u); }));
-  if (COMPANY.logo) images[COMPANY.logo] = await loadImage(COMPANY.logo, 300);
-  return renderPdf(spec, images);
+  if (company.logo) images[company.logo] = await loadImage(company.logo, 300);   // null on CORS/blocked: PDF is made without it
+  return renderPdf(spec, images, company);
 }
 
 const lines = (items) =>

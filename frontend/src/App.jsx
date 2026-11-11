@@ -52,6 +52,7 @@ import {
   ScrollText,
   X,
   Printer,
+  Building2,
 } from "lucide-react";
 import "./index.css";
 import { BASE_URL, apiFetch } from "./api.js";
@@ -67,6 +68,12 @@ import {
 } from "./auth.jsx";
 import { UsersAdminPage, ProfileModal } from "./UsersAdmin.jsx";
 import { AuditLogPage, HistoryLink } from "./AuditLogPage.jsx";
+import {
+  CompanyProvider,
+  CompanyProfilePage,
+  SidebarCompanyHeader,
+  useCompany,
+} from "./company.jsx";
 
 // const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
@@ -4485,6 +4492,7 @@ function AppHeader({
   hideAddProduct,
   inlineAction,
 }) {
+  const { company } = useCompany();
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -4717,7 +4725,7 @@ function AppHeader({
         {!isAdmin && (
           <div className="min-w-0 flex-1">
             <h1 className="text-xl font-bold text-gray-900 truncate">
-              STD OPERATION
+              {company?.name || "\u00A0"}
             </h1>
             <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
               Employee (Read Only)
@@ -18056,8 +18064,10 @@ const VIEW_AREA = {
   banking: "banking",
   taxes: "taxes",
   reports: "reports",
+  company: null, // everyone may LOOK at the company profile; only manage_companies may change it (server checks)
 };
 function viewAllowed(id, can, hasRight, openMode) {
+  if (id === "company") return true;
   if (id === "users" || id === "audit")
     return !openMode && can("users", "view") && hasRight("manage_users");
   if (openMode) return true;
@@ -18068,8 +18078,6 @@ function viewAllowed(id, can, hasRight, openMode) {
   return true;
 }
 
-// ---------- Zoho-style shell + dashboard (admin) ----------
-// Sidebar sections, in order. A thin line is drawn between sections.
 const ZOHO_NAV = [
   [
     { id: "home", label: "Home", Icon: Home },
@@ -18102,6 +18110,7 @@ const ZOHO_NAV = [
     { id: "reports", label: "Reports", Icon: TrendingUp },
   ],
   [
+    { id: "company", label: "Company Profile", Icon: Building2 },
     { id: "users", label: "Users & Roles", Icon: ShieldCheck },
     { id: "audit", label: "Audit Log", Icon: ScrollText },
   ],
@@ -18126,9 +18135,7 @@ function ZohoSidebar({ onNavigate }) {
 
   return (
     <div className="flex flex-col min-h-full">
-      <div className="flex items-center justify-center h-14 bg-black/20 text-white shrink-0">
-        D A S H B O A R D
-      </div>
+      <SidebarCompanyHeader />
 
       <nav className="flex-1 px-2 py-3">
         {ZOHO_NAV.map((group, gi) => {
@@ -18168,6 +18175,7 @@ function ZohoSidebar({ onNavigate }) {
 }
 
 function ZohoLayout({ children }) {
+  const { company } = useCompany();
   const [drawer, setDrawer] = useState(false);
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -18196,7 +18204,7 @@ function ZohoLayout({ children }) {
           >
             <Menu size={22} />
           </button>
-          <span className="font-semibold">STD OPERATION</span>
+          <span className="font-semibold truncate">{company?.name}</span>
           <HeaderSignOut />
         </div>
         {children}
@@ -18471,9 +18479,10 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
   const [year, setYear] = useState(thisYear);
   const [tab, setTab] = useState("dashboard");
   const { data, loading, error } = useReport(() => getDashboard(year), [year]);
-  const [layout, updateLayout, resetLayout] = useDashboardLayout();
-  const { user } = useAuth();
-  const [panelOpen, setPanelOpen] = useState(false);
+    const [layout, updateLayout, resetLayout] = useDashboardLayout();
+    const { user } = useAuth();
+    const { company } = useCompany();
+    const [panelOpen, setPanelOpen] = useState(false);
 
   const tabs = [
     ["dashboard", "Dashboard"],
@@ -18633,7 +18642,7 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
             <h1 className="text-xl font-medium text-gray-900 truncate">
               Hello, {user?.full_name || "Admin"}
             </h1>
-            <p className="text-sm text-gray-500 truncate">STD OPERATION</p>
+            <p className="text-sm text-gray-500 truncate">{company?.name}</p>
           </div>
           <button
             type="button"
@@ -18978,6 +18987,8 @@ function AppShell() {
     page = (
       <InventoryView isAdmin={isAdmin} onBack={() => setSearchParams({})} />
     );
+  } else if (searchParams.get("view") === "company") {
+    page = <CompanyProfilePage />;
   } else if (searchParams.get("view") === "users") {
     page = <UsersAdminPage />;
   } else if (searchParams.get("view") === "audit") {
@@ -19028,12 +19039,14 @@ export default function App() {
   return (
     <AuthProvider>
       <AuthGate>
-        <Routes>
-          <Route path="/" element={<AppShell />} />
-          <Route path="/admin" element={<AppShell />} />
-          <Route path="/admin.html" element={<AppShell />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <CompanyProvider>
+          <Routes>
+            <Route path="/" element={<AppShell />} />
+            <Route path="/admin" element={<AppShell />} />
+            <Route path="/admin.html" element={<AppShell />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </CompanyProvider>
       </AuthGate>
     </AuthProvider>
   );

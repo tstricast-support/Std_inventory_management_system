@@ -1,10 +1,14 @@
 """Audit helper. Call log_audit() wherever something should be remembered."""
+import logging
 import os
 from contextvars import ContextVar
 
 from fastapi import Request
 
 from app.models import AuditLog
+from app.database import company_session
+
+log = logging.getLogger(__name__)
 
 # Behind a proxy (Railway, nginx) the real client IP is in X-Forwarded-For. Only trust it if you set this.
 TRUST_PROXY = os.getenv("TRUST_PROXY", "false").strip().lower() in ("1", "true", "yes", "on")
@@ -41,3 +45,19 @@ def log_audit(db, user, action, record_type=None, record_id=None, summary=None, 
     )
     db.add(row)
     return row
+
+def log_audit_company(company_id, user, action, record_type=None, record_id=None, summary=None, request=None, username=None):
+    """Writes ONE audit row straight into a company's audit_logs and commits it on its own.
+    For events outside a company session (login, logout, refresh, switch-company).
+    A failing audit write must never lock people out, so it is logged and swallowed."""
+    if company_id is None:
+        return
+    db = company_session(company_id)
+    try:
+        log_audit(db, user, action, record_type, record_id, summary, request, username)
+        db.commit()
+    except Exception:
+        db.rollback()
+        log.exception("audit write failed (company %s, action %s)", company_id, action)
+    finally:
+        db.close()

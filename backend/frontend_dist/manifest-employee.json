@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "STD OPERATION",
-  "short_name": "STD OPERATION",
+  "name": "ACCOUNTING SYSTEM",
+  "short_name": "ACCOUNTING SYSTEM",
   "description": "Browse inventory and request items",
   "lang": "en",
   "dir": "ltr",

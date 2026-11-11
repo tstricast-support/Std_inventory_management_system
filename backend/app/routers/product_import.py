@@ -10,7 +10,7 @@ from openpyxl import Workbook, load_workbook
 from sqlalchemy.orm import Session, joinedload
 
 from .. import models
-from ..database import get_db
+from ..database import current_company_id, get_db
 from ..imagekit_client import upload_image, delete_image
 from ..upload_checks import check_image_count, read_import_file, validate_image
 
@@ -367,7 +367,7 @@ def bulk_upload_images(
                 db.flush()
                 product.images = []
                 cleared.add(product.id)
-            url, file_id = upload_image(img.file.read(), safe_name)
+            url, file_id = upload_image(img.file.read(), safe_name, current_company_id(db))
             has_primary = any(i.is_primary for i in product.images)
             new_img = models.ProductImage(
                 product_id=product.id, image_url=url, file_id=file_id, is_primary=not has_primary,

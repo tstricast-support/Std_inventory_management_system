@@ -7,8 +7,9 @@ from sqlalchemy.exc import IntegrityError
 from app.auth import (
     AUTH_REQUIRED, hash_password, normalize_username, validate_new_password,
 )
-from app.database import SessionLocal
-from app.models import AuditLog, Role, RolePermission, RoleRight, User
+from app.audit import log_audit_company
+from app.database import public_session
+from app.models import Company, Role, RolePermission, RoleRight, User, UserCompanyAccess
 from app.permissions import AREA_KEYS, RIGHT_KEYS, SYSTEM_ROLES
 
 
@@ -17,7 +18,7 @@ def seed_system_roles():
     so changes you make to a preset in the Roles screen survive a restart.
     The one exception: Admin always gets every area/right, so a new area added in future code
     can never lock the Admin out."""
-    db = SessionLocal()
+    db = public_session()
     try:
         for preset in SYSTEM_ROLES:
             role = db.query(Role).filter(Role.name == preset["name"]).first()
@@ -50,7 +51,7 @@ def bootstrap_owner():
     """First start only: if there are no users, create the Owner from OWNER_USERNAME / OWNER_PASSWORD.
     There is no default password. If the variables are missing we print a clear error; the app still
     starts while AUTH_REQUIRED=false (so you can deploy first), but refuses to start when AUTH_REQUIRED=true."""
-    db = SessionLocal()
+    db = public_session()
     try:
         if db.query(User.id).first() is not None:
             return
@@ -98,10 +99,14 @@ def bootstrap_owner():
         except IntegrityError:          # another worker created it a moment ago
             db.rollback()
             return
-        db.add(AuditLog(user_id=owner.id, username=owner.username, action="owner_created",
-                        record_type="user", record_id=owner.id,
-                        summary="First Owner account created from environment variables"))
+        # the owner may enter every company that exists (the first Owner is also the one who can create more)
+        companies = db.query(Company).filter(Company.is_active == True).order_by(Company.id).all()  # noqa: E712
+        for c in companies:
+            db.add(UserCompanyAccess(user_id=owner.id, company_id=c.id))
         db.commit()
+        if companies:   # audit_logs lives inside the company schema, so it is written there
+            log_audit_company(companies[0].id, owner, "owner_created", "user", owner.id,
+                              "First Owner account created from environment variables")
         print(f"AUTH: first Owner '{username}' created (must change password at first login). "
               "You can now remove OWNER_PASSWORD from your environment.")
     finally:

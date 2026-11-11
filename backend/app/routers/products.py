@@ -3,7 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional, List
 from .. import models, schemas
-from ..database import get_db
+from ..database import current_company_id, get_db
 from ..imagekit_client import upload_image, delete_image
 from ..upload_checks import check_image_count, validate_image
 
@@ -77,13 +77,18 @@ def create_product(
         cogs_account_id=cogs_account_id, income_account_id=income_account_id,
         asset_account_id=asset_account_id, preferred_vendor_id=preferred_vendor_id,
     )
+    
     db.add(product)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:                       # SKU already used inside THIS company
+        db.rollback()
+        raise HTTPException(400, "An item with that SKU already exists.")
     db.refresh(product)
 
     for idx, img in enumerate(images):
         file_bytes = img.file.read()
-        url, file_id = upload_image(file_bytes, safe_names[idx])
+        url, file_id = upload_image(file_bytes, safe_names[idx], current_company_id(db))
         db.add(models.ProductImage(
             product_id=product.id,
             image_url=url,
@@ -183,7 +188,7 @@ def add_product_images(
 
     has_primary = any(i.is_primary for i in product.images)
     for img, safe_name in zip(images, safe_names):
-        url, file_id = upload_image(img.file.read(), safe_name)
+        url, file_id = upload_image(img.file.read(), safe_name, current_company_id(db))
         db.add(models.ProductImage(
             product_id=product.id,
             image_url=url,

@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { LayoutGrid, LogOut } from "lucide-react";
+import { Building2, LayoutGrid, LogOut } from "lucide-react";
 import {
   BASE_URL,
   apiFetch,
@@ -56,17 +56,22 @@ async function readError(res, fallback) {
 export function AuthProvider({ children }) {
   const [status, setStatus] = useState("loading");
   const [user, setUser] = useState(null);
+  // true right after a fresh sign-in when the user may enter several companies -> show the company picker once
+  const [needsPick, setNeedsPick] = useState(false);
 
   const loadProfile = useCallback(async () => {
     const res = await apiFetch(`${BASE_URL}/auth/me`);
     if (!res.ok) throw new Error("Could not load your profile");
-    setUser(await res.json());
+    const data = await res.json();
+    setUser(data);
     setStatus("authed");
+    return data;
   }, []);
 
   const clearSession = useCallback(() => {
     setAccessToken(null);
     setUser(null);
+    setNeedsPick(false);
     setStatus("anon");
   }, []);
 
@@ -112,10 +117,29 @@ export function AuthProvider({ children }) {
       if (!res.ok) throw new Error(await readError(res, "Login failed"));
       const session = await res.json();
       setAccessToken(session.access_token);
+      // decided BEFORE the app is shown, so there is no flash of the wrong company
+      setNeedsPick((session.companies || []).length > 1);
       await loadProfile();
     },
     [loadProfile],
   );
+
+  // Enter another company: the server checks access and returns a NEW token for it, then a full reload so
+  // no data of the old company stays in memory (the refresh cookie remembers the company across the reload).
+  const switchCompany = useCallback(async (companyId) => {
+    const res = await apiFetch(`${BASE_URL}/auth/switch-company`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ company_id: companyId }),
+    });
+    if (!res.ok)
+      throw new Error(await readError(res, "Could not open that company"));
+    const session = await res.json();
+    setAccessToken(session.access_token);
+    window.location.reload();
+  }, []);
+
+  const finishPick = useCallback(() => setNeedsPick(false), []);
 
   const logout = useCallback(async () => {
     try {
@@ -167,6 +191,9 @@ export function AuthProvider({ children }) {
     () => ({
       status,
       user,
+      needsPick,
+      finishPick,
+      switchCompany,
       openMode: status === "open",
       can,
       hasRight,
@@ -175,14 +202,26 @@ export function AuthProvider({ children }) {
       changePassword,
       reloadUser: loadProfile,
     }),
-    [status, user, can, hasRight, login, logout, changePassword,loadProfile],
+    [
+      status,
+      user,
+      needsPick,
+      finishPick,
+      switchCompany,
+      can,
+      hasRight,
+      login,
+      logout,
+      changePassword,
+      loadProfile,
+    ],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 // ---------- shows login / forced password change / the app ----------
 export function AuthGate({ children }) {
-  const { status, user } = useAuth();
+  const { status, user, needsPick } = useAuth();
   if (status === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 text-sm text-gray-500">
@@ -193,6 +232,8 @@ export function AuthGate({ children }) {
   if (status === "anon") return <LoginPage />;
   if (status === "authed" && user?.must_change_password)
     return <ChangePasswordPage forced />;
+  if (status === "authed" && needsPick && (user?.companies?.length || 0) > 1)
+    return <CompanyPickerPage />;
   return (
     <>
       {children}
@@ -209,8 +250,11 @@ function AuthCard({ title, subtitle, children }) {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm bg-white rounded-xl shadow-xl border border-gray-200 p-6">
         <div className="flex items-center gap-2 text-[#1f2640] mb-4">
-          
-                    <img src="/YAVERO.png" alt="YAVERO" className="h-8 w-8 object-contain" />
+          <img
+            src="/YAVERO.png"
+            alt="YAVERO"
+            className="h-8 w-8 object-contain"
+          />
         </div>
         <h1 className="text-xl font-bold text-gray-900">{title}</h1>
         {subtitle && (
@@ -281,6 +325,122 @@ function LoginPage() {
         </button>
       </form>
     </AuthCard>
+  );
+}
+
+// ---------- company picker (shown once after sign-in when the user has several companies) ----------
+function CompanyPickerPage() {
+  const { user, switchCompany, finishPick, logout } = useAuth();
+  const [selected, setSelected] = useState(user.company_id);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const go = async () => {
+    setError("");
+    if (selected === user.company_id) return finishPick(); // already in it (it was the last-used one)
+    setBusy(true);
+    try {
+      await switchCompany(selected); // reloads the page on success
+    } catch (err) {
+      setError(err.message || "Could not open that company");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AuthCard
+      title="Choose a company"
+      subtitle={`Welcome, ${user.full_name}. Which company do you want to work in?`}
+    >
+      <div className="space-y-2">
+        {user.companies.map((c) => (
+          <label
+            key={c.id}
+            className={`flex items-center gap-3 border rounded-lg px-3 py-2.5 cursor-pointer text-sm ${
+              selected === c.id
+                ? "border-blue-600 bg-blue-50"
+                : "border-gray-300 hover:bg-gray-50"
+            }`}
+          >
+            <input
+              type="radio"
+              name="company"
+              checked={selected === c.id}
+              onChange={() => setSelected(c.id)}
+            />
+            <Building2 size={16} className="text-gray-400 shrink-0" />
+            <span className="flex-1 min-w-0 truncate text-gray-900">
+              {c.name}
+            </span>
+            {c.id === user.company_id && (
+              <span className="text-[11px] text-gray-500">Last used</span>
+            )}
+          </label>
+        ))}
+      </div>
+      {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
+      <button
+        type="button"
+        onClick={go}
+        disabled={busy}
+        className="w-full mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
+      >
+        {busy ? "Opening..." : "Continue"}
+      </button>
+      <button
+        type="button"
+        onClick={logout}
+        className="w-full mt-2 text-sm text-gray-500 hover:text-gray-800"
+      >
+        Sign out
+      </button>
+    </AuthCard>
+  );
+}
+
+// ---------- company switcher (only drawn when the user may enter 2+ companies) ----------
+function CompanySwitcher({ light = false }) {
+  const { user, switchCompany } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const list = user?.companies || [];
+  if (list.length < 2) return null;
+
+  const onChange = async (e) => {
+    const id = Number(e.target.value);
+    if (id === user.company_id) return;
+    setBusy(true);
+    setError("");
+    try {
+      await switchCompany(id); // reloads the page on success
+    } catch (err) {
+      setError(err.message || "Could not open that company");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={light ? "" : "mt-2"}>
+      <select
+        value={user.company_id}
+        onChange={onChange}
+        disabled={busy}
+        aria-label="Switch company"
+        title="Switch company"
+        className={
+          light
+            ? "border border-gray-300 bg-white text-gray-700 text-xs rounded-full px-2 py-1.5 shadow max-w-[11rem]"
+            : "w-full rounded bg-white/10 text-white text-xs px-2 py-1.5 border border-white/10 [&>option]:text-gray-900"
+        }
+      >
+        {list.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+      {error && <p className="text-[11px] text-red-400 mt-1">{error}</p>}
+    </div>
   );
 }
 
@@ -468,6 +628,7 @@ export function SidebarUser() {
     <div className="mx-2 mb-1 px-3 py-2 rounded-md bg-white/5 text-xs">
       <p className="truncate text-white font-medium">{user.full_name}</p>
       <p className="truncate text-gray-400">{user.role?.name}</p>
+      <CompanySwitcher />
       <div className="mt-2 flex items-center gap-4">
         <button
           onClick={() => window.dispatchEvent(new Event("app:profile"))}
@@ -506,6 +667,7 @@ export function FloatingSignOut() {
   if (openMode || !user) return null;
   return (
     <div className="fixed bottom-3 left-3 z-40 flex items-center gap-2">
+      <CompanySwitcher light />
       <button
         onClick={() => window.dispatchEvent(new Event("app:profile"))}
         title={`Signed in as ${user.full_name}`}

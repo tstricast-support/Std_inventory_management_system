@@ -8,11 +8,11 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..audit import log_audit
 from ..auth import (
-    MIN_PASSWORD_LENGTH, get_current_user, hash_password, normalize_username, user_permissions, user_rights,
-    utcnow, validate_new_password,
+    MIN_PASSWORD_LENGTH, accessible_companies, get_current_user, hash_password, normalize_username, user_permissions,
+    user_rights, utcnow, validate_new_password,
 )
 from ..database import get_db
-from ..models import Role, RolePermission, RoleRight, User
+from ..models import Company, Role, RolePermission, RoleRight, User, UserCompanyAccess
 from ..permissions import AREAS, AREA_KEYS, LEVELS, RIGHTS, RIGHT_KEYS
 from .auth import _revoke_all
 
@@ -47,7 +47,41 @@ def _require_an_admin_left(db: Session, message: str) -> None:
         raise HTTPException(400, message)
 
 
-def _user_row(u: User) -> dict:
+def _companies_of(db: Session, user_ids: list) -> dict:
+    """{user_id: [{"id", "name"}]} - the ACTIVE companies each user may enter (one query for all users)."""
+    if not user_ids:
+        return {}
+    rows = (
+        db.query(UserCompanyAccess.user_id, Company.id, Company.name)
+        .join(Company, Company.id == UserCompanyAccess.company_id)
+        .filter(UserCompanyAccess.user_id.in_(user_ids), Company.is_active == True)  # noqa: E712
+        .order_by(Company.id)
+        .all()
+    )
+    out: dict = {}
+    for uid, cid, cname in rows:
+        out.setdefault(uid, []).append({"id": cid, "name": cname})
+    return out
+
+
+def _row(db: Session, u: User) -> dict:
+    return _user_row(u, _companies_of(db, [u.id]).get(u.id, []))
+
+
+def _validated_company_ids(db: Session, actor: User, ids) -> tuple:
+    """Returns (wanted ids, {company_id: name} the actor may hand out). Roles stay global; only the company
+    list is per user. You can only give access to companies you can enter yourself. (Per-company roles could be
+    added later by moving the role onto user_company_access.)"""
+    wanted = {int(i) for i in (ids or [])}
+    if not wanted:
+        raise HTTPException(400, "Choose at least one company for this user.")
+    scope = {c.id: c.name for c in accessible_companies(db, actor)}
+    if wanted - set(scope):
+        raise HTTPException(400, "You can only give access to companies that you can enter yourself.")
+    return wanted, scope
+
+
+def _user_row(u: User, companies: list | None = None) -> dict:
     now = utcnow()
     return {
         "id": u.id,
@@ -61,6 +95,7 @@ def _user_row(u: User) -> dict:
         "failed_attempts": u.failed_attempts or 0,
         "last_login": u.last_login.isoformat() if u.last_login else None,
         "created_at": u.created_at.isoformat() if u.created_at else None,
+        "companies": companies or [],
     }
 
 
@@ -101,11 +136,13 @@ class UserCreate(BaseModel):
     full_name: str = Field(min_length=1, max_length=150)
     role_id: int
     temp_password: str | None = Field(default=None, max_length=128)   # leave empty to generate one
+    company_ids: list[int] = []                                       # companies this user may enter (at least one)
 
 
 class UserUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=1, max_length=150)
     role_id: int | None = None
+    company_ids: list[int] | None = None      # None = leave the companies alone
 
 
 class PasswordReset(BaseModel):
@@ -136,7 +173,8 @@ def _validate_grid(permissions: dict, rights: list) -> None:
 @router.get("/")
 def list_users(db: Session = Depends(get_db)):
     users = db.query(User).options(joinedload(User.role)).order_by(User.username).all()
-    return [_user_row(u) for u in users]
+    companies = _companies_of(db, [u.id for u in users])
+    return [_user_row(u, companies.get(u.id, [])) for u in users]
 
 
 @router.post("/")
@@ -148,6 +186,7 @@ def create_user(payload: UserCreate, request: Request, db: Session = Depends(get
     if db.query(User).filter(User.username == username).first():
         raise HTTPException(400, "That username is already taken.")
     role = _get_role(db, payload.role_id)
+    wanted, scope = _validated_company_ids(db, actor, payload.company_ids)
 
     generated = not payload.temp_password
     password = payload.temp_password or _generate_password()
@@ -159,10 +198,14 @@ def create_user(payload: UserCreate, request: Request, db: Session = Depends(get
                 role_id=role.id, is_active=True, must_change_password=True)
     db.add(user)
     db.flush()
-    log_audit(db, actor, "user_created", "user", user.id, f"Created user '{username}' with role {role.name}", request)
+    for cid in sorted(wanted):
+        db.add(UserCompanyAccess(user_id=user.id, company_id=cid))
+    log_audit(db, actor, "user_created", "user", user.id,
+              f"Created user '{username}' with role {role.name}; companies: " + ", ".join(scope[c] for c in sorted(wanted)),
+              request)
     db.commit()
     db.refresh(user)
-    row = _user_row(user)
+    row = _row(db, user)
     row["temporary_password"] = password if generated else None   # shown ONCE; never stored in plain text
     return row
 
@@ -182,10 +225,31 @@ def update_user(user_id: int, payload: UserUpdate, request: Request, db: Session
         db.flush()
         _require_an_admin_left(db, "You cannot change this role: there must always be at least one active Admin.")
         user = _get_user(db, user_id)
+    if payload.company_ids is not None:
+        wanted, scope = _validated_company_ids(db, actor, payload.company_ids)
+        current = {cid for (cid,) in db.query(UserCompanyAccess.company_id).filter(UserCompanyAccess.user_id == user.id)}
+        # companies this admin cannot see (e.g. a deactivated one, or one the admin has no access to) stay as they are
+        new_set = wanted | (current - set(scope))
+        if user.id == actor.id and request.state.company_id not in new_set:
+            raise HTTPException(400, "You cannot remove your own access to the company you are working in.")
+        added, removed = new_set - current, current - new_set
+        for cid in sorted(added):
+            db.add(UserCompanyAccess(user_id=user.id, company_id=cid))
+        if removed:
+            db.query(UserCompanyAccess).filter(
+                UserCompanyAccess.user_id == user.id, UserCompanyAccess.company_id.in_(removed)
+            ).delete(synchronize_session=False)
+            if user.last_company_id in removed:
+                user.last_company_id = None
+        # nothing else to do for removal: access is re-checked on EVERY request, so it is blocked at once
+        if added:
+            changes.append("companies +" + ", ".join(scope[c] for c in sorted(added)))
+        if removed:
+            changes.append("companies -" + ", ".join(scope[c] for c in sorted(removed)))
     if changes:
         log_audit(db, actor, "user_updated", "user", user.id, f"Updated '{user.username}': " + "; ".join(changes), request)
         db.commit()
-    return _user_row(_get_user(db, user_id))
+    return _row(db, _get_user(db, user_id))
 
 
 @router.put("/{user_id}/reset-password")
@@ -204,7 +268,7 @@ def reset_password(user_id: int, payload: PasswordReset, request: Request, db: S
     _revoke_all(db, user.id)
     log_audit(db, actor, "password_reset", "user", user.id, f"Password reset for '{user.username}'", request)
     db.commit()
-    row = _user_row(_get_user(db, user_id))
+    row = _row(db, _get_user(db, user_id))
     row["temporary_password"] = password if generated else None
     return row
 
@@ -221,7 +285,7 @@ def deactivate_user(user_id: int, request: Request, db: Session = Depends(get_db
     _require_an_admin_left(db, "You cannot deactivate the last active Admin.")
     log_audit(db, actor, "user_deactivated", "user", user_id, f"Deactivated '{user.username}'", request)
     db.commit()
-    return _user_row(_get_user(db, user_id))
+    return _row(db, _get_user(db, user_id))
 
 
 @router.put("/{user_id}/activate")
@@ -231,7 +295,7 @@ def activate_user(user_id: int, request: Request, db: Session = Depends(get_db),
     user.is_active = True
     log_audit(db, actor, "user_activated", "user", user.id, f"Activated '{user.username}'", request)
     db.commit()
-    return _user_row(_get_user(db, user_id))
+    return _row(db, _get_user(db, user_id))
 
 
 @router.put("/{user_id}/unlock")
@@ -242,7 +306,7 @@ def unlock_user(user_id: int, request: Request, db: Session = Depends(get_db),
     user.failed_attempts = 0
     log_audit(db, actor, "user_unlocked", "user", user.id, f"Unlocked '{user.username}'", request)
     db.commit()
-    return _user_row(_get_user(db, user_id))
+    return _row(db, _get_user(db, user_id))
 
 
 @router.put("/{user_id}/sign-out-all")
