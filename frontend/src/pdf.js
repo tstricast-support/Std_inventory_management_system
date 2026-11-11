@@ -241,6 +241,7 @@ async function makePdf(spec) {
 const lines = (items) =>
   items.map((l) => ({ ...l, imageUrl: primaryImageUrl(l.product) }));
 
+
 export async function downloadInvoicePdf(inv, customer, asFile = false) {
   const status = inv.status === "void" ? "Void" : inv.balance_due <= 0.004 ? "Paid" : "";
   const doc = await makePdf({
@@ -255,7 +256,7 @@ export async function downloadInvoicePdf(inv, customer, asFile = false) {
       ["Terms", customer?.payment_terms],
       ["PO / Order #", inv.order_number],
     ],
-    items: lines(inv.items),
+    items: inv.items.map((l) => ({ ...l, imageUrl: null })), // invoices are printed without item pictures
     totals: [
       ...(Number(inv.discount_amount) > 0
         ? [

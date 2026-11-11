@@ -13066,7 +13066,7 @@ function QuickItemModal({ initialName, onSave, onClose }) {
 }
 
 const INVOICE_ROW_GRID =
-  "grid grid-cols-2 gap-2 sm:grid-cols-[28px_minmax(0,1.5fr)_minmax(0,1.5fr)_64px_96px_96px_32px] sm:items-center";
+  "grid grid-cols-2 gap-2 sm:grid-cols-[28px_minmax(0,2fr)_minmax(0,1.2fr)_64px_96px_96px_32px] sm:items-center";
 
 const blankInvoiceLine = () => ({
   product_id: "",
@@ -13074,6 +13074,7 @@ const blankInvoiceLine = () => ({
   quantity: "1",
   rate: "",
 });
+
 
 function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
   const [customers, setCustomers] = useState([]);
@@ -13135,6 +13136,29 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
   const [preview, setPreview] = useState(null); // { url } while the preview window is open
   const [previewBusy, setPreviewBusy] = useState(false);
   const panelRef = useRef(null);
+  // "Record payment" while creating the invoice (customer paid on the spot)
+  const [accounts, setAccounts] = useState([]); // cash / bank accounts the money can go into
+  const [payNow, setPayNow] = useState(false);
+  const [payAmount, setPayAmount] = useState(""); // empty = the full invoice total
+  const [payMode, setPayMode] = useState("Cash");
+  const [payDepositId, setPayDepositId] = useState("");
+  const [payReference, setPayReference] = useState("");
+
+  // only for a NEW invoice: load the deposit accounts (if this user can't read them, the button is simply hidden)
+  useEffect(() => {
+    if (editInvoice) return;
+    getAccounts()
+      .then((acc) => {
+        const deposits = acc.filter((a) =>
+          DEPOSIT_ACCOUNT_TYPES.includes(a.account_type),
+        );
+        setAccounts(deposits);
+        const preferred =
+          deposits.find((a) => a.name === "Undeposited Funds") || deposits[0];
+        if (preferred) setPayDepositId(preferred.id);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     Promise.all([getCustomers(), getProducts()])
@@ -13241,6 +13265,7 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
         ? `${p.quantity + (oldQty[p.id] || 0)} in stock`
         : p.item_type,
     search: `${p.label} ${p.sku || ""}`,
+    thumb: p, // lets the dropdown show the item picture before the name
   }));
 
   const setLine = (i, patch) =>
@@ -13342,6 +13367,10 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     (discountType !== "percent" || discountNum <= 100) &&
     discountCents <= totalCents;
   const netCents = totalCents - discountCents; // what the customer owes
+  const payCents = payAmount === "" ? netCents : toCents(payAmount); // amount received now
+  const payOk =
+    !payNow ||
+    (Boolean(payDepositId) && payCents > 0 && payCents <= netCents);
   const canSave =
     Boolean(customerId) &&
     filled.length > 0 &&
@@ -13353,7 +13382,8 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     ) &&
     netCents > 0 &&
     discountOk &&
-    effectiveDue >= date;
+    effectiveDue >= date &&
+    payOk;
 
   const canPreview = Boolean(customerId) && filled.length > 0;
 
@@ -13422,8 +13452,34 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
           rate: Number(l.rate) || 0,
         })),
       };
-      if (editInvoice) await updateInvoice(editInvoice.id, invoicePayload);
-      else await createInvoice(invoicePayload);
+      if (editInvoice) {
+        await updateInvoice(editInvoice.id, invoicePayload);
+      } else {
+        const created = await createInvoice(invoicePayload);
+        if (payNow) {
+          try {
+            await createPayment({
+              customer_id: customerId,
+              payment_date: date,
+              payment_mode: payMode,
+              deposit_account_id: Number(payDepositId),
+              reference: payReference.trim() || null,
+              notes: null,
+              allocations: [
+                { invoice_id: created.id, amount: payCents / 100 },
+              ],
+            });
+          } catch (payErr) {
+            // the invoice is already saved, so close the form and tell the user what is left to do
+            await onSaved();
+            onClose();
+            alert(
+              `${created.invoice_number} was saved, but the payment could not be recorded (${payErr.message}). Use "Record payment" on the invoice list.`,
+            );
+            return;
+          }
+        }
+      }
       await onSaved();
       onClose();
     } catch (err) {
@@ -13588,10 +13644,12 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
                           }
                           createLabel="item"
                           emptyText="No items found"
+                          wrap
                         />
                       </div>
                       <input
                         placeholder="Description"
+                        title={l.description}
                         value={l.description}
                         onChange={(e) =>
                           setLine(i, { description: e.target.value })
@@ -13731,6 +13789,86 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
             </div>
           </div>
 
+          {!editInvoice && accounts.length > 0 && (
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => setPayNow((v) => !v)}
+                className={`w-full inline-flex items-center justify-center gap-2 rounded-xl py-3.5 text-base font-bold text-green-700 bg-green-100 hover:bg-green-200 border-2 transition ${payNow ? "border-green-500" : "border-green-200"}`}
+              >
+                {payNow ? <Check size={20} /> : <Wallet size={20} />}
+                {payNow
+                  ? `Payment will be recorded: ${formatRs(payCents / 100)}`
+                  : "Record payment"}
+              </button>
+
+              {payNow && (
+                <div className="border border-green-200 bg-green-50/60 rounded-xl p-3 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <label className="text-xs text-gray-500">
+                      Amount received
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder={String(netCents / 100)}
+                        value={payAmount}
+                        onChange={(e) => setPayAmount(e.target.value)}
+                        className={`${cls} mt-1 ${payOk ? "" : "!border-red-400"}`}
+                      />
+                    </label>
+                    <label className="text-xs text-gray-500">
+                      Payment mode
+                      <select
+                        value={payMode}
+                        onChange={(e) => setPayMode(e.target.value)}
+                        className={cls + " mt-1 bg-white"}
+                      >
+                        {PAYMENT_MODES.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-xs text-gray-500">
+                      Deposit to
+                      <select
+                        value={payDepositId}
+                        onChange={(e) => setPayDepositId(e.target.value)}
+                        className={cls + " mt-1 bg-white"}
+                      >
+                        {accounts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <input
+                    placeholder="Reference (cheque no., transfer ID...)"
+                    value={payReference}
+                    onChange={(e) => setPayReference(e.target.value)}
+                    className={cls + " bg-white"}
+                  />
+                  {!payOk && (
+                    <p className="text-xs text-red-600">
+                      The amount must be more than 0 and not more than the
+                      invoice total.
+                    </p>
+                  )}
+                  {payOk && payCents < netCents && (
+                    <p className="text-xs text-gray-500">
+                      Balance of {formatRs((netCents - payCents) / 100)} stays
+                      due on the invoice.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-2 pt-2">
             <button
               type="button"
@@ -13750,7 +13888,9 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
                 ? "Saving..."
                 : editInvoice
                   ? "Save Changes"
-                  : "Save Invoice"}
+                  : payNow
+                    ? "Save Invoice & Payment"
+                    : "Save Invoice"}
             </button>
           </div>
         </form>
@@ -16015,7 +16155,6 @@ function FieldButton({ onClick, disabled, title, children }) {
   );
 }
 
-// Dropdown you can search in, then pick from
 function SearchSelect({
   value,
   onChange,
@@ -16027,6 +16166,7 @@ function SearchSelect({
   onCreateNew = null,
   createLabel = "item",
   searchable = true,
+  wrap = false, // true = show the full (long) name on several lines instead of cutting it with "..."
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -16103,25 +16243,33 @@ function SearchSelect({
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className={`w-full flex items-center justify-between gap-2 border rounded-lg px-3 py-2.5 text-sm text-left bg-white transition focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:border-gray-300 ${
+        title={selected ? selected.label : undefined}
+        className={`w-full flex ${wrap ? "items-start" : "items-center"} justify-between gap-2 border rounded-lg px-3 py-2.5 text-sm text-left bg-white transition focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:border-gray-300 ${
           open
             ? "border-blue-500 ring-2 ring-blue-100"
             : "border-gray-300 hover:border-gray-400"
         }`}
       >
-        <span
-          className={`truncate ${selected ? "text-gray-900" : "text-gray-400"}`}
-        >
-          {selected ? selected.label : placeholder}
+        <span className="flex items-start gap-2 min-w-0">
+          {selected && "thumb" in selected && (
+            <ItemThumb product={selected.thumb} size={32} />
+          )}
+          <span
+            className={`${wrap ? "break-words whitespace-normal leading-snug" : "truncate"} ${selected ? "text-gray-900" : "text-gray-400"}`}
+          >
+            {selected ? selected.label : placeholder}
+          </span>
         </span>
         <ChevronDown
           size={16}
-          className={`shrink-0 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`shrink-0 mt-0.5 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`}
         />
       </button>
 
       {open && (
-        <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+        <div
+          className={`absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden ${wrap ? "sm:w-[380px] sm:max-w-[80vw]" : ""}`}
+        >
           {searchable && (
             <div className="p-2 border-b border-gray-100">
               <div className="relative">
@@ -16156,7 +16304,16 @@ function SearchSelect({
                     i === active ? "bg-blue-50" : ""
                   } ${o.value === value ? "font-medium text-blue-700" : "text-gray-800"}`}
                 >
-                  <span className="truncate">{o.label}</span>
+                  <span className="flex items-center gap-2 min-w-0">
+                    {"thumb" in o && <ItemThumb product={o.thumb} size={32} />}
+                    <span
+                      className={
+                        wrap ? "break-words whitespace-normal" : "truncate"
+                      }
+                    >
+                      {o.label}
+                    </span>
+                  </span>
                   <span className="flex items-center gap-2 shrink-0">
                     {o.hint && (
                       <span className="text-xs text-gray-400 font-normal">
