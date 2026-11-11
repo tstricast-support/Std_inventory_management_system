@@ -10,6 +10,7 @@ import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
 import {
   Pencil,
   Trash2,
+  Copy,
   PackagePlus,
   History,
   ChevronRight,
@@ -2844,9 +2845,9 @@ function filterItemTree(items, q) {
 // Editing an item, or a form opened from inside another form, skips the question.
 function ProductForm(props) {
   const [kind, setKind] = useState(null); // null = still asking
-  if (!props.initialData && !kind) {
-    return <ProductKindChooser onPick={setKind} onClose={props.onClose} />;
-  }
+    if (!props.initialData && !props.duplicateFrom && !kind) {
+      return <ProductKindChooser onPick={setKind} onClose={props.onClose} />;
+    }
   return <ProductFormBody {...props} kind={kind || "item"} />;
 }
 
@@ -2895,6 +2896,7 @@ function ProductKindChooser({ onPick, onClose }) {
 
 function ProductFormBody({
   initialData,
+  duplicateFrom = null, // an existing item to copy into a NEW item
   onSubmit,
   onClose,
   onImagesChanged,
@@ -2902,38 +2904,38 @@ function ProductFormBody({
   initialName = "",
 }) {
   const isEditMode = Boolean(initialData);
+  const isDuplicate = !isEditMode && Boolean(duplicateFrom);
+  const seed = initialData || duplicateFrom; // where the form fields get their starting values
   const parentKind = kind === "subitem" ? "sub" : "top"; // which items are offered as parents
   const requireParent = kind === "subitem" || kind === "under-item"; // Subitem of is ticked and locked
   const [form, setForm] = useState({
-    item_type: initialData?.item_type || "Inventory Part",
-    name: initialData?.name || initialName || "",
-    manufacturer_part_number: initialData?.manufacturer_part_number || "",
-    is_subitem: requireParent || Boolean(initialData?.parent_id),
-    parent_id: initialData?.parent_id ? String(initialData.parent_id) : "",
+    item_type: seed?.item_type || "Inventory Part",
+    name: isDuplicate ? `${seed.name} (Copy)` : seed?.name || initialName || "",
+    manufacturer_part_number: seed?.manufacturer_part_number || "",
+    is_subitem: requireParent || Boolean(seed?.parent_id),
+    parent_id: seed?.parent_id ? String(seed.parent_id) : "",
 
-    purchase_description: initialData?.purchase_description || "",
-    cost: initialData?.cost ?? 0,
-    cogs_account_id: initialData?.cogs_account?.id
-      ? String(initialData.cogs_account.id)
-      : "",
-    preferred_vendor_id: initialData?.preferred_vendor?.id
-      ? String(initialData.preferred_vendor.id)
+    purchase_description: seed?.purchase_description || "",
+    cost: seed?.cost ?? 0,
+    cogs_account_id: seed?.cogs_account?.id ? String(seed.cogs_account.id) : "",
+    preferred_vendor_id: seed?.preferred_vendor?.id
+      ? String(seed.preferred_vendor.id)
       : "",
 
-    description: initialData?.description || "",
-    price: initialData?.price ?? 0,
-    income_account_id: initialData?.income_account?.id
-      ? String(initialData.income_account.id)
+    description: seed?.description || "",
+    price: seed?.price ?? 0,
+    income_account_id: seed?.income_account?.id
+      ? String(seed.income_account.id)
       : "",
 
-    asset_account_id: initialData?.asset_account?.id
-      ? String(initialData.asset_account.id)
+    asset_account_id: seed?.asset_account?.id
+      ? String(seed.asset_account.id)
       : "",
-    reorder_min: initialData?.reorder_min ?? "",
-    reorder_max: initialData?.reorder_max ?? "",
-    quantity: initialData?.quantity ?? 0,
+    reorder_min: seed?.reorder_min ?? "",
+    reorder_max: seed?.reorder_max ?? "",
+    quantity: isDuplicate ? 0 : (seed?.quantity ?? 0), // a copy starts with no stock
 
-    sku: initialData?.sku || "",
+    sku: isDuplicate ? "" : seed?.sku || "", // SKU must be unique, so the copy starts blank
   });
 
   const [vendors, setVendors] = useState([]);
@@ -2951,6 +2953,7 @@ function ProductFormBody({
   //   otherwise      -> top-level items only
   const buildParentOptions = (tree) => {
     if (isEditMode) return flattenParents(tree, initialData.id);
+    if (isDuplicate) return flattenParents(tree); // the copy keeps the same parent as the original
     const all = flattenParents(tree);
     return parentKind === "sub"
       ? all.filter((p) => p.parent_id)
@@ -3067,9 +3070,11 @@ function ProductFormBody({
         <h2 className="text-lg font-semibold mb-3">
           {isEditMode
             ? "Edit Item"
-            : requireParent
-              ? "New Subitem"
-              : "New Item"}
+            : isDuplicate
+              ? "Duplicate Item"
+              : requireParent
+                ? "New Subitem"
+                : "New Item"}
         </h2>
 
         {error && (
@@ -4968,54 +4973,175 @@ function StockBadge({ quantity, lowStock }) {
   );
 }
 
-function ItemRow({ item, onClick, expanded, onToggle, isAdmin, onLongPress }) {
+// ---------- Item row gestures: tap, long-press (add stock) and desktop right-click menu ----------
+function useRowGestures({
+  item,
+  hasSubitems,
+  isAdmin,
+  onClick,
+  onToggle,
+  onLongPress,
+  onContextMenuItem,
+}) {
+  const isDesktop = useIsDesktop();
+  const canLongPress = isAdmin && !hasSubitems && Boolean(onLongPress);
+  const canMenu = isAdmin && Boolean(onContextMenuItem);
+  const timer = useRef(null);
+  const triggered = useRef(false);
+
+  const cancel = () => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+  };
+  const start = (e) => {
+    if (!canLongPress) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return; // right-click belongs to the menu
+    triggered.current = false;
+    timer.current = setTimeout(() => {
+      triggered.current = true;
+      onLongPress(item);
+    }, 550);
+  };
+  const handleClick = () => {
+    if (triggered.current) {
+      triggered.current = false;
+      return;
+    }
+    (hasSubitems ? onToggle : onClick)();
+  };
+  const handleContextMenu = (e) => {
+    e.preventDefault();
+    if (triggered.current) return; // a phone long-press already opened "Add stock"
+    if (canMenu && isDesktop) {
+      cancel();
+      onContextMenuItem(item, e.clientX, e.clientY);
+    }
+  };
+
+  return {
+    onClick: handleClick,
+    onPointerDown: canLongPress ? start : undefined,
+    onPointerUp: canLongPress ? cancel : undefined,
+    onPointerLeave: canLongPress ? cancel : undefined,
+    onPointerCancel: canLongPress ? cancel : undefined,
+    onContextMenu: canLongPress || canMenu ? handleContextMenu : undefined,
+    style: canLongPress
+      ? {
+          touchAction: "manipulation",
+          WebkitUserSelect: "none",
+          userSelect: "none",
+        }
+      : undefined,
+  };
+}
+
+// small panel that appears where the mouse was right-clicked (desktop)
+function ItemContextMenu({
+  x,
+  y,
+  item,
+  onClose,
+  onEdit,
+  onDuplicate,
+  onRestock,
+  onDelete,
+}) {
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onClose);
+    window.addEventListener("scroll", onClose, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onClose);
+      window.removeEventListener("scroll", onClose, true);
+    };
+  }, [onClose]);
+
+  // keep the panel inside the window
+  const left = Math.max(8, Math.min(x, window.innerWidth - 200));
+  const top = Math.max(8, Math.min(y, window.innerHeight - 220));
+  const run = (fn) => () => {
+    onClose();
+    fn(item);
+  };
+  const btn =
+    "w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50";
+
+  return (
+    <div
+      className="fixed inset-0 z-40"
+      onClick={onClose}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onClose();
+      }}
+    >
+      <div
+        style={{ left, top }}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-1"
+      >
+        <p className="px-3 py-1.5 text-xs text-gray-400 truncate border-b border-gray-100">
+          {item.name}
+        </p>
+        {onEdit && (
+          <button onClick={run(onEdit)} className={`${btn} text-gray-700`}>
+            <Pencil size={14} /> Edit
+          </button>
+        )}
+        {onDuplicate && (
+          <button onClick={run(onDuplicate)} className={`${btn} text-gray-700`}>
+            <Copy size={14} /> Duplicate
+          </button>
+        )}
+        {onRestock && (
+          <button onClick={run(onRestock)} className={`${btn} text-gray-700`}>
+            <PackagePlus size={14} /> Add stock
+          </button>
+        )}
+        {onDelete && (
+          <button
+            onClick={run(onDelete)}
+            className={`${btn} text-red-600 hover:bg-red-50`}
+          >
+            <Trash2 size={14} /> Delete
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ItemRow({
+  item,
+  onClick,
+  expanded,
+  onToggle,
+  isAdmin,
+  onLongPress,
+  onContextMenuItem,
+}) {
   const image = item.images?.find((i) => i.is_primary) || item.images?.[0];
   const low = isLowStock(item);
   const hasSubitems = (item.subitems?.length ?? 0) > 0;
   const Wrapper = hasSubitems ? "div" : "button";
 
-  const canLongPress = isAdmin && !hasSubitems && Boolean(onLongPress);
-  const longPressTimer = useRef(null);
-  const longPressTriggered = useRef(false);
-  const startLongPress = () => {
-    if (!canLongPress) return;
-    longPressTriggered.current = false;
-    longPressTimer.current = setTimeout(() => {
-      longPressTriggered.current = true;
-      onLongPress(item);
-    }, 550);
-  };
-  const cancelLongPress = () => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  };
-  const handleClick = () => {
-    if (longPressTriggered.current) {
-      longPressTriggered.current = false;
-      return;
-    }
-    (hasSubitems ? onToggle : onClick)();
-  };
+  const gestures = useRowGestures({
+    item,
+    hasSubitems,
+    isAdmin,
+    onClick,
+    onToggle,
+    onLongPress,
+    onContextMenuItem,
+  });
 
   return (
     <Wrapper
-      onClick={handleClick}
-      onPointerDown={canLongPress ? startLongPress : undefined}
-      onPointerUp={canLongPress ? cancelLongPress : undefined}
-      onPointerLeave={canLongPress ? cancelLongPress : undefined}
-      onPointerCancel={canLongPress ? cancelLongPress : undefined}
-      onContextMenu={canLongPress ? (e) => e.preventDefault() : undefined}
-      style={
-        canLongPress
-          ? {
-              touchAction: "manipulation",
-              WebkitUserSelect: "none",
-              userSelect: "none",
-            }
-          : undefined
-      }
+      {...gestures}
       className={`w-full flex items-center gap-3 border rounded-xl px-3 py-2 text-left bg-white border-gray-200 hover:border-gray-300 transition ${
         hasSubitems ? "hover:bg-gray-50" : "hover:shadow-md"
       }`}
@@ -5068,13 +5194,13 @@ function DetailRow({ label, value }) {
   );
 }
 
-// ---------- Full item card ----------
 function ItemDetail({
   item,
   parentName,
   onBack,
   isAdmin,
   onEdit,
+  onDuplicate,
   onDelete,
   onRestock,
   onRequest,
@@ -5142,6 +5268,16 @@ function ItemDetail({
               />
               {isAdmin ? (
                 <div className="ml-auto flex items-center gap-1">
+                  {onEdit && (
+                    <button
+                      onClick={() => onEdit(item)}
+                      title="Edit item"
+                      aria-label="Edit item"
+                      className="p-2 rounded-full text-blue-600 hover:bg-blue-50 transition-colors"
+                    >
+                      <Pencil size={18} />
+                    </button>
+                  )}
                   {onRestock && (
                     <button
                       onClick={() => onRestock(item)}
@@ -5152,25 +5288,14 @@ function ItemDetail({
                       <PackagePlus size={18} />
                     </button>
                   )}
-                  {onEdit && (
-                    <button
-                      onClick={() => onEdit(item)}
-                      title="Edit product"
-                      aria-label="Edit product"
-                      className="p-2 rounded-full text-blue-600 hover:bg-blue-50 transition-colors"
-                    >
-                      <Pencil size={18} />
-                    </button>
-                  )}
-                  {onDelete && (
-                    <button
-                      onClick={() => onDelete(item.id)}
-                      title="Delete product"
-                      aria-label="Delete product"
-                      className="p-2 rounded-full text-red-500 hover:bg-red-50 transition-colors"
-                    >
-                      <Trash2 size={18} />
-                    </button>
+                  {(onEdit || onDuplicate || onDelete) && (
+                    <ItemActionsMenu
+                      onEdit={onEdit ? () => onEdit(item) : undefined}
+                      onDuplicate={
+                        onDuplicate ? () => onDuplicate(item) : undefined
+                      }
+                      onDelete={onDelete ? () => onDelete(item) : undefined}
+                    />
                   )}
                 </div>
               ) : (
@@ -5264,54 +5389,26 @@ function SubitemRow({
   onToggle,
   isAdmin,
   onLongPress,
+  onContextMenuItem,
 }) {
   const image = item.images?.find((i) => i.is_primary) || item.images?.[0];
   const low = isLowStock(item);
   const hasSubitems = (item.subitems?.length ?? 0) > 0;
   const Wrapper = hasSubitems ? "div" : "button";
 
-  const canLongPress = isAdmin && !hasSubitems && Boolean(onLongPress);
-  const longPressTimer = useRef(null);
-  const longPressTriggered = useRef(false);
-  const startLongPress = () => {
-    if (!canLongPress) return;
-    longPressTriggered.current = false;
-    longPressTimer.current = setTimeout(() => {
-      longPressTriggered.current = true;
-      onLongPress(item);
-    }, 550);
-  };
-  const cancelLongPress = () => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  };
-  const handleClick = () => {
-    if (longPressTriggered.current) {
-      longPressTriggered.current = false;
-      return;
-    }
-    (hasSubitems ? onToggle : onClick)();
-  };
+  const gestures = useRowGestures({
+    item,
+    hasSubitems,
+    isAdmin,
+    onClick,
+    onToggle,
+    onLongPress,
+    onContextMenuItem,
+  });
 
   return (
     <Wrapper
-      onClick={handleClick}
-      onPointerDown={canLongPress ? startLongPress : undefined}
-      onPointerUp={canLongPress ? cancelLongPress : undefined}
-      onPointerLeave={canLongPress ? cancelLongPress : undefined}
-      onPointerCancel={canLongPress ? cancelLongPress : undefined}
-      onContextMenu={canLongPress ? (e) => e.preventDefault() : undefined}
-      style={
-        canLongPress
-          ? {
-              touchAction: "manipulation",
-              WebkitUserSelect: "none",
-              userSelect: "none",
-            }
-          : undefined
-      }
+      {...gestures}
       className={`w-full flex items-center gap-2 border rounded-xl pl-3 pr-3 py-2.5 text-left transition ${
         hasSubitems ? "hover:bg-gray-50" : "hover:shadow-md"
       } ${
@@ -5360,7 +5457,14 @@ function SubitemRow({
   );
 }
 
-function SubitemBranch({ item, onSelect, forceOpen, isAdmin, onLongPress }) {
+function SubitemBranch({
+  item,
+  onSelect,
+  forceOpen,
+  isAdmin,
+  onLongPress,
+  onContextMenuItem,
+}) {
   const [open, setOpen] = useState(false);
   const kids = [...(item.subitems || [])].sort((a, b) =>
     compareNames(a.name, b.name),
@@ -5375,6 +5479,7 @@ function SubitemBranch({ item, onSelect, forceOpen, isAdmin, onLongPress }) {
         onToggle={() => setOpen((o) => !o)}
         isAdmin={isAdmin}
         onLongPress={onLongPress}
+        onContextMenuItem={onContextMenuItem}
       />
       {kids.length > 0 && isOpen && (
         <div className="ml-6 space-y-1.5">
@@ -5386,6 +5491,7 @@ function SubitemBranch({ item, onSelect, forceOpen, isAdmin, onLongPress }) {
               forceOpen={forceOpen}
               isAdmin={isAdmin}
               onLongPress={onLongPress}
+              onContextMenuItem={onContextMenuItem}
             />
           ))}
         </div>
@@ -5402,6 +5508,7 @@ function ItemRowWithSubitems({
   forceOpen,
   isAdmin,
   onLongPress,
+  onContextMenuItem,
 }) {
   const subitems = item.subitems || [];
   const sorted = [...subitems].sort((a, b) => compareNames(a.name, b.name));
@@ -5416,6 +5523,7 @@ function ItemRowWithSubitems({
         onToggle={onToggle}
         isAdmin={isAdmin}
         onLongPress={onLongPress}
+        onContextMenuItem={onContextMenuItem}
       />
       {sorted.length > 0 && isOpen && (
         <div className="ml-6 space-y-1.5">
@@ -5427,6 +5535,7 @@ function ItemRowWithSubitems({
               forceOpen={forceOpen}
               isAdmin={isAdmin}
               onLongPress={onLongPress}
+              onContextMenuItem={onContextMenuItem}
             />
           ))}
         </div>
@@ -5451,6 +5560,10 @@ function ItemsPage({
   const [search, setSearch] = useState("");
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [restockingProduct, setRestockingProduct] = useState(null);
+  const [editingProduct, setEditingProduct] = useState(null); // item being edited
+  const [duplicatingProduct, setDuplicatingProduct] = useState(null); // item being copied
+  const [deleteTarget, setDeleteTarget] = useState(null); // item waiting for typed DELETE
+  const [menu, setMenu] = useState(null); // desktop right-click panel: { item, x, y }
 
   useEffect(() => {
     let cancelled = false;
@@ -5493,6 +5606,91 @@ function ItemsPage({
     setProducts(await getProducts());
   };
 
+  const handleUpdate = async (id, updates) => {
+    await updateProduct(id, updates);
+    setProducts(await getProducts());
+  };
+
+  const handleCreateCopy = async (values, imageFiles) => {
+    await createProduct(values, imageFiles);
+    setProducts(await getProducts());
+  };
+
+  const handleDelete = async () => {
+    const target = deleteTarget;
+    try {
+      await deleteProduct(target.id);
+      setDeleteTarget(null);
+      setProducts(await getProducts());
+      if (String(itemId) === String(target.id)) {
+        navigateFrom(fromParam, go, { view: "items" }); // the open item is gone
+      }
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  // what this user is allowed to do (the server checks too - this just hides buttons)
+  const canEdit = isAdmin && can("inventory", "full");
+  const canDuplicate = isAdmin && can("inventory", "create");
+  const canDelete = isAdmin && can("inventory", "full");
+  const canRestock = isAdmin && can("stock_bills", "create");
+  const onEditItem = canEdit ? (p) => setEditingProduct(p) : undefined;
+  const onDuplicateItem = canDuplicate
+    ? (p) => setDuplicatingProduct(p)
+    : undefined;
+  const onDeleteItem = canDelete ? (p) => setDeleteTarget(p) : undefined;
+  const onRestockItem = canRestock ? (p) => setRestockingProduct(p) : undefined;
+  const hasAnyAction = Boolean(
+    onEditItem || onDuplicateItem || onDeleteItem || onRestockItem,
+  );
+
+  // modals + right-click panel, shared by the list and the item card
+  const overlays = (
+    <>
+      {menu && (
+        <ItemContextMenu
+          x={menu.x}
+          y={menu.y}
+          item={menu.item}
+          onClose={() => setMenu(null)}
+          onEdit={onEditItem}
+          onDuplicate={onDuplicateItem}
+          onDelete={onDeleteItem}
+          onRestock={menu.item.subitems?.length ? undefined : onRestockItem}
+        />
+      )}
+      {restockingProduct && (
+        <RestockModal
+          product={restockingProduct}
+          onSubmit={handleRestock}
+          onClose={() => setRestockingProduct(null)}
+        />
+      )}
+      {editingProduct && (
+        <ProductForm
+          initialData={editingProduct}
+          onSubmit={handleUpdate}
+          onClose={() => setEditingProduct(null)}
+        />
+      )}
+      {duplicatingProduct && (
+        <ProductForm
+          duplicateFrom={duplicatingProduct}
+          onSubmit={handleCreateCopy}
+          onClose={() => setDuplicatingProduct(null)}
+        />
+      )}
+      {deleteTarget && (
+        <TypedDeleteConfirm
+          label={deleteTarget.name}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
+        />
+      )}
+    </>
+  );
+
   if (itemId) {
     const back = () => navigateFrom(fromParam, go, { view: "items" });
     const item = findItemById(products, itemId);
@@ -5507,19 +5705,12 @@ function ItemsPage({
             parentName={parentName}
             onBack={back}
             isAdmin={isAdmin}
-            onRestock={
-              isAdmin && can("stock_bills", "create")
-                ? (p) => setRestockingProduct(p)
-                : undefined
-            }
+            onEdit={onEditItem}
+            onDuplicate={onDuplicateItem}
+            onDelete={onDeleteItem}
+            onRestock={onRestockItem}
           />
-          {restockingProduct && (
-            <RestockModal
-              product={restockingProduct}
-              onSubmit={handleRestock}
-              onClose={() => setRestockingProduct(null)}
-            />
-          )}
+          {overlays}
         </>
       );
     }
@@ -5558,7 +5749,7 @@ function ItemsPage({
             />
             {isAdmin && (
               <p className="text-xs text-gray-400 mt-1.5">
-                Hold an item to add stock
+                Hold an item to add stock · right-click for more options
               </p>
             )}
           </div>
@@ -5585,6 +5776,11 @@ function ItemsPage({
                   forceOpen={Boolean(q)}
                   isAdmin={isAdmin}
                   onLongPress={(p) => setRestockingProduct(p)}
+                  onContextMenuItem={
+                    hasAnyAction
+                      ? (p, x, y) => setMenu({ item: p, x, y })
+                      : undefined
+                  }
                 />
               ))}
             </div>
@@ -5595,20 +5791,15 @@ function ItemsPage({
         </DesktopOnly>
       </main>
 
-      {restockingProduct && (
-        <RestockModal
-          product={restockingProduct}
-          onSubmit={handleRestock}
-          onClose={() => setRestockingProduct(null)}
-        />
-      )}
+      {overlays}
     </div>
   );
 }
 
-// ---------- Manage page: item list where Edit/Delete live behind a 3-dot menu ----------
-function ItemActionsMenu({ onEdit, onDelete }) {
+function ItemActionsMenu({ onEdit, onDuplicate, onDelete }) {
   const [open, setOpen] = useState(false);
+  const itemCls =
+    "w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50";
   return (
     <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
       <button
@@ -5622,24 +5813,39 @@ function ItemActionsMenu({ onEdit, onDelete }) {
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[130px]">
-            <button
-              onClick={() => {
-                setOpen(false);
-                onEdit();
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              <Pencil size={14} /> Edit
-            </button>
-            <button
-              onClick={() => {
-                setOpen(false);
-                onDelete();
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
-            >
-              <Trash2 size={14} /> Delete
-            </button>
+            {onEdit && (
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onEdit();
+                }}
+                className={`${itemCls} text-gray-700`}
+              >
+                <Pencil size={14} /> Edit
+              </button>
+            )}
+            {onDuplicate && (
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onDuplicate();
+                }}
+                className={`${itemCls} text-gray-700`}
+              >
+                <Copy size={14} /> Duplicate
+              </button>
+            )}
+            {onDelete && (
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onDelete();
+                }}
+                className={`${itemCls} text-red-600 hover:bg-red-50`}
+              >
+                <Trash2 size={14} /> Delete
+              </button>
+            )}
           </div>
         </>
       )}
@@ -19067,3 +19273,4 @@ function NotFound() {
     </div>
   );
 }
+
