@@ -2534,6 +2534,41 @@ function NotFoundDialog({
   );
 }
 
+// ---------- "Create a new one?" prompt: just OK / Cancel (the details are asked in the form that follows) ----------
+function ConfirmCreateDialog({ noun, text, onOk, onCancel }) {
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center p-4"
+      style={{ zIndex: 70 }}
+    >
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-sm p-5">
+        <h3 className="text-base font-semibold mb-2">{noun} Not Found</h3>
+        <p className="text-sm text-gray-700 mb-4">
+          The {noun.toLowerCase()} <b>"{text}"</b> doesn't exist yet. Do you
+          want to create a new one?
+        </p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 border border-gray-300 rounded py-1.5 text-sm font-medium hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            autoFocus
+            onClick={onOk}
+            className="flex-1 bg-blue-600 text-white rounded py-1.5 text-sm font-medium hover:bg-blue-700"
+          >
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- ComboWithCreate: type-or-pick box; unknown text -> Quick Add / Set Up / Cancel ----------
 //   options: [{ id, name, label }]      value: selected id (string)
 //   onQuickAdd(name) -> created record  onSetUp(name) -> opens the full form
@@ -2545,6 +2580,7 @@ function ComboWithCreate({
   disabled,
   noun,
   allowQuickAdd = true,
+  confirmOnly = false,
   onQuickAdd,
   onSetUp,
 }) {
@@ -2634,7 +2670,15 @@ function ComboWithCreate({
           <option key={o.id} value={o.label} />
         ))}
       </datalist>
-      {askFor && (
+      {askFor && confirmOnly && (
+        <ConfirmCreateDialog
+          noun={noun}
+          text={askFor}
+          onOk={setUp}
+          onCancel={cancelAsk}
+        />
+      )}
+      {askFor && !confirmOnly && (
         <NotFoundDialog
           noun={noun}
           text={askFor}
@@ -2689,17 +2733,35 @@ const ACCOUNT_TYPE_LABELS = {
   asset: "Inventory Asset",
 };
 
-function AccountSetupModal({ accountType, initialName, onSave, onClose }) {
+function AccountSetupModal({
+  accountType,
+  initialName,
+  parents = [],
+  onSave,
+  onClose,
+}) {
   const [name, setName] = useState(initialName || "");
   const [code, setCode] = useState("");
   const [desc, setDesc] = useState("");
+  const [isSub, setIsSub] = useState(false); // "Sub-account of" tick
+  const [parentText, setParentText] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const parentListId = useRef(
+    "pl-" + Math.random().toString(36).slice(2),
+  ).current;
   const cls =
     "w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   const save = async () => {
     if (!name.trim()) return setError("Account name is required");
+    let parentId = null;
+    if (isSub) {
+      const q = parentText.trim().toLowerCase();
+      const match = parents.find((a) => a.name.trim().toLowerCase() === q);
+      if (!match) return setError("Pick the parent account from the list");
+      parentId = match.id;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -2707,6 +2769,7 @@ function AccountSetupModal({ accountType, initialName, onSave, onClose }) {
         name: name.trim(),
         account_code: code.trim() || null,
         description: desc.trim() || null,
+        parent_id: parentId,
       });
     } catch (err) {
       setError(err.message);
@@ -2747,6 +2810,32 @@ function AccountSetupModal({ accountType, initialName, onSave, onClose }) {
               onChange={(e) => setName(e.target.value)}
               className={cls}
             />
+          </div>
+          <div>
+            <label className="flex items-center gap-2 text-xs text-gray-600 mb-0.5">
+              <input
+                type="checkbox"
+                checked={isSub}
+                onChange={(e) => {
+                  setIsSub(e.target.checked);
+                  if (!e.target.checked) setParentText("");
+                }}
+              />
+              Sub-account of
+            </label>
+            <input
+              list={parentListId}
+              disabled={!isSub}
+              value={parentText}
+              onChange={(e) => setParentText(e.target.value)}
+              placeholder="Select parent account..."
+              className={cls + " disabled:bg-gray-100 disabled:text-gray-400"}
+            />
+            <datalist id={parentListId}>
+              {parents.map((a) => (
+                <option key={a.id} value={a.name} />
+              ))}
+            </datalist>
           </div>
           <div>
             <label className="block text-xs text-gray-600 mb-0.5">
@@ -2801,10 +2890,13 @@ function AccountSelect({
   placeholder,
   onCreateAccount,
 }) {
-  const [setupName, setSetupName] = useState(null); // not null = "Set Up" form is open
-  const options = accounts
-    .filter((a) => a.account_type === accountType)
-    .map((a) => ({ id: a.id, name: a.name, label: a.name }));
+  const [setupName, setSetupName] = useState(null); // not null = the "New Account" form is open
+  const sameType = accounts.filter((a) => a.account_type === accountType);
+  const options = sameType.map((a) => ({
+    id: a.id,
+    name: a.name,
+    label: a.name,
+  }));
 
   return (
     <>
@@ -2814,13 +2906,14 @@ function AccountSelect({
         options={options}
         value={value}
         onChange={onChange}
-        onQuickAdd={(name) => onCreateAccount(name, accountType)}
+        confirmOnly
         onSetUp={(name) => setSetupName(name)}
       />
       {setupName !== null && (
         <AccountSetupModal
           accountType={accountType}
           initialName={setupName}
+          parents={sameType}
           onClose={() => setSetupName(null)}
           onSave={async (extra) => {
             const created = await onCreateAccount(
