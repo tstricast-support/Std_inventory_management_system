@@ -270,8 +270,18 @@ const getProfitLoss = (from, to) =>
     `profit-and-loss?date_from=${from}&date_to=${to}`,
     "Failed to load Profit & Loss",
   );
-const getBalanceSheet = (asOf) =>
-  reportRequest(`balance-sheet?as_of=${asOf}`, "Failed to load Balance Sheet");
+const getBalanceSheet = (asOf, showZero = false) =>
+  reportRequest(
+    `balance-sheet?as_of=${asOf}&show_zero=${showZero}`,
+    "Failed to load Balance Sheet",
+  );
+const getAccountTransactions = (accountId, to, own, from) =>
+  reportRequest(
+    `account-transactions?account_id=${accountId}&include_children=${!own}` +
+      (from ? `&date_from=${from}` : "") +
+      (to ? `&date_to=${to}` : ""),
+    "Failed to load transactions",
+  );
 const getSalesSummary = (from, to) =>
   reportRequest(
     `sales-summary?date_from=${from}&date_to=${to}&top=10`,
@@ -4126,6 +4136,7 @@ const AddProductButton = forwardRef(function AddProductButton(
           </button>
         </>
       )}
+      
       {open && (
         <ProductForm onSubmit={handleCreate} onClose={() => setOpen(false)} />
       )}
@@ -9173,73 +9184,309 @@ function SalesSummaryReport() {
   );
 }
 
+function BSLine({
+  depth = 0,
+  label,
+  amount,
+  kind = "acct",
+  chevron,
+  onToggle,
+  onAmount,
+  active,
+}) {
+  const tone =
+    kind === "band"
+      ? "bg-[#0a2a5e] text-white font-semibold"
+      : kind === "group"
+        ? "bg-[#dbe8fb] text-[#0a2a5e] font-semibold"
+        : kind === "sub"
+          ? "font-semibold text-gray-800"
+          : kind === "total"
+            ? "border-t border-gray-300 font-semibold text-gray-900"
+            : kind === "grand"
+              ? "bg-[#eaf1fd] border-y-2 border-gray-800 font-bold text-gray-900"
+              : "text-gray-700 border-b border-gray-50";
+  return (
+    <div
+      className={`flex items-center justify-between gap-3 px-3 py-1.5 text-sm ${tone}`}
+    >
+      <span
+        style={{ paddingLeft: depth * 18 }}
+        className="flex items-center gap-1 min-w-0"
+      >
+        {chevron !== undefined && (
+          <button type="button" onClick={onToggle} className="shrink-0">
+            {chevron ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </button>
+        )}
+        <span className="truncate">{label}</span>
+      </span>
+      {amount !== undefined &&
+        (onAmount ? (
+          <button
+            type="button"
+            onClick={onAmount}
+            title="See the transactions behind this number"
+            className={`tabular-nums hover:underline ${active ? "text-blue-700" : ""}`}
+          >
+            {plNum(amount)}
+          </button>
+        ) : (
+          <span className="tabular-nums">{plNum(amount)}</span>
+        ))}
+    </div>
+  );
+}
+
+// the entries behind one balance-sheet number, with a running balance
+function BSAccountTx({ accountId, own, asOf, onOpen }) {
+  const { data, loading, error } = useReport(
+    () => getAccountTransactions(accountId, asOf, own),
+    [accountId, own, asOf],
+  );
+  const box = (c) => (
+    <div className="px-6 py-2 text-xs text-gray-500 bg-[#f6f9ff]">{c}</div>
+  );
+  if (loading && !data) return box("Loading transactions...");
+  if (error) return box(<span className="text-red-500">{error}</span>);
+  if (!data || data.rows.length === 0) return box("No transactions.");
+  const th = "px-2 py-1 text-xs font-semibold text-gray-500";
+  return (
+    <div className="bg-[#f6f9ff] px-4 py-2 overflow-x-auto">
+      <table className="w-full text-xs bg-white border border-[#dbe4f3] rounded min-w-[640px]">
+        <thead>
+          <tr className="text-left bg-[#eaf1fd]">
+            <th className={th}>Date</th>
+            <th className={th}>Transaction</th>
+            <th className={th}>Name / memo</th>
+            <th className={`${th} text-right`}>Debit</th>
+            <th className={`${th} text-right`}>Credit</th>
+            <th className={`${th} text-right`}>Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.rows.map((r) => (
+            <tr key={r.id} className="border-t border-[#eef2fa]">
+              <td className="px-2 py-1 whitespace-nowrap">
+                {formatJournalDate(r.date)}
+              </td>
+              <td className="px-2 py-1 whitespace-nowrap">
+                <button
+                  type="button"
+                  onClick={() => onOpen(r)}
+                  className="text-blue-700 underline font-medium"
+                >
+                  {r.type} {r.number}
+                </button>
+              </td>
+              <td className="px-2 py-1">
+                {r.name}
+                {r.memo && <span className="text-gray-400"> - {r.memo}</span>}
+              </td>
+              <td className="px-2 py-1 text-right tabular-nums">
+                {r.debit ? plNum(r.debit) : ""}
+              </td>
+              <td className="px-2 py-1 text-right tabular-nums">
+                {r.credit ? plNum(r.credit) : ""}
+              </td>
+              <td className="px-2 py-1 text-right tabular-nums">
+                {plNum(r.balance)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function BalanceSheetReport() {
   const [asOf, setAsOf] = useState(localIso());
+  const [showZero, setShowZero] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => new Set()); // account ids folded shut
+  const [showTx, setShowTx] = useState(() => new Set()); // "own:12" / "all:12" = entries showing
+  const [txOpen, setTxOpen] = useState(null); // the transaction whose details are open
   const { data, loading, error } = useReport(
-    () => getBalanceSheet(asOf),
-    [asOf],
+    () => getBalanceSheet(asOf, showZero),
+    [asOf, showZero],
   );
 
-  const side = (title, groups, total) => (
-    <ReportCard title={title}>
-      {groups.map((g) => (
-        <div key={g.title}>
-          <p className="text-sm font-semibold text-gray-900 mt-2">{g.title}</p>
-          {g.accounts.length === 0 && (
-            <p className="text-xs text-gray-400 pl-4 py-1">Nothing here</p>
-          )}
-          {g.accounts.map((a) => (
-            <ReportLine
-              key={a.id ?? a.name}
-              label={a.name}
-              amount={a.amount}
-              indent
+  const flip = (setter, key) =>
+    setter((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+
+  const renderNode = (n, depth) => {
+    const canDrill = n.id != null;
+    const txFor = (key, own) =>
+      canDrill && showTx.has(key) ? (
+        <BSAccountTx
+          accountId={n.id}
+          own={own}
+          asOf={asOf}
+          onOpen={setTxOpen}
+        />
+      ) : null;
+    const drill = (key) => (canDrill ? () => flip(setShowTx, key) : undefined);
+
+    if (n.children.length === 0)
+      return (
+        <div key={n.id ?? n.name}>
+          <BSLine
+            depth={depth}
+            label={n.name}
+            amount={n.amount}
+            onAmount={drill(`own:${n.id}`)}
+            active={showTx.has(`own:${n.id}`)}
+          />
+          {txFor(`own:${n.id}`, true)}
+        </div>
+      );
+
+    const isOpen = !collapsed.has(n.id);
+    return (
+      <div key={n.id}>
+        <BSLine
+          depth={depth}
+          label={n.name}
+          chevron={isOpen}
+          onToggle={() => flip(setCollapsed, n.id)}
+          amount={isOpen ? undefined : n.total}
+          onAmount={isOpen ? undefined : drill(`all:${n.id}`)}
+          active={showTx.has(`all:${n.id}`)}
+        />
+        {!isOpen && txFor(`all:${n.id}`, false)}
+        {isOpen && (
+          <>
+            {n.amount !== 0 && (
+              <div>
+                <BSLine
+                  depth={depth + 1}
+                  label={n.name}
+                  amount={n.amount}
+                  onAmount={drill(`own:${n.id}`)}
+                  active={showTx.has(`own:${n.id}`)}
+                />
+                {txFor(`own:${n.id}`, true)}
+              </div>
+            )}
+            {n.children.map((c) => renderNode(c, depth + 1))}
+            <BSLine
+              kind="total"
+              depth={depth}
+              label={`Total ${n.name}`}
+              amount={n.total}
+              onAmount={drill(`all:${n.id}`)}
+              active={showTx.has(`all:${n.id}`)}
             />
+            {txFor(`all:${n.id}`, false)}
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const renderSide = (side, totalLabel, total) => (
+    <div className="mb-4">
+      <BSLine kind="band" label={side.title} />
+      {side.groups.map((g) => (
+        <div key={g.title}>
+          <BSLine kind="group" depth={1} label={g.title} />
+          {g.subgroups.map((sg) => (
+            <div key={sg.title}>
+              {sg.title !== g.title && (
+                <BSLine kind="sub" depth={2} label={sg.title} />
+              )}
+              {sg.accounts.map((n) =>
+                renderNode(n, sg.title !== g.title ? 3 : 2),
+              )}
+              {sg.title !== g.title && (
+                <BSLine
+                  kind="total"
+                  depth={2}
+                  label={`Total ${sg.title}`}
+                  amount={sg.total}
+                />
+              )}
+            </div>
           ))}
-          <div className="border-t border-gray-100 mt-1">
-            <ReportLine label={`Total ${g.title}`} amount={g.total} bold />
-          </div>
+          <BSLine
+            kind="total"
+            depth={1}
+            label={`Total ${g.title}`}
+            amount={g.total}
+          />
         </div>
       ))}
-      <div className="bg-gray-100 rounded-lg px-2 mt-3">
-        <ReportLine label={`Total ${title}`} amount={total} bold />
-      </div>
-    </ReportCard>
+      <BSLine kind="grand" label={totalLabel} amount={total} />
+    </div>
   );
 
   return (
     <>
-      <label className="text-xs text-gray-500 block mb-4 max-w-[12rem]">
-        As of
-        <input
-          type="date"
-          value={asOf}
-          onChange={(e) => e.target.value && setAsOf(e.target.value)}
-          className={dateInputCls}
-        />
-      </label>
+      <div className="flex flex-wrap items-end gap-4 mb-4">
+        <label className="text-xs text-gray-500 block max-w-[12rem]">
+          As of
+          <input
+            type="date"
+            value={asOf}
+            onChange={(e) => e.target.value && setAsOf(e.target.value)}
+            className={dateInputCls}
+          />
+        </label>
+        <label className="text-xs text-gray-500 flex items-center gap-1.5 pb-2">
+          <input
+            type="checkbox"
+            checked={showZero}
+            onChange={(e) => setShowZero(e.target.checked)}
+          />
+          Show zero accounts
+        </label>
+      </div>
       <ReportBody loading={loading} error={error} data={data}>
         {data && (
           <>
             {Math.abs(data.difference) >= 0.005 && (
-              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4">
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
                 The sheet is out of balance by {formatRs(data.difference)}.
                 Check your journal entries.
               </p>
             )}
-            {side("Assets", data.assets, data.total_assets)}
-            {side("Liabilities", data.liabilities, data.total_liabilities)}
-            {side("Equity", data.equity, data.total_equity)}
-            <ReportCard>
-              <ReportLine
-                label="Total Liabilities + Equity"
+            {(data.warnings || []).map((w) => (
+              <p
+                key={w.account_id}
+                className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3"
+              >
+                {w.message} Click its number below to see the entries.
+              </p>
+            ))}
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              {renderSide(data.assets, "TOTAL ASSETS", data.total_assets)}
+              <BSLine kind="band" label="LIABILITIES & EQUITY" />
+              {renderSide(
+                { ...data.liabilities, title: "Liabilities" },
+                "Total Liabilities",
+                data.total_liabilities,
+              )}
+              {renderSide(
+                { ...data.equity, title: "Equity" },
+                "Total Equity",
+                data.total_equity,
+              )}
+              <BSLine
+                kind="grand"
+                label="TOTAL LIABILITIES & EQUITY"
                 amount={data.total_liabilities_and_equity}
-                bold
               />
-            </ReportCard>
+            </div>
           </>
         )}
       </ReportBody>
+      {txOpen && (
+        <PLTransactionModal tx={txOpen} onClose={() => setTxOpen(null)} />
+      )}
     </>
   );
 }
@@ -11932,6 +12179,7 @@ function AccountingPage({ isAdmin, go }) {
                         <button
                           key={a.id}
                           type="button"
+                          data-account-id={a.id}
                           onClick={() => setSelectedId(a.id)}
                           onDoubleClick={() => openAccount(a)}
                           className={`text-left border rounded-md p-3 ${t.line} ${selected ? t.sel : `${t.rowA} ${t.text} ${t.hover}`}`}
@@ -12033,6 +12281,7 @@ function AccountingPage({ isAdmin, go }) {
                       return (
                         <tr
                           key={a.id}
+                          data-account-id={a.id}
                           onClick={() => setSelectedId(a.id)}
                           onDoubleClick={() => openAccount(a)}
                           className={`cursor-pointer ${bg}`}
@@ -18849,7 +19098,8 @@ const SHORTCUT_HELP = [
       ["Ctrl + L", "Items"],
       ["Ctrl + R", "Banking"],
       ["Ctrl + Y", "Manual journals"],
-      ["Ctrl + Q", "Reports"],
+      ["Ctrl + Q", "Quick report on the account you last clicked"],
+      ["Alt + R", "Reports"],
       ["Alt + H", "Home / dashboard"],
       ["Alt + C", "Customers"],
       ["Alt + V", "Vendors"],
@@ -18896,13 +19146,122 @@ const SHORTCUT_HELP = [
   ],
 ];
 
+// the account the user last clicked on - Ctrl+Q opens a quick report on it (QuickBooks QuickReport)
+let lastQuickAccount = null;
+
+function QuickReportModal({ accountId, onClose }) {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [txOpen, setTxOpen] = useState(null);
+  const { data, loading, error } = useReport(
+    () => getAccountTransactions(accountId, to, false, from),
+    [accountId, from, to],
+  );
+  const th = "px-2 py-1.5 text-xs font-semibold text-gray-500";
+  const dateBox = (label, value, set) => (
+    <label className="text-xs text-gray-500">
+      {label}
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => set(e.target.value)}
+        className="block border border-gray-300 rounded-lg px-2 py-1.5 text-sm mt-1"
+      />
+    </label>
+  );
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200">
+          <h3 className="font-semibold text-gray-900 truncate">
+            Quick report
+            {data && <span className="text-gray-400 font-normal"> · {data.account.name}</span>}
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-sm font-medium hover:bg-blue-700"
+          >
+            Close
+          </button>
+        </div>
+        <div className="flex flex-wrap items-end gap-3 px-4 py-3 border-b border-gray-100">
+          {dateBox("From", from, setFrom)}
+          {dateBox("To", to, setTo)}
+          {(from || to) && (
+            <button
+              type="button"
+              onClick={() => { setFrom(""); setTo(""); }}
+              className="text-sm text-blue-700 underline pb-1.5"
+            >
+              All dates
+            </button>
+          )}
+          {!from && !to && <span className="text-xs text-gray-400 pb-2">All dates</span>}
+        </div>
+        <div className="overflow-auto p-4">
+          {error && <p className="text-red-500 text-sm">{error}</p>}
+          {loading && !data && <p className="text-gray-400 text-center py-10">Loading...</p>}
+          {data && (
+            <table className="w-full text-sm min-w-[640px]">
+              <thead>
+                <tr className="border-b border-gray-200 text-left">
+                  <th className={th}>Date</th>
+                  <th className={th}>Transaction</th>
+                  <th className={th}>Name / memo</th>
+                  <th className={`${th} text-right`}>Debit</th>
+                  <th className={`${th} text-right`}>Credit</th>
+                  <th className={`${th} text-right`}>Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {from && (
+                  <tr className="border-b border-gray-100 text-gray-500">
+                    <td className="px-2 py-1.5" colSpan={5}>Opening balance</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{plNum(data.opening_balance)}</td>
+                  </tr>
+                )}
+                {data.rows.length === 0 && (
+                  <tr><td colSpan={6} className="px-2 py-6 text-center text-gray-400">No transactions.</td></tr>
+                )}
+                {data.rows.map((r) => (
+                  <tr key={r.id} className="border-b border-gray-100">
+                    <td className="px-2 py-1.5 whitespace-nowrap">{formatJournalDate(r.date)}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">
+                      <button type="button" onClick={() => setTxOpen(r)} className="text-blue-700 underline font-medium">
+                        {r.type} {r.number}
+                      </button>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {r.name}
+                      {r.account && r.account !== data.account.name && <span className="text-gray-400"> · {r.account}</span>}
+                      {r.memo && <span className="text-gray-400"> - {r.memo}</span>}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{r.debit ? plNum(r.debit) : ""}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{r.credit ? plNum(r.credit) : ""}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{plNum(r.balance)}</td>
+                  </tr>
+                ))}
+                <tr className="font-semibold">
+                  <td className="px-2 py-2" colSpan={5}>Balance</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{plNum(data.closing_balance)}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+      {txOpen && <PLTransactionModal tx={txOpen} onClose={() => setTxOpen(null)} />}
+    </div>
+  );
+}
+
 const CTRL_GO = {
   a: "accounting",
   j: "customers",
   l: "items",
   r: "banking",
-  y: "journals",
-  q: "reports",
+  y: "journals"
 };
 const ALT_GO = {
   KeyH: "",
@@ -18918,15 +19277,26 @@ const ALT_GO = {
   KeyX: "taxes",
   KeyU: "issued",
   KeyG: "manage",
+  KeyR: "reports",
 };
 
 function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
   const [open, setOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [quickAccount, setQuickAccount] = useState(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const wins = useWindows();
   const active = useWindowActive(); // only the window you are looking at listens to the keys
   const floating = useWindowFloating();
+
+    useEffect(() => {
+      const track = (e) => {
+        const el = e.target?.closest?.("[data-account-id]");
+        if (el) lastQuickAccount = Number(el.dataset.accountId);
+      };
+      document.addEventListener("click", track, true);
+      return () => document.removeEventListener("click", track, true);
+    }, []);
 
   useEffect(() => {
     if (!isAdmin || !active) return;
@@ -19079,6 +19449,9 @@ function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
       } else if (key === "b") {
         e.preventDefault(); // stop Chrome's "toggle bookmarks bar"
         onNewBill();
+      } else if (key === "q") {
+        e.preventDefault();
+        if (lastQuickAccount) setQuickAccount(lastQuickAccount);
       } else if (key === "f") {
         e.preventDefault();
         [...document.querySelectorAll('input[placeholder^="Search"]')]
@@ -19105,6 +19478,12 @@ function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
 
   return (
     <>
+      {quickAccount && (
+        <QuickReportModal
+          accountId={quickAccount}
+          onClose={() => setQuickAccount(null)}
+        />
+      )}
       {open && (
         <ProductForm
           onSubmit={async (values, imageFiles) => {

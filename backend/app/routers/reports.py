@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 from .. import models
-from ..account_types import ACCOUNT_CATEGORY
+from ..account_types import ACCOUNT_CATEGORY, DEBIT_NORMAL
 from ..database import get_db
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -117,6 +117,9 @@ SOURCE_LABELS = {
     "purchase_bill": "Bill",
     "vendor_payment": "Bill Payment",
     "bank_opening": "Opening Balance",
+    "stock_opening": "Opening Stock",
+    "stock_restock": "Stock Added",
+    "stock_bill": "Stock Bill",
 }
 
 
@@ -365,27 +368,86 @@ def journal_detail(journal_id: int, db: Session = Depends(get_db)):
     }
 
 
-# ---------------------------------------------------------------- Balance Sheet
+# ---------------------------------------------------------------- Balance Sheet (QuickBooks layout)
+# (side, heading, sign, [(group heading, [(sub-group heading, account types)])])
+BS_LAYOUT = [
+    ("assets", "ASSETS", 1, [
+        ("Current Assets", [
+            ("Checking/Savings", {"cash", "bank"}),
+            ("Accounts Receivable", {"accounts_receivable"}),
+            ("Other Current Assets", {"other_current_asset", "asset"}),
+        ]),
+        ("Fixed Assets", [("Fixed Assets", {"fixed_asset"})]),
+    ]),
+    ("liabilities", "LIABILITIES", -1, [
+        ("Current Liabilities", [
+            ("Accounts Payable", {"accounts_payable"}),
+            ("Credit Cards", {"credit_card"}),
+            ("Other Current Liabilities", {"current_liability"}),
+        ]),
+        ("Long Term Liabilities", [("Long Term Liabilities", {"long_term_liability"})]),
+    ]),
+    ("equity", "EQUITY", -1, [("Equity", [("Equity", {"equity"})])]),
+]
+# an account of these types showing a minus balance is almost always a data mistake
+BS_SHOULD_BE_POSITIVE = {"asset", "other_current_asset", "accounts_receivable", "fixed_asset", "accounts_payable", "credit_card"}
+
+
+def _bs_tree(accts: list, own: dict, show_zero: bool) -> tuple[list[dict], Decimal]:
+    """Accounts of one sub-group as a tree (sub-accounts nested under their parent), each with its own amount and its rolled-up total."""
+    ids = {a.id for a in accts}
+    kids: dict[int, list] = {}
+    for a in accts:
+        if a.parent_id in ids:
+            kids.setdefault(a.parent_id, []).append(a)
+
+    def build(a):
+        children = [n for n in (build(c) for c in kids.get(a.id, [])) if n]
+        amount = own.get(a.id, Decimal("0"))
+        if not children and amount == 0 and not show_zero:
+            return None
+        total = amount + sum((c["total"] for c in children), Decimal("0"))
+        return {"id": a.id, "name": a.name, "account_type": a.account_type, "amount": amount, "total": total, "children": children}
+
+    roots = [n for n in (build(a) for a in accts if a.parent_id not in ids) if n]
+    return roots, sum((n["total"] for n in roots), Decimal("0"))
+
+
+def _bs_floats(node: dict) -> dict:
+    return {**node, "amount": float(node["amount"]), "total": float(node["total"]),
+            "children": [_bs_floats(c) for c in node["children"]]}
+
+
 @router.get("/balance-sheet")
-def balance_sheet(as_of: date | None = None, db: Session = Depends(get_db)):
+def balance_sheet(as_of: date | None = None, show_zero: bool = False, db: Session = Depends(get_db)):
     as_of = as_of or date.today()
     nets = _nets(db, None, as_of)
     accounts = db.query(models.Account).order_by(models.Account.name).all()
 
-    sides = {"assets": [], "liabilities": [], "equity": []}
-    side_totals = {"assets": Decimal("0"), "liabilities": Decimal("0"), "equity": Decimal("0")}
-    for side, title, types in BS_GROUPS:
-        sign = 1 if side == "assets" else -1          # assets are debit-normal, the rest credit-normal
-        rows = []
-        for a in accounts:
-            if a.account_type not in types:
-                continue
-            amount = sign * nets.get(a.id, Decimal("0"))
-            if amount != 0:
-                rows.append({"id": a.id, "name": a.name, "amount": float(amount)})
-        total = sum((Decimal(str(r["amount"])) for r in rows), Decimal("0"))
-        sides[side].append({"title": title, "accounts": rows, "total": float(total)})
-        side_totals[side] += total
+    out, side_totals, warnings = {}, {}, []
+    for side, title, sign, groups in BS_LAYOUT:
+        own = {a.id: sign * nets.get(a.id, Decimal("0")) for a in accounts}
+        group_out, side_total = [], Decimal("0")
+        for g_title, subs in groups:
+            sub_out, g_total = [], Decimal("0")
+            for s_title, types in subs:
+                tree, s_total = _bs_tree([a for a in accounts if a.account_type in types], own, show_zero)
+                if tree or show_zero:
+                    sub_out.append({"title": s_title, "accounts": [_bs_floats(n) for n in tree], "total": float(s_total)})
+                    g_total += s_total
+                for a in accounts:
+                    if a.account_type in types and a.account_type in BS_SHOULD_BE_POSITIVE and own[a.id] < 0:
+                        warnings.append({
+                            "account_id": a.id, "account": a.name, "amount": float(own[a.id]),
+                            "message": f"{a.name} is negative ({own[a.id]:,.2f}). "
+                                       + ("Stock was sold or used without a matching stock-in entry (opening stock or a purchase bill)."
+                                          if a.account_type == "asset" else "Check the entries posted to this account."),
+                        })
+            if sub_out:
+                group_out.append({"title": g_title, "subgroups": sub_out, "total": float(g_total)})
+                side_total += g_total
+        out[side] = {"title": title, "groups": group_out}
+        side_totals[side] = side_total
 
     # every sale / cost since the books began that no one has closed into Retained Earnings yet
     profit = -sum(
@@ -393,19 +455,94 @@ def balance_sheet(as_of: date | None = None, db: Session = Depends(get_db)):
         Decimal("0"),
     )
     if profit != 0:
-        sides["equity"][0]["accounts"].append({"id": None, "name": "Net Profit (to date)", "amount": float(profit)})
-        sides["equity"][0]["total"] = float(Decimal(str(sides["equity"][0]["total"])) + profit)
+        eq_sub = out["equity"]["groups"][0]["subgroups"] if out["equity"]["groups"] else None
+        net_node = {"id": None, "name": "Net Income", "account_type": "net_income", "amount": float(profit),
+                    "total": float(profit), "children": []}
+        if eq_sub:
+            eq_sub[0]["accounts"].append(net_node)
+            eq_sub[0]["total"] = float(Decimal(str(eq_sub[0]["total"])) + profit)
+            out["equity"]["groups"][0]["total"] = float(Decimal(str(out["equity"]["groups"][0]["total"])) + profit)
+        else:
+            out["equity"]["groups"] = [{"title": "Equity", "total": float(profit),
+                                        "subgroups": [{"title": "Equity", "accounts": [net_node], "total": float(profit)}]}]
         side_totals["equity"] += profit
 
     right = side_totals["liabilities"] + side_totals["equity"]
     return {
         "as_of": as_of,
-        "assets": sides["assets"], "liabilities": sides["liabilities"], "equity": sides["equity"],
+        "assets": out["assets"], "liabilities": out["liabilities"], "equity": out["equity"],
         "total_assets": float(side_totals["assets"]),
         "total_liabilities": float(side_totals["liabilities"]),
         "total_equity": float(side_totals["equity"]),
         "total_liabilities_and_equity": float(right),
         "difference": float(side_totals["assets"] - right),
+        "warnings": warnings,
+    }
+
+
+@router.get("/account-transactions")
+def account_transactions(
+    account_id: int,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    include_children: bool = True,
+    db: Session = Depends(get_db),
+):
+    """Every entry behind one account, with a running balance (QuickBooks 'QuickReport' / Transaction Detail by Account)."""
+    account = db.query(models.Account).get(account_id)
+    if not account:
+        raise HTTPException(404, "Account not found")
+    sign = 1 if ACCOUNT_CATEGORY.get(account.account_type) in DEBIT_NORMAL else -1
+
+    all_accounts = db.query(models.Account).all()
+    names = {a.id: a.name for a in all_accounts}
+    ids = {account.id}
+    if include_children:
+        grew = True
+        while grew:
+            grew = False
+            for a in all_accounts:
+                if a.parent_id in ids and a.id not in ids:
+                    ids.add(a.id)
+                    grew = True
+
+    opening = Decimal("0")
+    if date_from:
+        d, c = (
+            db.query(func.coalesce(func.sum(models.JournalLine.debit), 0), func.coalesce(func.sum(models.JournalLine.credit), 0))
+            .join(models.Journal, models.JournalLine.journal_id == models.Journal.id)
+            .filter(models.JournalLine.account_id.in_(ids), models.Journal.journal_date < date_from)
+            .one()
+        )
+        opening = sign * (_money(d) - _money(c))
+
+    query = (
+        db.query(models.JournalLine, models.Journal)
+        .join(models.Journal, models.JournalLine.journal_id == models.Journal.id)
+        .filter(models.JournalLine.account_id.in_(ids))
+    )
+    if date_from:
+        query = query.filter(models.Journal.journal_date >= date_from)
+    if date_to:
+        query = query.filter(models.Journal.journal_date <= date_to)
+    lines = query.order_by(models.Journal.journal_date, models.Journal.id, models.JournalLine.id).all()
+
+    rows, running = [], opening
+    for line, journal in lines:
+        debit, credit = _money(line.debit), _money(line.credit)
+        running += sign * (debit - credit)
+        rows.append({
+            "id": line.id, "journal_id": journal.id, "date": journal.journal_date,
+            "type": _source_label(journal.source_type), "source_type": journal.source_type, "source_id": journal.source_id,
+            "number": journal.journal_number, "name": journal.reference or "",
+            "memo": line.description or journal.notes or "",
+            "account": names.get(line.account_id, ""),
+            "debit": float(debit), "credit": float(credit), "balance": float(running),
+        })
+    return {
+        "account": {"id": account.id, "name": account.name, "account_type": account.account_type},
+        "date_from": date_from, "date_to": date_to,
+        "opening_balance": float(opening), "rows": rows, "closing_balance": float(running),
     }
 
 
