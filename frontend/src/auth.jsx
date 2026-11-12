@@ -245,17 +245,35 @@ export function AuthGate({ children }) {
 const inputCls =
   "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500";
 
-function AuthCard({ title, subtitle, children }) {
+// Login hero: full-width uppercase heading with a light sweep, accent line, and rotating module names.
+function AuthHero() {
+  const words = ["Invoicing", "Inventory", "Accounting", "Reports"];
+  return (
+    <div className="text-center mb-6">
+      <h2 className="auth-hero-title text-[22px] sm:text-2xl font-extrabold uppercase tracking-wider leading-tight">
+        Manage your business
+      </h2>
+      <div className="auth-hero-line mx-auto mt-3 h-[3px] w-full rounded-full" />
+      <div className="relative h-5 mt-3" aria-hidden="true">
+        {words.map((w, i) => (
+          <span
+            key={w}
+            className="auth-hero-word absolute inset-0 text-xs font-semibold uppercase tracking-[0.3em] text-gray-500"
+            style={{ animationDelay: `${i * 2}s` }}
+          >
+            {w}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AuthCard({ title, subtitle, hero, children }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm bg-white rounded-xl shadow-xl border border-gray-200 p-6">
-        <div className="flex items-center gap-2 text-[#1f2640] mb-4">
-          <img
-            src="/YAVERO.png"
-            alt="YAVERO"
-            className="h-8 w-8 object-contain"
-          />
-        </div>
+        {hero && <AuthHero />}
         <h1 className="text-xl font-bold text-gray-900">{title}</h1>
         {subtitle && (
           <p className="text-sm text-gray-500 mt-1 mb-4">{subtitle}</p>
@@ -287,7 +305,11 @@ function LoginPage() {
   };
 
   return (
-    <AuthCard title="Sign in" subtitle="Enter your username and password.">
+    <AuthCard
+      hero
+      title="Sign in"
+      subtitle="Enter your username and password."
+    >
       <form onSubmit={submit} className="space-y-3">
         <div>
           <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">

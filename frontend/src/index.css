@@ -287,3 +287,83 @@ html[data-theme] [class*="1f2640"] .bg-white {
   }
 }
 
+/* ---------- Login hero (heading + accent line + rotating words) ---------- */
+.auth-hero-title {
+  background: linear-gradient(100deg,
+      var(--color-gray-900) 35%,
+      var(--color-blue-600) 50%,
+      var(--color-gray-900) 65%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: auth-sweep 4.5s ease-in-out infinite;
+}
+
+.auth-hero-line {
+  background: linear-gradient(90deg,
+      transparent,
+      var(--color-blue-600),
+      transparent);
+  background-size: 200% 100%;
+  animation: auth-line 3s linear infinite;
+}
+
+.auth-hero-word {
+  text-align: center;
+  opacity: 0;
+  animation: auth-word 8s ease-in-out infinite;
+}
+
+@keyframes auth-sweep {
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@keyframes auth-line {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes auth-word {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  5%,
+  20% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  25%,
+  100% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .auth-hero-title,
+  .auth-hero-line {
+    animation: none;
+  }
+
+  .auth-hero-word:first-child {
+    animation: none;
+    opacity: 1;
+  }
+}
