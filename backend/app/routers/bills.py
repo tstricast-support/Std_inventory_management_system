@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from .. import models, schemas
 from ..database import get_db
+from .stock_posting import post_stock_journal, remove_stock_journal
 
 router = APIRouter(prefix="/api/bills", tags=["bills"])
 
@@ -53,6 +54,12 @@ def create_bill(payload: schemas.BillCreate, db: Session = Depends(get_db)):
             movement_type="restock",
             note=f"Bill #{bill.id} by {name}",
         ))
+    
+    post_stock_journal(
+        db, "stock_bill", bill.id,
+        [(products[pid], qty) for pid, qty in totals.items()],
+        reference=name, notes=f"Stock bill #{bill.id} by {name}",
+    )
 
     db.commit()
     db.refresh(bill)
@@ -142,6 +149,13 @@ def update_bill(bill_id: int, payload: schemas.BillCreate, db: Session = Depends
             movement_type="restock",
             note=f"Bill #{bill.id} by {name}",
         ))
+    remove_stock_journal(db, "stock_bill", bill.id)
+    db.flush()
+    post_stock_journal(
+        db, "stock_bill", bill.id,
+        [(products[pid], qty) for pid, qty in totals.items() if pid in products],
+        reference=name, notes=f"Stock bill #{bill.id} by {name}",
+    )
     db.commit()
 
     return (
@@ -175,6 +189,7 @@ def delete_bill(bill_id: int, db: Session = Depends(get_db)):
             products[pid].quantity -= qty
 
     _remove_bill_movements(db, bill)
+    remove_stock_journal(db, "stock_bill", bill.id)
     db.delete(bill)   # cascades to its items
     db.commit()
     return {"ok": True, "removed_units": sum(old.values())}

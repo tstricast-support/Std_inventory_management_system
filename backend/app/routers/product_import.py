@@ -13,6 +13,7 @@ from .. import models
 from ..database import current_company_id, get_db
 from ..imagekit_client import upload_image, delete_image
 from ..upload_checks import check_image_count, read_import_file, validate_image
+from .stock_posting import post_stock_journal
 
 router = APIRouter(prefix="/api/product-import", tags=["product-import"])
 
@@ -271,6 +272,11 @@ def import_products(
                     product = models.Product(quantity=quantity, **values)
                     db.add(product)
                     db.flush()  # gives it an id so later subitem rows can find it
+                    if quantity and quantity > 0:
+                        post_stock_journal(
+                            db, "stock_opening", product.id, [(product, quantity)],
+                            reference="Opening stock", notes=f"Opening stock - {product.name}",
+                        )
                     by_name.setdefault(name.lower(), product)
                     if sku:
                         by_sku[sku.lower()] = product

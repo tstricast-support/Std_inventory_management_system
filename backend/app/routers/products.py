@@ -6,6 +6,7 @@ from .. import models, schemas
 from ..database import current_company_id, get_db
 from ..imagekit_client import upload_image, delete_image
 from ..upload_checks import check_image_count, validate_image
+from .stock_posting import post_stock_journal
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
@@ -86,6 +87,13 @@ def create_product(
         raise HTTPException(400, "An item with that SKU already exists.")
     db.refresh(product)
 
+    if quantity and quantity > 0:
+        post_stock_journal(
+            db, "stock_opening", product.id, [(product, quantity)],
+            reference="Opening stock", notes=f"Opening stock - {product.name}",
+        )
+        db.commit()
+
     for idx, img in enumerate(images):
         file_bytes = img.file.read()
         url, file_id = upload_image(file_bytes, safe_names[idx], current_company_id(db))
@@ -106,7 +114,6 @@ def update_product(product_id: int, payload: schemas.ProductUpdate, db: Session 
     if not product:
         raise HTTPException(404, "Product not found")
 
-
     if payload.parent_id is not None:
         if payload.parent_id == product_id:
             raise HTTPException(400, "An item cannot be a subitem of itself")
@@ -118,10 +125,24 @@ def update_product(product_id: int, payload: schemas.ProductUpdate, db: Session 
     if "sku" in data:
         data["sku"] = (data["sku"] or "").strip() or None
 
+    old_qty = product.quantity or 0
     for field, value in data.items():
         setattr(product, field, value)
 
     try:
+        # stock raised by editing the quantity directly -> same opening-balance entry as Restock
+        added = (product.quantity or 0) - old_qty
+        if added > 0:
+            movement = models.StockMovement(
+                product_id=product.id, quantity=added, movement_type="restock",
+                note="Quantity edited on item",
+            )
+            db.add(movement)
+            db.flush()
+            post_stock_journal(
+                db, "stock_restock", movement.id, [(product, added)],
+                reference="Stock added", notes=f"Stock added - {product.name}",
+            )
         db.commit()
     except IntegrityError as e:
         db.rollback()
@@ -129,7 +150,6 @@ def update_product(product_id: int, payload: schemas.ProductUpdate, db: Session 
 
     db.refresh(product)
     return product
-
 
 @router.delete("/{product_id}")
 def delete_product(product_id: int, db: Session = Depends(get_db)):
@@ -148,16 +168,23 @@ def restock_product(product_id: int, payload: schemas.StockAdjustment, db: Sessi
         raise HTTPException(400, "Quantity must be greater than 0")
 
     product = db.query(models.Product).get(product_id)
-    if not product: 
+    if not product:
         raise HTTPException(404, "Product not found")
 
     product.quantity += payload.quantity
-    db.add(models.StockMovement(
+    movement = models.StockMovement(
         product_id=product.id,
         quantity=payload.quantity,
         movement_type="restock",
         note=payload.note,
-    ))
+    )
+    db.add(movement)
+    db.flush()   # gives the movement an id
+
+    post_stock_journal(
+        db, "stock_restock", movement.id, [(product, payload.quantity)],
+        reference="Stock added", notes=f"Stock added - {product.name}",
+    )
     db.commit()
     db.refresh(product)
     return product
