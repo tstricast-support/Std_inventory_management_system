@@ -1,3 +1,4 @@
+
 import {
   useEffect,
   useRef,
@@ -6,7 +7,15 @@ import {
   useImperativeHandle,
   Fragment,
 } from "react";
-import { Routes, Route, useLocation, useSearchParams } from "react-router-dom";
+import { Routes, Route, useLocation } from "react-router-dom";
+import {
+  MultiWindow,
+  useSearchParams,
+  useWindows,
+  useWindowActive,
+  useWindowFloating,
+  isShown,
+} from "./windows.jsx";
 import {
   Pencil,
   Trash2,
@@ -18798,12 +18807,16 @@ let pendingNew = false;
 function useQuickNew(open) {
   const ref = useRef(open);
   ref.current = open;
+  const active = useWindowActive();
+  const activeRef = useRef(active);
+  activeRef.current = active;
   useEffect(() => {
     if (pendingNew) {
       pendingNew = false;
       ref.current();
     }
     const onNew = (e) => {
+      if (!activeRef.current) return; // a page in a background window must not react
       e.detail.handled = true;
       ref.current();
     };
@@ -18851,6 +18864,25 @@ const SHORTCUT_HELP = [
     ],
   ],
   [
+    "Windows",
+    [
+      ["Alt + W", "Open a new window (a copy of this page)"],
+      [
+        "Alt + Shift + letter",
+        "Open that page in a new window (Alt + Shift + I = Invoices, ...)",
+      ],
+      ["Ctrl + click", "Open a sidebar page in a new window"],
+      ["Alt + T", "Tile all windows side by side"],
+      ["Alt + Shift + T", "Cascade all windows"],
+      ["Alt + 1 ... 9", "Bring window 1 ... 9 to the front"],
+      ["Alt + ]  /  Alt + [", "Next / previous window"],
+      [
+        "Alt + Shift + W  or  Esc",
+        "Close this window (Esc: when no form is open in it)",
+      ],
+    ],
+  ],
+  [
     "Anywhere",
     [
       ["Ctrl + F  or  /", "Find (search)"],
@@ -18889,9 +18921,12 @@ function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
   const [open, setOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
+  const wins = useWindows();
+  const active = useWindowActive(); // only the window you are looking at listens to the keys
+  const floating = useWindowFloating();
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isAdmin || !active) return;
     const typing = () => {
       const el = document.activeElement;
       return (
@@ -18902,8 +18937,9 @@ function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
     };
     // a form / dialog is open: don't navigate away from half-typed work
     const formOpen = () =>
-      [...document.querySelectorAll(".fixed.inset-0")].some((el) =>
-        el.querySelector("form, input, select, textarea"),
+      [...document.querySelectorAll(".fixed.inset-0")].some(
+        (el) =>
+          isShown(el) && el.querySelector("form, input, select, textarea"),
       );
     const go = (view) => setSearchParams(view ? { view } : {});
     const openNew = (view) => {
@@ -18918,6 +18954,7 @@ function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
     };
     const overlayButton = (pattern) =>
       [...document.querySelectorAll(".fixed.inset-0 button")]
+        .filter(isShown)
         .reverse()
         .find((b) => pattern.test(b.textContent.trim()));
 
@@ -18936,14 +18973,27 @@ function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
           setHelpOpen(false);
           return;
         }
-        overlayButton(/^(cancel|close)$/i)?.click();
+        const btn = overlayButton(/^(cancel|close)$/i);
+        if (btn) {
+          btn.click();
+          return;
+        }
+        // QuickBooks: Esc closes the window you are in (floating windows only, never while a dialog is open)
+        const dialogOpen = [
+          ...document.querySelectorAll(".fixed.inset-0"),
+        ].some(isShown);
+        if (floating && wins && !dialogOpen) {
+          if (typing())
+            document.activeElement.blur(); // 1st Esc leaves the field
+          else wins.closeActive(); // next Esc closes the window
+        }
         return;
       }
       if (mod && e.key === "Enter") {
         e.preventDefault();
-        const form = [
-          ...document.querySelectorAll(".fixed.inset-0 form"),
-        ].pop();
+        const form = [...document.querySelectorAll(".fixed.inset-0 form")]
+          .filter(isShown)
+          .pop();
         if (form) form.requestSubmit();
         else overlayButton(/^(save|create|record|submit|post|add)\b/i)?.click();
         return;
@@ -18954,6 +19004,40 @@ function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
           .find((i) => i.offsetParent !== null)
           ?.focus();
         return;
+      }
+
+      // ---- windows: these work even while a form is open (the form stays in its own window) ----
+      if (wins && e.altKey && !mod) {
+        if (e.code === "KeyW") {
+          e.preventDefault();
+          if (e.shiftKey) wins.closeActive();
+          else wins.duplicate();
+          return;
+        }
+        if (e.code === "KeyT") {
+          e.preventDefault();
+          if (e.shiftKey) wins.cascade();
+          else wins.tile();
+          return;
+        }
+        if (e.shiftKey && e.code in ALT_GO) {
+          e.preventDefault();
+          wins.openWindow(ALT_GO[e.code] ? `view=${ALT_GO[e.code]}` : "");
+          return;
+        }
+        if (!e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
+          e.preventDefault();
+          wins.goIndex(Number(e.code.slice(5)));
+          return;
+        }
+        if (
+          !e.shiftKey &&
+          (e.code === "BracketRight" || e.code === "BracketLeft")
+        ) {
+          e.preventDefault();
+          wins.cycle(e.code === "BracketRight" ? 1 : -1);
+          return;
+        }
       }
 
       if (formOpen() || helpOpen) return; // everything below would leave an open form
@@ -19006,14 +19090,15 @@ function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isAdmin, onNewBill, searchParams, helpOpen]);
+  }, [isAdmin, active, floating, wins, onNewBill, searchParams, helpOpen]);
 
   // the "Keyboard shortcuts" link in the sidebar
   useEffect(() => {
+    if (!active) return;
     const show = () => setHelpOpen(true);
     window.addEventListener("app:help", show);
     return () => window.removeEventListener("app:help", show);
-  }, []);
+  }, [active]);
 
   return (
     <>
@@ -19151,13 +19236,27 @@ const ZOHO_NAV = [
   ],
 ];
 
+// text in a window's title bar
+function windowLabel(params) {
+  const v = params.get("view") || "home";
+  if (v === "dashboard") return "Home";
+  return ZOHO_NAV.flat().find((n) => n.id === v)?.label || "Home";
+}
+
 function ZohoSidebar({ onNavigate }) {
   const [params, setParams] = useSearchParams();
   const activeId = params.get("view") || "home";
   const { can, hasRight, openMode } = useAuth();
 
-  const go = (id) => {
-    setParams(id === "home" ? {} : { view: id });
+  const wins = useWindows();
+
+  // Ctrl / Cmd / Shift + click = open that page in a new window
+  const go = (id, inNewWindow = false) => {
+    if (inNewWindow && wins) {
+      wins.openWindow(id === "home" ? "" : `view=${id}`);
+    } else {
+      setParams(id === "home" ? {} : { view: id });
+    }
     onNavigate?.();
   };
 
@@ -19186,7 +19285,9 @@ function ZohoSidebar({ onNavigate }) {
               {items.map(({ id, label, Icon }) => (
                 <div key={id}>
                   <button
-                    onClick={() => go(id)}
+                    onClick={(e) =>
+                      go(id, e.ctrlKey || e.metaKey || e.shiftKey)
+                    }
                     className={rowCls(activeId === id)}
                   >
                     <Icon size={16} className="shrink-0" />
@@ -19909,10 +20010,12 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
   );
 }
 
-function AppShell() {
+// ONE window: sidebar + page + shortcuts. <MultiWindow> (see AppShell below) renders one copy per open window.
+function AppWindow() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { openMode, can, hasRight } = useAuth();
+  const floating = useWindowFloating(); // floating windows show just the page, no sidebar
   // Login not enforced yet (AUTH_REQUIRED=false): keep the old behaviour. Enforced: decided by the role.
   const isAdmin = openMode
     ? location.pathname.startsWith("/admin")
@@ -20055,16 +20158,26 @@ function AppShell() {
 
   return (
     <>
-      {isAdmin ? <ZohoLayout>{page}</ZohoLayout> : page}
+      {isAdmin && !floating ? <ZohoLayout>{page}</ZohoLayout> : page}
       <GlobalAdminShortcuts
         isAdmin={isAdmin}
         onProductCreated={refresh}
         onNewBill={goNewBill}
         onNewIssued={goNewIssued}
       />
+      {!isAdmin && <FloatingSignOut />}
+    </>
+  );
+}
+
+function AppShell() {
+  return (
+    <>
+      <MultiWindow labelFor={windowLabel}>
+        <AppWindow />
+      </MultiWindow>
       <ThemePanel />
       <ProfileModal />
-      {!isAdmin && <FloatingSignOut />}
     </>
   );
 }

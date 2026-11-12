@@ -1,6 +1,6 @@
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "./windows.jsx";
 import { History } from "lucide-react";
 import { useAuth } from "./auth.jsx";
 import { call, fmtTime, Badge } from "./UsersAdmin.jsx";
