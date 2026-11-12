@@ -4227,6 +4227,9 @@ function LowStockBell() {
 // ---------- App appearance: theme / accent colour / text size (whole app, saved on this device) ----------
 // The colours themselves live in src/index.css (html[data-theme=...] rules); this only picks + remembers them.
 const APP_THEME_KEY = "app_theme_v1";
+const APP_THEME_LAST_KEY = "app_theme_last_company"; // remembers which company was open (avoids a flash of the wrong theme on reload)
+const themeKeyFor = (companyId) =>
+  companyId ? `${APP_THEME_KEY}:${companyId}` : APP_THEME_KEY;
 const APP_THEMES = [
   {
     id: "light",
@@ -4294,9 +4297,11 @@ const APP_THEME_DEFAULT = {
   sidebar: "auto",
 };
 
-function loadAppTheme() {
+function loadAppTheme(companyId) {
   try {
-    const s = JSON.parse(localStorage.getItem(APP_THEME_KEY) || "null");
+    const s = JSON.parse(
+      localStorage.getItem(themeKeyFor(companyId)) || "null",
+    );
     if (s && typeof s === "object") {
       return {
         theme: APP_THEMES.some((t) => t.id === s.theme)
@@ -4328,12 +4333,14 @@ function applyAppTheme(s) {
   if (sb && sb.color) el.style.setProperty("--sidebar-bg", sb.color);
   else el.style.removeProperty("--sidebar-bg"); // "auto" → theme default from index.css
 }
-applyAppTheme(loadAppTheme()); // runs once when the app loads, before the first screen is drawn
+applyAppTheme(loadAppTheme(localStorage.getItem(APP_THEME_LAST_KEY))); // runs once when the app loads, before the first screen is drawn
 
 // Slide-in panel. Open it from anywhere with: window.dispatchEvent(new Event("app:appearance"))
 function ThemePanel() {
+  const { company } = useCompany();
+  const companyId = company?.id ?? null;
   const [open, setOpen] = useState(false);
-  const [s, setS] = useState(loadAppTheme);
+  const [s, setS] = useState(() => loadAppTheme(companyId));
 
   useEffect(() => {
     const show = () => setOpen(true);
@@ -4341,12 +4348,25 @@ function ThemePanel() {
     return () => window.removeEventListener("app:appearance", show);
   }, []);
 
+  // when the company becomes known / changes: load ITS saved theme (new companies start with the default)
+  useEffect(() => {
+    if (companyId == null) return;
+    const t = loadAppTheme(companyId);
+    setS(t);
+    applyAppTheme(t);
+    try {
+      localStorage.setItem(APP_THEME_LAST_KEY, String(companyId));
+    } catch (e) {
+      /* storage blocked */
+    }
+  }, [companyId]);
+
   const change = (patch) => {
     const next = { ...s, ...patch };
     setS(next);
     applyAppTheme(next);
     try {
-      localStorage.setItem(APP_THEME_KEY, JSON.stringify(next));
+      localStorage.setItem(themeKeyFor(companyId), JSON.stringify(next));
     } catch (e) {
       /* storage blocked */
     }
@@ -4448,6 +4468,7 @@ function ThemePanel() {
             ))}
           </div>
         </section>
+
         <section>
           <h3 className={label}>Sidebar colour</h3>
           <div className="flex flex-wrap gap-3">
@@ -4493,7 +4514,8 @@ function ThemePanel() {
           </button>
         </div>
         <p className="text-xs text-gray-400">
-          Applies to every page. Saved automatically on this device.
+          Applies to every page of this company. Saved automatically on this
+          device.
         </p>
       </div>
     </div>
@@ -4813,14 +4835,16 @@ function AppHeader({
                   </div>
                 </>
               )}
-              <Gate area="invoices" level="create">
-                <button
-                  onClick={openNewInvoice}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
-                >
-                  + New Invoice
-                </button>
-              </Gate>
+              {active !== "items" && (
+                <Gate area="invoices" level="create">
+                  <button
+                    onClick={openNewInvoice}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
+                  >
+                    + New Invoice
+                  </button>
+                </Gate>
+              )}
               <AddProductButton
                 ref={addProductRef}
                 onCreated={onProductAdded}
@@ -11504,9 +11528,14 @@ const ACCT_LAYOUT_DEFAULT = {
 
 // saved on this device (localStorage); survives refresh
 function useAccountLayout() {
-  const [layout, setLayout] = useState(() => {
+  const { company } = useCompany();
+  const storageKey = company?.id
+    ? `${ACCT_LAYOUT_KEY}:${company.id}`
+    : ACCT_LAYOUT_KEY;
+
+  const readLayout = (key) => {
     try {
-      const saved = JSON.parse(localStorage.getItem(ACCT_LAYOUT_KEY) || "null");
+      const saved = JSON.parse(localStorage.getItem(key) || "null");
       if (saved && typeof saved === "object") {
         const known = ACCT_LAYOUT_DEFAULT.cols.map((c) => c.key);
         const savedCols = (saved.cols || []).filter((c) =>
@@ -11528,10 +11557,16 @@ function useAccountLayout() {
       /* ignore broken saved data */
     }
     return ACCT_LAYOUT_DEFAULT;
-  });
+  };
+
+  const [layout, setLayout] = useState(() => readLayout(storageKey));
+  useEffect(() => {
+    setLayout(readLayout(storageKey));
+  }, [storageKey]);
+
   const save = (next) => {
     try {
-      localStorage.setItem(ACCT_LAYOUT_KEY, JSON.stringify(next));
+      localStorage.setItem(storageKey, JSON.stringify(next));
     } catch (e) {
       /* storage blocked */
     }
@@ -11541,7 +11576,6 @@ function useAccountLayout() {
   const reset = () => setLayout(save(ACCT_LAYOUT_DEFAULT));
   return [layout, update, reset];
 }
-
 function orderAccountTree(list) {
   const ids = new Set(list.map((a) => a.id));
   const kids = new Map();
