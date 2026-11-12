@@ -18873,7 +18873,7 @@ const SHORTCUT_HELP = [
         "Alt + Shift + letter",
         "Open that page in a new window (Alt + Shift + I = Invoices, ...)",
       ],
-      ["Ctrl + click", "Open a sidebar page in a new window"],
+      ["Ctrl + click", "Open a menu page (side or top menu) in a new window"],
       ["Alt + T", "Tile all windows side by side"],
       ["Alt + Shift + T", "Cascade all windows"],
       ["Alt + 1 ... 9", "Bring window 1 ... 9 to the front"],
@@ -18882,10 +18882,7 @@ const SHORTCUT_HELP = [
         "Alt + Shift + W  or  Esc",
         "Close this window (Esc: when no form is open in it)",
       ],
-      [
-        "Toolbar click",
-        "Top-menu mode: open that page in its own window (or bring it to the front)",
-      ],
+      
     ],
   ],
   [
@@ -19243,7 +19240,6 @@ const ZOHO_NAV = [
 ];
 
 
-
 // Which menu the user prefers: "side" = the sidebar (default), "top" = QuickBooks-style toolbar. Saved on this device.
 const NAV_LAYOUT_KEY = "nav_layout_v1";
 function readNavLayout() {
@@ -19316,8 +19312,12 @@ function TopToolbar() {
                   <button
                     key={id}
                     type="button"
-                    title={label}
-                    onClick={() => wins.openView(id)}
+                    title={`${label}  (Ctrl + click: open in a new window)`}
+                    onClick={(e) =>
+                      e.ctrlKey || e.metaKey || e.shiftKey
+                        ? wins.openWindow(id === "home" ? "" : `view=${id}`)
+                        : wins.go(id)
+                    }
                     className={`relative w-[4.25rem] shrink-0 flex flex-col items-center justify-center gap-1 px-1 text-[10px] leading-3 text-center ${
                       on
                         ? "bg-blue-500 text-white"

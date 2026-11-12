@@ -47,7 +47,7 @@ export function useWindowState() {
   return useContext(StateCtx);
 }
 
-// { openView, openWindow, duplicate, closeActive, closeWindow, focus, goIndex, cycle, tile, cascade }
+// { go, openView, openWindow, duplicate, closeActive, closeWindow, focus, goIndex, cycle, tile, cascade }
 export function useWindows() {
   return useContext(ManagerCtx);
 }
@@ -210,7 +210,9 @@ function FloatWin({ w, n, label, active, z, children, api, patch }) {
 
 // labelFor(URLSearchParams) -> text shown in a window's title bar
 export function MultiWindow({ children, labelFor, toolbar }) {
-  const [mainParams] = useRouterSearchParams();
+  const [mainParams, setMainParams] = useRouterSearchParams();
+  const mainSetRef = useRef(setMainParams);
+  mainSetRef.current = setMainParams;
   const [wins, setWins] = useState([]); // floating windows only
   const [activeId, setActiveId] = useState(0);
 
@@ -324,7 +326,14 @@ export function MultiWindow({ children, labelFor, toolbar }) {
       if (hit) focus(hit.id);
       else openWindow(view === "home" ? "" : `view=${view}`);
     };
+    // toolbar click: show this page in the window you are working in (like the side menu)
+    const go = (view) => {
+      const next = view === "home" ? {} : { view };
+      if (activeRef.current === 0) mainSetRef.current(next);
+      else setSearch(activeRef.current, next);
+    };
     return {
+      go,
       openView,
       openWindow,
       focus,
@@ -349,7 +358,7 @@ export function MultiWindow({ children, labelFor, toolbar }) {
       tile: () => arrange("tile"),
       cascade: () => arrange("cascade"),
     };
-  }, []);
+  }, [setSearch]);
 
   // several windows may hold unsaved forms: ask before the browser tab is closed / reloaded
   const multi = wins.length > 0;
