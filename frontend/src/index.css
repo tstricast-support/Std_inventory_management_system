@@ -230,9 +230,13 @@ html[data-theme="quickbooks"] body {
 
 
 /* ---------- SIDEBAR colour: theme default, overridden by the "Sidebar colour" picker ---------- */
+/* ---------- SIDEBAR colour: theme default, overridden by the "Sidebar colour" picker ---------- */
 html {
   --sidebar-bg: #1f2640;
   /* Light theme default */
+
+  /* darker "light grey" text (phone numbers, hints, placeholders-style labels) everywhere; colour only, not bold */
+  --color-gray-400: #2e2e30;
 }
 
 html[data-theme="dark"] {
