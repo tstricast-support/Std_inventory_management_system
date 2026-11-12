@@ -12,10 +12,10 @@ import { useSearchParams as useRouterSearchParams } from "react-router-dom";
 import { Minus, Maximize2, Minimize2, X } from "lucide-react";
 
 export const MAX_WINDOWS = 8;
-const SIDEBAR_W = 224; // the w-56 sidebar of window 1
 const TITLE_H = 32;
 
 const WinCtx = createContext(null); // which window am I rendered in?
+const StateCtx = createContext({ activeView: "home", openViews: new Set() });
 const ManagerCtx = createContext(null); // open / close / focus windows
 
 // true when the element is really on screen (elements inside a minimized window are not)
@@ -42,7 +42,12 @@ export function useWindowFloating() {
   return !!win && !!win.floating;
 }
 
-// { openWindow, duplicate, closeActive, closeWindow, focus, goIndex, cycle, tile, cascade }
+// which page the active window shows + which pages are open in some window (for the toolbar)
+export function useWindowState() {
+  return useContext(StateCtx);
+}
+
+// { openView, openWindow, duplicate, closeActive, closeWindow, focus, goIndex, cycle, tile, cascade }
 export function useWindows() {
   return useContext(ManagerCtx);
 }
@@ -50,14 +55,25 @@ export function useWindows() {
 const vw = () => window.innerWidth;
 const vh = () => window.innerHeight;
 const isSmall = () => vw() < 768;
+// height of the top toolbar (0 when the user uses the sidebar menu instead)
+const topH = () => {
+  const el = document.querySelector("[data-win-toolbar]");
+  return el && isShown(el) ? el.offsetHeight : 0;
+};
+// width of the sidebar menu (0 when the toolbar is used, or on a phone) - windows stay to its right
+const leftW = () => (!isSmall() && topH() === 0 ? 224 : 0);
+const viewOf = (search) => {
+  const v = new URLSearchParams(search).get("view") || "home";
+  return v === "dashboard" ? "home" : v;
+};
 
 function cascadeRect(n) {
   const w = Math.min(920, vw() - 40);
   const h = Math.min(620, vh() - 60);
   const off = (n % 8) * 32;
   return {
-    x: Math.max(8, Math.min(SIDEBAR_W + 24 + off, vw() - w - 8)),
-    y: Math.max(8, Math.min(48 + off, vh() - h - 8)),
+    x: Math.max(8, Math.min(leftW() + 24 + off, vw() - w - 8)),
+    y: Math.max(topH() + 8, Math.min(topH() + 16 + off, vh() - h - 8)),
     w,
     h,
   };
@@ -66,10 +82,10 @@ function cascadeRect(n) {
 function FloatWin({ w, n, label, active, z, children, api, patch }) {
   const small = isSmall();
   const max = w.max || small; // phones: always full screen
-  const left = max ? (small ? 0 : SIDEBAR_W) : w.x;
-  const top = max ? 0 : w.y;
-  const width = max ? vw() - left : w.w;
-  const height = w.min ? TITLE_H : max ? vh() : w.h;
+  const left = max ? leftW() : w.x;
+  const top = max ? topH() : w.y;
+  const width = max ? vw() - leftW() : w.w;
+  const height = w.min ? TITLE_H : max ? vh() - topH() : w.h;
 
   const startDrag = (e) => {
     if (max || e.button !== 0 || e.target.closest("button")) return;
@@ -80,7 +96,7 @@ function FloatWin({ w, n, label, active, z, children, api, patch }) {
     const move = (ev) =>
       patch(w.id, {
         x: ox + ev.clientX - sx,
-        y: Math.max(0, Math.min(oy + ev.clientY - sy, vh() - TITLE_H)),
+        y: Math.max(topH(), Math.min(oy + ev.clientY - sy, vh() - TITLE_H)),
       });
     const up = () => {
       window.removeEventListener("pointermove", move);
@@ -193,7 +209,7 @@ function FloatWin({ w, n, label, active, z, children, api, patch }) {
 }
 
 // labelFor(URLSearchParams) -> text shown in a window's title bar
-export function MultiWindow({ children, labelFor }) {
+export function MultiWindow({ children, labelFor, toolbar }) {
   const [mainParams] = useRouterSearchParams();
   const [wins, setWins] = useState([]); // floating windows only
   const [activeId, setActiveId] = useState(0);
@@ -280,16 +296,17 @@ export function MultiWindow({ children, labelFor }) {
         );
         return;
       }
-      const left = isSmall() ? 0 : SIDEBAR_W;
+      const left = leftW(),
+        top0 = topH();
       const W = vw() - left,
-        H = vh();
+        H = vh() - top0;
       const cols = Math.ceil(Math.sqrt(list.length));
       const rows = Math.ceil(list.length / cols);
       setWins((ws) =>
         ws.map((w, i) => ({
           ...w,
           x: left + (i % cols) * (W / cols),
-          y: Math.floor(i / cols) * (H / rows),
+          y: top0 + Math.floor(i / cols) * (H / rows),
           w: W / cols,
           h: H / rows,
           min: false,
@@ -298,7 +315,17 @@ export function MultiWindow({ children, labelFor }) {
       );
     };
     const allIds = () => [0, ...winsRef.current.map((w) => w.id)];
+    // toolbar click: bring the window that already shows this page to the front, else open it in a new window
+    const openView = (view) => {
+      const hit = [
+        { id: 0, v: viewOf(mainSearchRef.current) },
+        ...winsRef.current.map((w) => ({ id: w.id, v: viewOf(w.search) })),
+      ].find((e) => e.v === view);
+      if (hit) focus(hit.id);
+      else openWindow(view === "home" ? "" : `view=${view}`);
+    };
     return {
+      openView,
       openWindow,
       focus,
       closeWindow,
@@ -342,12 +369,18 @@ export function MultiWindow({ children, labelFor }) {
       setWins((ws) =>
         ws.map((w) => ({
           ...w,
-          x: Math.max(0, Math.min(w.x, vw() - 120)),
-          y: Math.max(0, Math.min(w.y, vh() - TITLE_H)),
+          x: Math.max(leftW(), Math.min(w.x, vw() - 120)),
+          y: Math.max(topH(), Math.min(w.y, vh() - TITLE_H)),
         })),
       );
+    // the user switched between the sidebar menu and the top toolbar
+    const onLayout = () => setTimeout(fix, 50);
     window.addEventListener("resize", fix);
-    return () => window.removeEventListener("resize", fix);
+    window.addEventListener("app:navlayout", onLayout);
+    return () => {
+      window.removeEventListener("resize", fix);
+      window.removeEventListener("app:navlayout", onLayout);
+    };
   }, []);
 
   const mainCtx = useMemo(
@@ -357,8 +390,24 @@ export function MultiWindow({ children, labelFor }) {
 
   const ranked = [...wins].sort((a, b) => a.z - b.z);
 
+  const activeSearch =
+    activeId === 0
+      ? mainParams.toString()
+      : wins.find((w) => w.id === activeId)?.search || "";
+  const openViewsKey = [mainParams.toString(), ...wins.map((w) => w.search)]
+    .map(viewOf)
+    .join("|");
+  const stateValue = useMemo(
+    () => ({
+      activeView: viewOf(activeSearch),
+      openViews: new Set(openViewsKey.split("|")),
+    }),
+    [activeSearch, openViewsKey],
+  );
+
   return (
     <ManagerCtx.Provider value={api}>
+      <StateCtx.Provider value={stateValue}>{toolbar}</StateCtx.Provider>
       <WinCtx.Provider value={mainCtx}>
         <div onPointerDownCapture={() => api.focus(0)}>{children}</div>
       </WinCtx.Provider>

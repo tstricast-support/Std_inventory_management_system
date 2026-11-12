@@ -421,7 +421,7 @@ function CompanyPickerPage() {
 }
 
 // ---------- company switcher (only drawn when the user may enter 2+ companies) ----------
-function CompanySwitcher({ light = false }) {
+export function CompanySwitcher({ light = false }) {
   const { user, switchCompany } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

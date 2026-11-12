@@ -14,6 +14,7 @@ import {
   useWindows,
   useWindowActive,
   useWindowFloating,
+  useWindowState,
   isShown,
 } from "./windows.jsx";
 import {
@@ -74,6 +75,7 @@ import {
   SidebarUser,
   HeaderSignOut,
   FloatingSignOut,
+  CompanySwitcher,
   ACCOUNTING_AREAS,
 } from "./auth.jsx";
 import { UsersAdminPage, ProfileModal } from "./UsersAdmin.jsx";
@@ -18880,6 +18882,10 @@ const SHORTCUT_HELP = [
         "Alt + Shift + W  or  Esc",
         "Close this window (Esc: when no form is open in it)",
       ],
+      [
+        "Toolbar click",
+        "Top-menu mode: open that page in its own window (or bring it to the front)",
+      ],
     ],
   ],
   [
@@ -19236,6 +19242,147 @@ const ZOHO_NAV = [
   ],
 ];
 
+
+
+// Which menu the user prefers: "side" = the sidebar (default), "top" = QuickBooks-style toolbar. Saved on this device.
+const NAV_LAYOUT_KEY = "nav_layout_v1";
+function readNavLayout() {
+  try {
+    return localStorage.getItem(NAV_LAYOUT_KEY) === "top" ? "top" : "side";
+  } catch {
+    return "side";
+  }
+}
+function useNavLayout() {
+  const [layout, setLayout] = useState(readNavLayout);
+  useEffect(() => {
+    const sync = () => setLayout(readNavLayout());
+    window.addEventListener("app:navlayout", sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener("app:navlayout", sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+  const choose = (value) => {
+    try {
+      localStorage.setItem(NAV_LAYOUT_KEY, value);
+    } catch {}
+    window.dispatchEvent(new Event("app:navlayout"));
+  };
+  return [layout, choose];
+}
+
+// QuickBooks-style toolbar at the top (desktop). Click = open that page in its own window
+// (or bring the window that already shows it to the front).
+function TopToolbar() {
+  const [navLayout, setNavLayout] = useNavLayout();
+  const { user, logout, openMode, can, hasRight } = useAuth();
+  const location = useLocation();
+  const wins = useWindows();
+  const { activeView, openViews } = useWindowState();
+  const isAdmin = openMode
+    ? location.pathname.startsWith("/admin")
+    : ACCOUNTING_AREAS.some((a) => can(a, "view"));
+  if (!isAdmin || !wins || navLayout !== "top") return null;
+
+  const small =
+    "px-2 py-1 rounded text-[11px] text-gray-300 hover:bg-white/10 hover:text-white";
+  return (
+    <div
+      data-win-toolbar
+      className="hidden md:flex sticky top-0 z-30 h-16 items-stretch bg-[#1f2640] text-white shadow-md"
+    >
+      <div className="w-52 shrink-0 flex items-center border-r border-white/10">
+        <SidebarCompanyHeader />
+      </div>
+
+      <nav className="flex-1 min-w-0 flex items-stretch overflow-x-auto px-1">
+        {ZOHO_NAV.map((group, gi) => {
+          const items = group.filter((n) =>
+            viewAllowed(n.id, can, hasRight, openMode),
+          );
+          if (items.length === 0) return null;
+          return (
+            <div
+              key={gi}
+              className={`flex items-stretch ${
+                gi > 0 ? "ml-1 pl-1 border-l border-white/10" : ""
+              }`}
+            >
+              {items.map(({ id, label, Icon }) => {
+                const on = activeView === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    title={label}
+                    onClick={() => wins.openView(id)}
+                    className={`relative w-[4.25rem] shrink-0 flex flex-col items-center justify-center gap-1 px-1 text-[10px] leading-3 text-center ${
+                      on
+                        ? "bg-blue-500 text-white"
+                        : "text-gray-300 hover:bg-white/10 hover:text-white"
+                    }`}
+                  >
+                    <Icon size={18} />
+                    <span className="line-clamp-2">{label}</span>
+                    {openViews.has(id) && !on && (
+                      <span className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-blue-400" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </nav>
+
+      <div className="shrink-0 flex items-center gap-1 px-3 border-l border-white/10 text-xs">
+        <button type="button" className={small} onClick={() => wins.tile()} title="Tile windows  (Alt + T)">
+          Tile
+        </button>
+        <button type="button" className={small} onClick={() => wins.cascade()} title="Cascade windows  (Alt + Shift + T)">
+          Cascade
+        </button>
+        <button
+          type="button"
+          className={small}
+          onClick={() => window.dispatchEvent(new Event("app:help"))}
+          title="Keyboard shortcuts (?)"
+        >
+          ?
+        </button>
+        <button
+          type="button"
+          className={small}
+          onClick={() => setNavLayout("side")}
+          title="Show the menu as a side panel again"
+        >
+          Side menu
+        </button>
+        <CompanySwitcher light />
+        {!openMode && user && (
+          <div className="ml-2 leading-4 max-w-[9rem]">
+            <p className="truncate font-medium">{user.full_name}</p>
+            <div className="flex gap-3 text-gray-300">
+              <button
+                type="button"
+                className="hover:text-white"
+                onClick={() => window.dispatchEvent(new Event("app:profile"))}
+              >
+                Profile
+              </button>
+              <button type="button" className="hover:text-white" onClick={logout}>
+                Sign out
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // text in a window's title bar
 function windowLabel(params) {
   const v = params.get("view") || "home";
@@ -19243,23 +19390,24 @@ function windowLabel(params) {
   return ZOHO_NAV.flat().find((n) => n.id === v)?.label || "Home";
 }
 
+
 function ZohoSidebar({ onNavigate }) {
   const [params, setParams] = useSearchParams();
   const activeId = params.get("view") || "home";
   const { can, hasRight, openMode } = useAuth();
 
-  const wins = useWindows();
+    const wins = useWindows();
+    const [, setNavLayout] = useNavLayout();
 
-  // Ctrl / Cmd / Shift + click = open that page in a new window
-  const go = (id, inNewWindow = false) => {
-    if (inNewWindow && wins) {
-      wins.openWindow(id === "home" ? "" : `view=${id}`);
-    } else {
-      setParams(id === "home" ? {} : { view: id });
-    }
-    onNavigate?.();
-  };
-
+    // Ctrl / Cmd / Shift + click = open that page in a new window
+    const go = (id, inNewWindow = false) => {
+      if (inNewWindow && wins) {
+        wins.openWindow(id === "home" ? "" : `view=${id}`);
+      } else {
+        setParams(id === "home" ? {} : { view: id });
+      }
+      onNavigate?.();
+    };
   const rowCls = (active) =>
     `w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-left transition ${
       active
@@ -19306,6 +19454,12 @@ function ZohoSidebar({ onNavigate }) {
       >
         Keyboard shortcuts (?)
       </button>
+      <button
+        onClick={() => setNavLayout("top")}
+        className="hidden md:block mx-2 mb-2 px-3 py-2 rounded-md text-xs text-left text-gray-400 hover:bg-white/10 hover:text-white"
+      >
+        Show menu on top
+      </button>
     </div>
   );
 }
@@ -19313,9 +19467,14 @@ function ZohoSidebar({ onNavigate }) {
 function ZohoLayout({ children }) {
   const { company } = useCompany();
   const [drawer, setDrawer] = useState(false);
+  const [navLayout] = useNavLayout(); // "side" (sidebar) or "top" (toolbar)
   return (
     <div className="flex min-h-screen bg-gray-50">
-      <aside className="hidden md:block w-56 shrink-0 bg-[#1f2640] sticky top-0 self-start h-screen overflow-y-auto">
+      <aside
+        className={`${
+          navLayout === "side" ? "hidden md:block" : "hidden"
+        } w-56 shrink-0 bg-[#1f2640] sticky top-0 self-start h-screen overflow-y-auto`}
+      >
         <ZohoSidebar />
       </aside>
 
@@ -20173,7 +20332,7 @@ function AppWindow() {
 function AppShell() {
   return (
     <>
-      <MultiWindow labelFor={windowLabel}>
+      <MultiWindow labelFor={windowLabel} toolbar={<TopToolbar />}>
         <AppWindow />
       </MultiWindow>
       <ThemePanel />
