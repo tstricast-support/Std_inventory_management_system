@@ -18479,6 +18479,253 @@ function ConfirmCreateItemModal({ name, onYes, onNo }) {
   );
 }
 
+
+const BILL_COL_DEFS = {
+  items: [
+    { key: "item", label: "Item", fr: 2.4, locked: true, show: true, full: true },
+    { key: "description", label: "Description", fr: 2, show: true, full: true },
+    { key: "sku", label: "SKU", fr: 1, show: false },
+    { key: "type", label: "Item type", fr: 1.1, show: false },
+    { key: "onhand", label: "In stock", fr: 0.8, right: true, show: false },
+    { key: "qty", label: "Qty", fr: 0.7, right: true, show: true },
+    { key: "rate", label: "Cost", fr: 1, right: true, locked: true, show: true },
+    { key: "amount", label: "Amount", fr: 1.1, right: true, locked: true, show: true },
+    { key: "newstock", label: "Stock after bill", fr: 1, right: true, show: false },
+    { key: "image", label: "Image", fr: 0.6, show: false },
+  ],
+  expenses: [
+    { key: "account", label: "Account", fr: 2.4, locked: true, show: true, full: true },
+    { key: "accttype", label: "Account type", fr: 1.2, show: false },
+    { key: "memo", label: "Memo", fr: 2, show: true, full: true },
+    { key: "amount", label: "Amount", fr: 1.1, right: true, locked: true, show: true },
+  ],
+};
+
+const BILL_COLS_KEY = "bill_cols_v1";
+
+// chosen columns + their order, saved on this device (localStorage) per company; survives refresh
+function useBillColumns(kind) {
+  const { company } = useCompany();
+  const storageKey = `${BILL_COLS_KEY}:${kind}${company?.id ? `:${company.id}` : ""}`;
+  const defs = BILL_COL_DEFS[kind];
+  const defaults = defs.map((c) => ({ key: c.key, visible: c.show }));
+
+  const read = (key) => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(key) || "null");
+      if (Array.isArray(saved)) {
+        const known = defs.map((c) => c.key);
+        const savedCols = saved.filter((c) => known.includes(c.key));
+        const missing = defaults.filter(
+          (c) => !savedCols.some((s) => s.key === c.key),
+        );
+        return [...savedCols, ...missing].map((c) => ({
+          key: c.key,
+          visible: Boolean(defs.find((d) => d.key === c.key)?.locked) || Boolean(c.visible),
+        }));
+      }
+    } catch (e) {
+      /* ignore broken saved data */
+    }
+    return defaults;
+  };
+
+  const [cols, setCols] = useState(() => read(storageKey));
+  useEffect(() => {
+    setCols(read(storageKey));
+  }, [storageKey]);
+
+  const save = (next) => {
+    setCols(next);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(next));
+    } catch (e) {
+      /* storage blocked */
+    }
+  };
+  return [cols, save, defaults];
+}
+
+// true on tablets / desktops (the grid is a table), false on phones (each row becomes a small card)
+function useIsWide() {
+  const [wide, setWide] = useState(
+    () => typeof window === "undefined" || window.innerWidth >= 640,
+  );
+  useEffect(() => {
+    const on = () => setWide(window.innerWidth >= 640);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  return wide;
+}
+
+// one cell of a grid row (on a phone it shows its own small label above the field)
+function BillCell({ label, wide, full = false, children }) {
+  return (
+    <div className={`min-w-0 ${!wide && full ? "col-span-2" : ""}`}>
+      {!wide && label && (
+        <span className="block text-[10px] uppercase text-gray-400 mb-0.5">
+          {label}
+        </span>
+      )}
+      {children}
+    </div>
+  );
+}
+
+// QuickBooks "Customize Columns": Available | Add / Remove / Move Up / Move Down / Default | Chosen
+function BillColumnsDialog({ title, defs, defaults, cols, onSave, onClose }) {
+  const [draft, setDraft] = useState(() => cols.map((c) => ({ ...c })));
+  const [selAvail, setSelAvail] = useState(null);
+  const [selChosen, setSelChosen] = useState(null);
+
+  const labelOf = (key) => defs.find((x) => x.key === key)?.label || key;
+  const isLocked = (key) => Boolean(defs.find((x) => x.key === key)?.locked);
+  const available = draft.filter((c) => !c.visible);
+  const chosen = draft.filter((c) => c.visible);
+
+  const add = (key = selAvail) => {
+    if (!key) return;
+    const rest = draft.filter((c) => c.key !== key);
+    const lastVisible = rest.map((c) => c.visible).lastIndexOf(true);
+    rest.splice(lastVisible + 1, 0, { key, visible: true });
+    setDraft(rest);
+    setSelAvail(null);
+    setSelChosen(key);
+  };
+  const remove = (key = selChosen) => {
+    if (!key || isLocked(key)) return;
+    setDraft(draft.map((c) => (c.key === key ? { ...c, visible: false } : c)));
+    setSelChosen(null);
+    setSelAvail(key);
+  };
+  const move = (dir) => {
+    if (!selChosen) return;
+    const idx = draft.map((c, i) => (c.visible ? i : -1)).filter((i) => i >= 0);
+    const pos = idx.findIndex((i) => draft[i].key === selChosen);
+    const swapWith = idx[pos + dir];
+    if (pos < 0 || swapWith === undefined) return;
+    const next = [...draft];
+    [next[idx[pos]], next[swapWith]] = [next[swapWith], next[idx[pos]]];
+    setDraft(next);
+  };
+  const setDefault = () => {
+    setDraft(defaults.map((c) => ({ ...c })));
+    setSelAvail(null);
+    setSelChosen(null);
+  };
+
+  const chosenPos = chosen.findIndex((c) => c.key === selChosen);
+  const btn =
+    "w-full border border-gray-300 rounded px-3 py-1.5 text-sm bg-white hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white";
+  const listBox = (list, selected, setSelected, onDouble) => (
+    <div className="border border-gray-400 bg-white h-56 overflow-y-auto">
+      {list.map((c) => (
+        <div
+          key={c.key}
+          onClick={() => setSelected(c.key)}
+          onDoubleClick={() => onDouble(c.key)}
+          className={`px-2 py-1 text-sm cursor-pointer select-none ${selected === c.key ? "bg-green-600 text-white" : "text-gray-800 hover:bg-gray-100"}`}
+        >
+          {labelOf(c.key)}
+          {isLocked(c.key) ? " *" : ""}
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center p-4"
+      style={{ zIndex: 70 }}
+    >
+      <div className="bg-white shadow-xl w-full max-w-2xl border border-gray-700">
+        <div className="bg-slate-800 text-white text-sm text-center py-2">
+          Customize Columns - {title}
+        </div>
+        <div className="p-4">
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-4">
+            <div>
+              <p className="text-sm text-gray-700 mb-1">Available Columns</p>
+              {listBox(available, selAvail, setSelAvail, add)}
+            </div>
+            <div className="flex sm:flex-col justify-center gap-2 sm:w-28 sm:pt-5 flex-wrap">
+              <button type="button" className={btn} disabled={!selAvail} onClick={() => add()}>
+                Add &gt;
+              </button>
+              <button
+                type="button"
+                className={btn}
+                disabled={!selChosen || isLocked(selChosen)}
+                onClick={() => remove()}
+              >
+                &lt; Remove
+              </button>
+              <div className="h-3 hidden sm:block" />
+              <button
+                type="button"
+                className={btn}
+                disabled={!selChosen || chosenPos <= 0}
+                onClick={() => move(-1)}
+              >
+                Move Up
+              </button>
+              <button
+                type="button"
+                className={btn}
+                disabled={!selChosen || chosenPos < 0 || chosenPos >= chosen.length - 1}
+                onClick={() => move(1)}
+              >
+                Move Down
+              </button>
+              <div className="h-3 hidden sm:block" />
+              <button type="button" className={btn} onClick={setDefault}>
+                Default
+              </button>
+            </div>
+            <div>
+              <p className="text-sm text-gray-700 mb-1">Chosen Columns</p>
+              {listBox(chosen, selChosen, setSelChosen, remove)}
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            * required column, it can be moved but not removed.
+          </p>
+          <div className="flex justify-center gap-3 mt-4">
+            <button
+              type="button"
+              onClick={() => onSave(draft)}
+              className="w-28 bg-blue-600 text-white rounded py-1.5 text-sm font-medium hover:bg-blue-700"
+            >
+              OK
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-28 border border-gray-300 rounded py-1.5 text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// empty grid rows (QuickBooks always shows a few blank lines; a new blank one appears when the last is filled)
+const blankBillItemRow = () => ({
+  product_id: "",
+  description: "",
+  quantity: "1",
+  rate: "",
+});
+const blankBillExpenseRow = () => ({ account_id: "", description: "", amount: "" });
+const blankBillRows = (make, n = 4) => Array.from({ length: n }, make);
+const withTrailingBlank = (rows, isFilled, make) =>
+  rows.length === 0 || isFilled(rows[rows.length - 1]) ? [...rows, make()] : rows;
+
+// ---------- Enter Bill form (QuickBooks style): vendor header on top, Expenses / Items grids below ----------
 function PurchaseBillForm({ onClose, onSaved }) {
   const [vendors, setVendors] = useState([]);
   const [items, setItems] = useState([]);
@@ -18488,33 +18735,51 @@ function PurchaseBillForm({ onClose, onSaved }) {
   const [terms, setTerms] = useState("Due on Receipt");
   const [dueDate, setDueDate] = useState(""); // empty = follow the payment terms
   const [vendorRef, setVendorRef] = useState("");
-  const [notes, setNotes] = useState("");
-  const [lines, setLines] = useState([blankBillLine()]);
+  const [notes, setNotes] = useState(""); // shown as "Memo"
+  const [tab, setTab] = useState("items"); // "items" | "expenses"
+  const [itemRows, setItemRows] = useState(() => blankBillRows(blankBillItemRow));
+  const [expRows, setExpRows] = useState(() => blankBillRows(blankBillExpenseRow));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [quickVendorName, setQuickVendorName] = useState(null); // typed name, or null = popup closed
-  const [quickItem, setQuickItem] = useState(null); // { name, lineIndex } or null = popup closed
   const [confirmItem, setConfirmItem] = useState(null); // { name, lineIndex } or null = question closed
+  const [quickItem, setQuickItem] = useState(null); // { name, lineIndex } or null = item form closed
+  const [colsOpen, setColsOpen] = useState(null); // null | "items" | "expenses" (Customize Columns)
+  const [itemCols, saveItemCols, itemColsDefault] = useBillColumns("items");
+  const [expCols, saveExpCols, expColsDefault] = useBillColumns("expenses");
+  const wide = useIsWide();
+
   const cls =
     "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const cellCls =
+    "w-full border border-gray-300 rounded px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const roCls = "px-2 py-1.5 text-sm text-gray-700 truncate";
 
+  const loadLists = async () => {
+    const [v, p, a] = await Promise.all([
+      getVendors(),
+      getProducts(),
+      getAccounts(),
+    ]);
+    setVendors(v);
+    // only real items: a parent that has subitems can't be bought itself
+    setItems(flattenParents(p).filter((x) => !(x.subitems?.length > 0)));
+    setAccounts(a.filter((x) => BILL_EXPENSE_TYPES.includes(x.account_type)));
+  };
   useEffect(() => {
-    Promise.all([getVendors(), getProducts(), getAccounts()])
-      .then(([v, p, a]) => {
-        setVendors(v);
-        // only real items: a parent that has subitems can't be bought itself
-        setItems(flattenParents(p).filter((x) => !(x.subitems?.length > 0)));
-        setAccounts(
-          a.filter((x) => BILL_EXPENSE_TYPES.includes(x.account_type)),
-        );
-      })
-      .catch((err) => setError(err.message));
+    loadLists().catch((err) => setError(err.message));
   }, []);
 
   const autoDue = addDaysISO(date, INVOICE_TERM_DAYS[terms] ?? 0);
   const effectiveDue = dueDate || autoDue;
 
   const itemById = Object.fromEntries(items.map((p) => [p.id, p]));
+  const vendor = vendors.find((v) => v.id === vendorId);
+  const vendorInfo = vendor
+    ? [vendor.contact_person, vendor.address, vendor.phone, vendor.email]
+        .filter(Boolean)
+        .join("\n")
+    : "";
   const vendorOptions = vendors.map((v) => ({ value: v.id, label: v.name }));
   const itemOptions = items.map((p) => ({
     value: p.id,
@@ -18531,61 +18796,116 @@ function PurchaseBillForm({ onClose, onSaved }) {
     hint: ACCOUNT_TYPE_NAMES[a.account_type],
   }));
 
-  const setLine = (i, patch) =>
-    setLines((prev) =>
-      prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
+  // ---- grid rows (a new blank row appears when the last one gets filled) ----
+  const isItemFilled = (r) => Boolean(r.product_id);
+  const isExpFilled = (r) => Boolean(r.account_id);
+  const setItemRow = (i, patch) =>
+    setItemRows((prev) =>
+      withTrailingBlank(
+        prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)),
+        isItemFilled,
+        blankBillItemRow,
+      ),
     );
+  const setExpRow = (i, patch) =>
+    setExpRows((prev) =>
+      withTrailingBlank(
+        prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)),
+        isExpFilled,
+        blankBillExpenseRow,
+      ),
+    );
+  const removeItemRow = (i) =>
+    setItemRows((prev) =>
+      withTrailingBlank(
+        prev.filter((_, idx) => idx !== i),
+        isItemFilled,
+        blankBillItemRow,
+      ),
+    );
+  const removeExpRow = (i) =>
+    setExpRows((prev) =>
+      withTrailingBlank(
+        prev.filter((_, idx) => idx !== i),
+        isExpFilled,
+        blankBillExpenseRow,
+      ),
+    );
+
   const pickItem = (i, productId) => {
     const p = itemById[productId];
     // the item's current cost is the starting rate; change it to what this bill actually charges
-    setLine(i, {
+    setItemRow(i, {
       product_id: productId,
       description: p?.purchase_description || "",
       rate: p && Number(p.cost) > 0 ? String(p.cost) : "",
     });
   };
 
-  // "+ New vendor": save from the popup, add it to the dropdown and select it
+  // \"+ New vendor\": save from the popup, add it to the dropdown and select it
   const handleQuickVendor = async (payload) => {
     const created = await createVendor(payload);
     setVendors((prev) => [...prev, created]);
     setVendorId(created.id);
   };
 
-  // "+ New item": save from the popup, reload the item list and fill the line it was opened from.
-  // Stock is NOT entered here - this bill adds it (so it is logged and posted to the ledger).
+  // New item: save from the full item form, reload the item list and fill the row it was opened from.
+  // Stock is NOT entered there - this bill adds it (so it is logged and posted to the ledger).
   const handleQuickItem = async (values, imageFiles = []) => {
     const created = await createProduct({ ...values, quantity: 0 }, imageFiles);
     const tree = await getProducts();
     setItems(flattenParents(tree).filter((x) => !(x.subitems?.length > 0)));
-    setLine(quickItem.lineIndex, {
-      kind: "item",
+    setTab("items");
+    setItemRow(quickItem.lineIndex, {
       product_id: created.id,
-      account_id: "",
       description: created.purchase_description || "",
       rate: Number(created.cost) > 0 ? String(created.cost) : "",
     });
   };
 
-  const isFilled = (l) =>
-    l.kind === "item" ? Boolean(l.product_id) : Boolean(l.account_id);
-  const filled = lines.filter(isFilled);
-  const lineCents = (l) => (Number(l.quantity) || 0) * toCents(l.rate);
-  const totalCents = filled.reduce((s, l) => s + lineCents(l), 0);
+  // ---- totals ----
+  const itemCents = (r) => (Number(r.quantity) || 0) * toCents(r.rate);
+  const expCents = (r) => toCents(r.amount);
+  const filledItems = itemRows.filter(isItemFilled);
+  const filledExp = expRows.filter(isExpFilled);
+  const itemsTotal = filledItems.reduce((s, r) => s + itemCents(r), 0);
+  const expTotal = filledExp.reduce((s, r) => s + expCents(r), 0);
+  const totalCents = itemsTotal + expTotal;
+  const stockUnits = filledItems.reduce(
+    (s, r) =>
+      itemById[r.product_id]?.item_type === STOCK_TRACKED_TYPE
+        ? s + (Number(r.quantity) || 0)
+        : s,
+    0,
+  );
   const canSave =
     Boolean(vendorId) &&
-    filled.length > 0 &&
-    filled.every(
-      (l) =>
-        Number.isInteger(Number(l.quantity)) &&
-        Number(l.quantity) > 0 &&
-        toCents(l.rate) >= 0,
+    filledItems.length + filledExp.length > 0 &&
+    filledItems.every(
+      (r) =>
+        Number.isInteger(Number(r.quantity)) &&
+        Number(r.quantity) > 0 &&
+        toCents(r.rate) >= 0,
     ) &&
+    filledExp.every((r) => toCents(r.amount) >= 0) &&
     totalCents > 0 &&
     effectiveDue >= date;
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const resetForm = () => {
+    setVendorId("");
+    setDate(toISODate(new Date()));
+    setTerms("Due on Receipt");
+    setDueDate("");
+    setVendorRef("");
+    setNotes("");
+    setTab("items");
+    setItemRows(blankBillRows(blankBillItemRow));
+    setExpRows(blankBillRows(blankBillExpenseRow));
+    setError(null);
+  };
+
+  const save = async (andNew) => {
+    if (!canSave || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -18595,17 +18915,28 @@ function PurchaseBillForm({ onClose, onSaved }) {
         due_date: effectiveDue,
         vendor_ref: vendorRef.trim() || null,
         notes: notes.trim() || null,
-        items: filled.map((l) => ({
-          ...(l.kind === "item"
-            ? { product_id: l.product_id }
-            : { account_id: l.account_id }),
-          description: l.description.trim() || null,
-          quantity: Number(l.quantity),
-          rate: Number(l.rate) || 0,
-        })),
+        items: [
+          ...filledItems.map((r) => ({
+            product_id: r.product_id,
+            description: r.description.trim() || null,
+            quantity: Number(r.quantity),
+            rate: Number(r.rate) || 0,
+          })),
+          ...filledExp.map((r) => ({
+            account_id: r.account_id,
+            description: r.description.trim() || null,
+            quantity: 1,
+            rate: Number(r.amount) || 0,
+          })),
+        ],
       });
       await onSaved();
-      onClose();
+      if (andNew) {
+        resetForm();
+        await loadLists().catch(() => {}); // stock counts changed
+      } else {
+        onClose();
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -18613,47 +18944,283 @@ function PurchaseBillForm({ onClose, onSaved }) {
     }
   };
 
+  // ---- grid drawing ----
+  const colDefs = (kind, cols) =>
+    cols
+      .filter((c) => c.visible)
+      .map((c) => BILL_COL_DEFS[kind].find((d) => d.key === c.key))
+      .filter(Boolean);
+  const template = (defs) =>
+    [...defs.map((d) => `minmax(0,${d.fr}fr)`), "2rem"].join(" ");
+  const rowProps = (defs) => ({
+    className: wide
+      ? "grid gap-1 items-start border-b border-gray-100 px-2 py-1.5"
+      : "grid grid-cols-2 gap-2 items-start border-b border-gray-200 px-2 py-2",
+    style: wide ? { gridTemplateColumns: template(defs) } : undefined,
+  });
+  const deleteBtn = (show, onClick) => (
+    <div className={`flex ${wide ? "justify-center pt-1" : "col-span-2 justify-end"}`}>
+      {show && (
+        <button
+          type="button"
+          title="Remove line"
+          onClick={onClick}
+          className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+        >
+          <Trash2 size={14} />
+        </button>
+      )}
+    </div>
+  );
+  const headerRow = (kind, defs) =>
+    wide && (
+      <div
+        className="grid gap-1 px-2 py-1.5 bg-gray-100 border-b border-gray-300 text-[11px] font-semibold uppercase text-gray-600 select-none"
+        style={{ gridTemplateColumns: template(defs) }}
+        title="Right-click to customize columns"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setColsOpen(kind);
+        }}
+      >
+        {defs.map((d) => (
+          <span key={d.key} className={d.right ? "text-right" : ""}>
+            {d.label}
+          </span>
+        ))}
+        <span />
+      </div>
+    );
+
+  const itemDefs = colDefs("items", itemCols);
+  const expDefs = colDefs("expenses", expCols);
+
+  const renderItemRow = (r, i) => {
+    const p = itemById[r.product_id];
+    const tracked = p?.item_type === STOCK_TRACKED_TYPE;
+    const qty = Number(r.quantity) || 0;
+    const num = " text-right";
+    const cells = {
+      item: (
+        <SearchSelect
+          value={r.product_id}
+          onChange={(v) => pickItem(i, v)}
+          options={itemOptions}
+          placeholder="Select an item..."
+          searchPlaceholder="Search items..."
+          emptyText="No items found. Type a name to create one."
+          onCreateNew={(name) => setConfirmItem({ name, lineIndex: i })}
+          createLabel="item"
+          wrap
+        />
+      ),
+      description: (
+        <input
+          placeholder="Description"
+          title={r.description}
+          value={r.description}
+          onChange={(e) => setItemRow(i, { description: e.target.value })}
+          className={cellCls}
+        />
+      ),
+      sku: <div className={roCls}>{p?.sku || ""}</div>,
+      type: <div className={roCls}>{p?.item_type || ""}</div>,
+      onhand: <div className={roCls + num}>{p ? (tracked ? p.quantity : "-") : ""}</div>,
+      qty: (
+        <input
+          type="number"
+          min="1"
+          step="1"
+          value={r.quantity}
+          onChange={(e) => setItemRow(i, { quantity: e.target.value })}
+          className={cellCls + num}
+        />
+      ),
+      rate: (
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={r.rate}
+          onChange={(e) => setItemRow(i, { rate: e.target.value })}
+          className={cellCls + num}
+        />
+      ),
+      amount: (
+        <div className={roCls + num + " font-medium text-gray-900"}>
+          {isItemFilled(r) ? formatRs(itemCents(r) / 100) : ""}
+        </div>
+      ),
+      newstock: (
+        <div className={roCls + num + " text-green-700"}>
+          {p && tracked && qty > 0 ? p.quantity + qty : ""}
+        </div>
+      ),
+      image: p ? <ItemThumb product={p} size={28} /> : null,
+    };
+    const rp = rowProps(itemDefs);
+    return (
+      <div key={i} {...rp}>
+        {itemDefs.map((d) => (
+          <BillCell key={d.key} label={d.label} wide={wide} full={d.full}>
+            {cells[d.key]}
+          </BillCell>
+        ))}
+        {deleteBtn(isItemFilled(r), () => removeItemRow(i))}
+      </div>
+    );
+  };
+
+  const renderExpRow = (r, i) => {
+    const a = accounts.find((x) => x.id === r.account_id);
+    const num = " text-right";
+    const cells = {
+      account: (
+        <SearchSelect
+          value={r.account_id}
+          onChange={(v) => setExpRow(i, { account_id: v })}
+          options={accountOptions}
+          placeholder="Select an expense account..."
+          searchPlaceholder="Search accounts..."
+          emptyText="No expense accounts found. Add one on the Acc. tab."
+          wrap
+        />
+      ),
+      accttype: <div className={roCls}>{a ? ACCOUNT_TYPE_NAMES[a.account_type] : ""}</div>,
+      memo: (
+        <input
+          placeholder="Memo"
+          title={r.description}
+          value={r.description}
+          onChange={(e) => setExpRow(i, { description: e.target.value })}
+          className={cellCls}
+        />
+      ),
+      amount: (
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={r.amount}
+          onChange={(e) => setExpRow(i, { amount: e.target.value })}
+          className={cellCls + num}
+        />
+      ),
+    };
+    const rp = rowProps(expDefs);
+    return (
+      <div key={i} {...rp}>
+        {expDefs.map((d) => (
+          <BillCell key={d.key} label={d.label} wide={wide} full={d.full}>
+            {cells[d.key]}
+          </BillCell>
+        ))}
+        {deleteBtn(isExpFilled(r), () => removeExpRow(i))}
+      </div>
+    );
+  };
+
+  const tabBtn = (key, label, cents) => (
+    <button
+      type="button"
+      onClick={() => setTab(key)}
+      className={`px-4 py-1.5 text-sm border border-b-0 rounded-t-lg ${tab === key ? "bg-white font-semibold text-gray-900 -mb-px" : "bg-gray-100 text-gray-500 hover:bg-gray-50"}`}
+    >
+      {label} <span className="ml-1 text-xs">{formatRs(cents / 100)}</span>
+    </button>
+  );
+
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">New Bill</h2>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-2 sm:p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-6xl p-4 sm:p-5 max-h-[96vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">Enter Bill</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            title="Close"
+            className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100"
+          >
+            <X size={18} />
+          </button>
+        </div>
         {error && (
-          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">
             {error}
           </div>
         )}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <FieldLabel
-              action={
-                <button
-                  type="button"
-                  onClick={() => setQuickVendorName("")}
-                  className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+
+        {/* ---------- bill header: vendor / address / terms / memo | date / ref no / amount due / bill due ---------- */}
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] gap-4 bg-blue-50/60 border border-blue-200 rounded-lg p-3 sm:p-4">
+          <div className="space-y-3 min-w-0">
+            <div>
+              <FieldLabel
+                action={
+                  <button
+                    type="button"
+                    onClick={() => setQuickVendorName("")}
+                    className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+                  >
+                    <Plus size={14} /> New vendor
+                  </button>
+                }
+              >
+                Vendor
+              </FieldLabel>
+              <SearchSelect
+                value={vendorId}
+                onChange={setVendorId}
+                options={vendorOptions}
+                placeholder="Select a vendor..."
+                searchPlaceholder="Search vendors..."
+                emptyText="No vendors found. Type a name to create one."
+                onCreateNew={(name) => setQuickVendorName(name)}
+                createLabel="vendor"
+              />
+            </div>
+            <label className="block text-xs text-gray-500">
+              Address
+              <textarea
+                readOnly
+                rows={3}
+                value={vendorInfo}
+                placeholder="Pick a vendor to see the address"
+                className={cls + " mt-1 bg-gray-50 resize-none"}
+              />
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="text-xs text-gray-500">
+                Terms
+                <select
+                  value={terms}
+                  onChange={(e) => {
+                    setTerms(e.target.value);
+                    setDueDate("");
+                  }}
+                  className={cls + " mt-1"}
                 >
-                  <Plus size={14} /> New vendor
-                </button>
-              }
-            >
-              Vendor
-            </FieldLabel>
-            <SearchSelect
-              value={vendorId}
-              onChange={setVendorId}
-              options={vendorOptions}
-              placeholder="Select a vendor..."
-              searchPlaceholder="Search vendors..."
-              emptyText="No vendors found. Type a name to create one."
-              onCreateNew={(name) => setQuickVendorName(name)}
-              createLabel="vendor"
-            />
+                  {Object.keys(INVOICE_TERM_DAYS).map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs text-gray-500">
+                Memo
+                <input
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className={cls + " mt-1"}
+                />
+              </label>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-1 gap-3 content-start">
             <label className="text-xs text-gray-500">
-              Bill date
+              Date
               <input
-                required
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
@@ -18661,34 +19228,22 @@ function PurchaseBillForm({ onClose, onSaved }) {
               />
             </label>
             <label className="text-xs text-gray-500">
-              Vendor's invoice number
+              Ref. No. (vendor's invoice number)
               <input
                 value={vendorRef}
                 onChange={(e) => setVendorRef(e.target.value)}
                 className={cls + " mt-1"}
               />
             </label>
+            <div className="text-xs text-gray-500">
+              Amount Due
+              <p className="mt-1 px-3 py-2 text-base font-semibold text-gray-900 bg-white border border-gray-300 rounded-lg">
+                {formatRs(totalCents / 100)}
+              </p>
+            </div>
             <label className="text-xs text-gray-500">
-              Payment terms
-              <select
-                value={terms}
-                onChange={(e) => {
-                  setTerms(e.target.value);
-                  setDueDate("");
-                }}
-                className={cls + " mt-1"}
-              >
-                {Object.keys(INVOICE_TERM_DAYS).map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs text-gray-500">
-              Due date
+              Bill Due
               <input
-                required
                 type="date"
                 value={effectiveDue}
                 min={date}
@@ -18697,193 +19252,100 @@ function PurchaseBillForm({ onClose, onSaved }) {
               />
             </label>
           </div>
+        </div>
 
-          <div className="space-y-3">
-            <FieldLabel>Lines</FieldLabel>
-            {lines.map((l, i) => {
-              const p = itemById[l.product_id];
-              return (
-                <div
-                  key={i}
-                  className="border border-gray-200 rounded-lg p-3 space-y-2"
-                >
-                  <div className="flex items-start gap-3">
-                    {l.kind === "item" ? (
-                      <ItemThumb product={p} size={56} />
-                    ) : (
-                      <div
-                        style={{ width: 56, height: 56 }}
-                        className="shrink-0 rounded-lg bg-gray-100 flex items-center justify-center text-gray-300"
-                      >
-                        <Receipt size={28} />
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs">
-                          {[
-                            ["item", "Item"],
-                            ["expense", "Expense"],
-                          ].map(([k, label]) => (
-                            <button
-                              key={k}
-                              type="button"
-                              onClick={() =>
-                                l.kind !== k &&
-                                setLine(i, {
-                                  kind: k,
-                                  product_id: "",
-                                  account_id: "",
-                                  description: "",
-                                  rate: "",
-                                })
-                              }
-                              className={`px-3 py-1 ${l.kind === k ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                        {l.kind === "item" && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setConfirmItem({ name: "", lineIndex: i })
-                            }
-                            className="text-xs text-blue-600 font-medium inline-flex items-center gap-1"
-                          >
-                            <Plus size={12} /> New item
-                          </button>
-                        )}
-                      </div>
-                      {l.kind === "item" ? (
-                        <SearchSelect
-                          value={l.product_id}
-                          onChange={(v) => pickItem(i, v)}
-                          options={itemOptions}
-                          placeholder="Select an item..."
-                          searchPlaceholder="Search items..."
-                          emptyText="No items found. Type a name to create one."
-                          onCreateNew={(name) =>
-                            setConfirmItem({ name, lineIndex: i })
-                          }
-                          createLabel="item"
-                        />
-                      ) : (
-                        <SearchSelect
-                          value={l.account_id}
-                          onChange={(v) => setLine(i, { account_id: v })}
-                          options={accountOptions}
-                          placeholder="Select an expense account..."
-                          searchPlaceholder="Search accounts..."
-                          emptyText="No expense accounts found. Add one on the Acc. tab."
-                        />
-                      )}
-                      <input
-                        placeholder="Description (optional)"
-                        value={l.description}
-                        onChange={(e) =>
-                          setLine(i, { description: e.target.value })
-                        }
-                        className={cls}
-                      />
-                    </div>
-                    {lines.length > 1 && (
-                      <button
-                        type="button"
-                        title="Remove line"
-                        onClick={() =>
-                          setLines((prev) => prev.filter((_, idx) => idx !== i))
-                        }
-                        className="shrink-0 border border-gray-300 rounded-lg p-2 text-gray-500 hover:bg-gray-50"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    <label className="text-xs text-gray-500">
-                      Qty
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={l.quantity}
-                        onChange={(e) =>
-                          setLine(i, { quantity: e.target.value })
-                        }
-                        className={cls + " mt-1"}
-                      />
-                    </label>
-                    <label className="text-xs text-gray-500">
-                      Rate
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={l.rate}
-                        onChange={(e) => setLine(i, { rate: e.target.value })}
-                        className={cls + " mt-1"}
-                      />
-                    </label>
-                    <div className="text-xs text-gray-500">
-                      Amount
-                      <p className="mt-1 py-2 text-sm font-medium text-gray-900">
-                        {formatRs(lineCents(l) / 100)}
-                      </p>
-                    </div>
-                  </div>
-
-                  {p &&
-                    p.item_type === STOCK_TRACKED_TYPE &&
-                    Number(l.quantity) > 0 && (
-                      <p className="text-xs text-green-700">
-                        +{Number(l.quantity)} will be added to stock.
-                      </p>
-                    )}
-                </div>
-              );
-            })}
+        {/* ---------- tabs + grid ---------- */}
+        <div className="mt-4 flex items-end justify-between gap-2 flex-wrap">
+          <div className="flex gap-1">
+            {tabBtn("expenses", "Expenses", expTotal)}
+            {tabBtn("items", "Items", itemsTotal)}
+          </div>
+          <div className="flex items-center gap-3 pb-1">
+            {tab === "items" && (
+              <button
+                type="button"
+                onClick={() =>
+                  setConfirmItem({
+                    name: "",
+                    lineIndex: Math.max(
+                      0,
+                      itemRows.findIndex((r) => !isItemFilled(r)),
+                    ),
+                  })
+                }
+                className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+              >
+                <Plus size={14} /> New item
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => setLines((prev) => [...prev, blankBillLine()])}
-              className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+              onClick={() => setColsOpen(tab)}
+              className="text-sm text-gray-600 hover:text-gray-900 inline-flex items-center gap-1"
             >
-              <Plus size={14} /> Add another line
+              <Settings size={14} /> Customize Columns
             </button>
           </div>
+        </div>
 
-          <textarea
-            rows={2}
-            placeholder="Notes"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className={cls}
-          />
+        <div className="border border-gray-300 rounded-b-lg rounded-tr-lg bg-white">
+          {tab === "items" ? (
+            <>
+              {headerRow("items", itemDefs)}
+              {itemRows.map(renderItemRow)}
+            </>
+          ) : (
+            <>
+              {headerRow("expenses", expDefs)}
+              {expRows.map(renderExpRow)}
+            </>
+          )}
+        </div>
 
-          <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-green-700">
+            {stockUnits > 0
+              ? `+${stockUnits} ${stockUnits === 1 ? "unit" : "units"} will be added to stock.`
+              : ""}
+          </p>
+          <div className="bg-gray-50 rounded-lg px-4 py-2 text-sm flex gap-6 font-semibold">
             <span>Total</span>
             <span>{formatRs(totalCents / 100)}</span>
           </div>
+        </div>
 
-          <div className="flex gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!canSave || submitting}
-              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-            >
-              {submitting ? "Saving..." : "Save Bill"}
-            </button>
-          </div>
-        </form>
+        <div className="flex flex-wrap justify-end gap-2 pt-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={resetForm}
+            className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50"
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            disabled={!canSave || submitting}
+            onClick={() => save(true)}
+            className="border border-blue-600 text-blue-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-50 disabled:opacity-50"
+          >
+            Save &amp; New
+          </button>
+          <button
+            type="button"
+            disabled={!canSave || submitting}
+            onClick={() => save(false)}
+            className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+          >
+            {submitting ? "Saving..." : "Save & Close"}
+          </button>
+        </div>
       </div>
 
       {quickVendorName !== null && (
@@ -18909,6 +19371,19 @@ function PurchaseBillForm({ onClose, onSaved }) {
           openingStockFromBill
           onSubmit={handleQuickItem}
           onClose={() => setQuickItem(null)}
+        />
+      )}
+      {colsOpen && (
+        <BillColumnsDialog
+          title={colsOpen === "items" ? "Items" : "Expenses"}
+          defs={BILL_COL_DEFS[colsOpen]}
+          defaults={colsOpen === "items" ? itemColsDefault : expColsDefault}
+          cols={colsOpen === "items" ? itemCols : expCols}
+          onSave={(next) => {
+            (colsOpen === "items" ? saveItemCols : saveExpCols)(next);
+            setColsOpen(null);
+          }}
+          onClose={() => setColsOpen(null)}
         />
       )}
     </div>
