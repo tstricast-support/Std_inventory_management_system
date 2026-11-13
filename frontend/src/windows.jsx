@@ -208,7 +208,6 @@ function FloatWin({ w, n, label, active, z, children, api, patch }) {
   );
 }
 
-// labelFor(URLSearchParams) -> text shown in a window's title bar
 export function MultiWindow({ children, labelFor, toolbar }) {
   const [mainParams, setMainParams] = useRouterSearchParams();
   const mainSetRef = useRef(setMainParams);
@@ -338,7 +337,14 @@ export function MultiWindow({ children, labelFor, toolbar }) {
       openWindow,
       focus,
       closeWindow,
-      closeActive: () => closeWindow(activeRef.current), // window 1 itself stays
+      // a floating window is removed; window 1 can't be removed, so it goes to the blank workspace instead
+      closeActive: () => {
+        if (activeRef.current !== 0) return closeWindow(activeRef.current);
+        const next = new URLSearchParams(mainSearchRef.current);
+        if (next.get("view") !== "blank") mainSetRef.current({ view: "blank" });
+        const top = [...winsRef.current].sort((x, y) => y.z - x.z)[0];
+        if (top) focus(top.id); // QuickBooks: the next window comes to the front
+      },
       duplicate: () =>
         openWindow(
           activeRef.current === 0

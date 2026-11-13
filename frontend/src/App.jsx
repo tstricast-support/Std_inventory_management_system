@@ -19642,14 +19642,14 @@ function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
   const active = useWindowActive(); // only the window you are looking at listens to the keys
   const floating = useWindowFloating();
 
-    useEffect(() => {
-      const track = (e) => {
-        const el = e.target?.closest?.("[data-account-id]");
-        if (el) lastQuickAccount = Number(el.dataset.accountId);
-      };
-      document.addEventListener("click", track, true);
-      return () => document.removeEventListener("click", track, true);
-    }, []);
+  useEffect(() => {
+    const track = (e) => {
+      const el = e.target?.closest?.("[data-account-id]");
+      if (el) lastQuickAccount = Number(el.dataset.accountId);
+    };
+    document.addEventListener("click", track, true);
+    return () => document.removeEventListener("click", track, true);
+  }, []);
 
   useEffect(() => {
     if (!isAdmin || !active) return;
@@ -19704,11 +19704,12 @@ function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
           btn.click();
           return;
         }
-        // QuickBooks: Esc closes the window you are in (floating windows only, never while a dialog is open)
+        // QuickBooks: Esc closes the window you are in - a floating window disappears, and the main
+        // window goes to the blank grey workspace. Never while a dialog is open.
         const dialogOpen = [
           ...document.querySelectorAll(".fixed.inset-0"),
         ].some(isShown);
-        if (floating && wins && !dialogOpen) {
+        if (wins && !dialogOpen) {
           if (typing())
             document.activeElement.blur(); // 1st Esc leaves the field
           else wins.closeActive(); // next Esc closes the window
@@ -20901,7 +20902,10 @@ function ZohoDashboard({ isAdmin, go, onProductAdded }) {
   );
 }
 
-// ONE window: sidebar + page + shortcuts. <MultiWindow> (see AppShell below) renders one copy per open window.
+function BlankWorkspace() {
+  return <div className="min-h-screen bg-[#808080]" />;
+}
+
 function AppWindow() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -20920,6 +20924,15 @@ function AppWindow() {
   const refresh = () => setRefreshToken((n) => n + 1);
   const [quickBillToken, setQuickBillToken] = useState(0);
   const [quickIssuedToken, setQuickIssuedToken] = useState(0);
+  // QuickBooks: the app opens on the blank grey workspace, not on Home.
+  // Only the main window of an admin user, and only when the address has no page in it yet
+  // (a bookmarked / reloaded page like ?view=accounting is left alone). Clicking "Home" later still opens Home.
+  const bootBlank = useRef(!floating && isAdmin && !searchParams.get("view"));
+  useEffect(() => {
+    if (!bootBlank.current) return;
+    bootBlank.current = false;
+    setSearchParams({ view: "blank" }, { replace: true });
+  }, []);
 
   const goNewBill = () => {
     setSearchParams({ view: "bill" });
@@ -20931,7 +20944,10 @@ function AppWindow() {
   };
 
   let page;
-  if (viewBlocked) {
+  if (viewParam === "blank" || (bootBlank.current && !viewParam)) {
+    // QuickBooks: every window closed = empty grey workspace (menu / toolbar stay)
+    page = <BlankWorkspace />;
+  } else if (viewBlocked) {
     page = <NoAccess />;
   } else if (searchParams.get("view") === "bill" && isAdmin) {
     page = <BillPage go={setSearchParams} autoCreateToken={quickBillToken} />;
