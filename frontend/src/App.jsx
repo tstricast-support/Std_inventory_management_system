@@ -4436,11 +4436,72 @@ const APP_SIZES = [
   ["normal", "Normal"],
   ["large", "Large"],
 ];
+// QuickBooks-style colour schemes: one click sets the sidebar, accent AND tints the whole page.
+// page = the four greys the app uses: [page background, soft panels, borders, stronger borders]
+const APP_SCHEMES = [
+  {
+    id: "classic",
+    name: "Classic",
+    accent: "green",
+    sidebar: "ocean",
+    page: ["#dfe7ef", "#e8eef5", "#c9d4e0", "#b3c1d1"],
+  },
+  {
+    id: "green",
+    name: "Green",
+    accent: "green",
+    sidebar: "forest",
+    page: ["#e3efe6", "#ecf5ee", "#c7dccc", "#aec9b5"],
+  },
+  {
+    id: "teal",
+    name: "Teal",
+    accent: "teal",
+    sidebar: "teal",
+    page: ["#dcecec", "#e6f2f2", "#bfdada", "#a6c9c9"],
+  },
+  {
+    id: "indigo",
+    name: "Indigo",
+    accent: "indigo",
+    sidebar: "indigo",
+    page: ["#e3e6f3", "#ebeef8", "#c8cee6", "#b0b8d8"],
+  },
+  {
+    id: "purple",
+    name: "Purple",
+    accent: "purple",
+    sidebar: "purple",
+    page: ["#e9e3f2", "#f0ebf7", "#d3c8e4", "#bfb0d6"],
+  },
+  {
+    id: "rose",
+    name: "Rose",
+    accent: "rose",
+    sidebar: "maroon",
+    page: ["#f2e3e5", "#f7ebed", "#e2c7cb", "#d3adb3"],
+  },
+  {
+    id: "sand",
+    name: "Sand",
+    accent: "orange",
+    sidebar: "brown",
+    page: ["#f2e8dc", "#f7efe6", "#e3d2bd", "#d3bda0"],
+  },
+  {
+    id: "grey",
+    name: "Grey",
+    accent: "slate",
+    sidebar: "slate",
+    page: ["#e5e7ea", "#edeff1", "#cdd1d6", "#b8bec6"],
+  },
+];
 const APP_THEME_DEFAULT = {
   theme: "light",
   accent: "blue",
   size: "normal",
   sidebar: "auto",
+  tint: null, // id of the colour scheme that tints the page (null = no tint)
 };
 
 function loadAppTheme(companyId) {
@@ -4462,6 +4523,7 @@ function loadAppTheme(companyId) {
         sidebar: APP_SIDEBARS.some((x) => x.id === s.sidebar)
           ? s.sidebar
           : APP_THEME_DEFAULT.sidebar,
+        tint: APP_SCHEMES.some((x) => x.id === s.tint) ? s.tint : null,
       };
     }
   } catch (e) {
@@ -4478,6 +4540,21 @@ function applyAppTheme(s) {
   const sb = APP_SIDEBARS.find((x) => x.id === s.sidebar);
   if (sb && sb.color) el.style.setProperty("--sidebar-bg", sb.color);
   else el.style.removeProperty("--sidebar-bg"); // "auto" → theme default from index.css
+  // colour scheme: tint the page greys (never on the Dark theme)
+  const greys = [
+    "--color-gray-50",
+    "--color-gray-100",
+    "--color-gray-200",
+    "--color-gray-300",
+  ];
+  const scheme = APP_SCHEMES.find((x) => x.id === s.tint);
+  if (scheme && s.theme !== "dark") {
+    greys.forEach((v, i) => el.style.setProperty(v, scheme.page[i]));
+    el.style.setProperty("--page-bg", scheme.page[0]);
+  } else {
+    greys.forEach((v) => el.style.removeProperty(v));
+    el.style.removeProperty("--page-bg");
+  }
 }
 applyAppTheme(loadAppTheme(localStorage.getItem(APP_THEME_LAST_KEY))); // runs once when the app loads, before the first screen is drawn
 
@@ -4548,7 +4625,9 @@ function ThemePanel() {
               <button
                 key={t.id}
                 type="button"
-                onClick={() => change({ theme: t.id, accent: t.accent })}
+                onClick={() =>
+                  change({ theme: t.id, accent: t.accent, tint: null })
+                }
                 className={`w-full flex items-center gap-3 border rounded-lg px-3 py-2.5 text-left ${
                   s.theme === t.id
                     ? "border-blue-600 ring-1 ring-blue-600"
@@ -4571,6 +4650,65 @@ function ThemePanel() {
                 {s.theme === t.id && <span className="text-blue-600">✓</span>}
               </button>
             ))}
+          </div>
+        </section>
+
+        <section>
+          <h3 className={label}>Colour scheme</h3>
+          <div className="grid grid-cols-4 gap-2">
+            {APP_SCHEMES.map((x) => {
+              const on =
+                s.tint === x.id &&
+                s.theme === "quickbooks" &&
+                s.accent === x.accent &&
+                s.sidebar === x.sidebar;
+              const sidebarColor = APP_SIDEBARS.find(
+                (b) => b.id === x.sidebar,
+              )?.color;
+              const accentColor = APP_ACCENTS.find(
+                (a) => a.id === x.accent,
+              )?.color;
+              return (
+                <button
+                  key={x.id}
+                  type="button"
+                  title={x.name}
+                  aria-label={`${x.name} colour scheme`}
+                  onClick={() =>
+                    change({
+                      theme: "quickbooks",
+                      accent: x.accent,
+                      sidebar: x.sidebar,
+                      tint: x.id,
+                    })
+                  }
+                  className={`rounded-md border p-1 text-center ${
+                    on
+                      ? "border-blue-600 ring-2 ring-blue-600"
+                      : "border-gray-300 hover:bg-gray-50"
+                  }`}
+                >
+                  <span
+                    className="flex h-9 rounded overflow-hidden border border-gray-300"
+                    style={{ background: x.page[0] }}
+                  >
+                    <span
+                      className="w-3"
+                      style={{ background: sidebarColor }}
+                    />
+                    <span className="flex-1 flex items-end justify-end p-1">
+                      <span
+                        className="w-3 h-3 rounded-full"
+                        style={{ background: accentColor }}
+                      />
+                    </span>
+                  </span>
+                  <span className="block text-[11px] mt-1 text-gray-600">
+                    {x.name}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </section>
 

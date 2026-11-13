@@ -235,6 +235,11 @@ html[data-theme="quickbooks"] body {
   background: #dfe7ef;
 }
 
+/* page tint chosen from "Colour scheme" (applyAppTheme sets --page-bg) */
+html[style*="--page-bg"] body {
+  background: var(--page-bg);
+}
+
 
 
 /* ---------- SIDEBAR colour: theme default, overridden by the "Sidebar colour" picker ---------- */
