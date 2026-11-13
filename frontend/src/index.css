@@ -1,8 +1,16 @@
 @import "tailwindcss";
 
-html, body {
-  overscroll-behavior-y: contain; /* stops the rubber-band pull-to-refresh bounce */
-  -webkit-tap-highlight-color: transparent; /* removes gray flash on tap on iOS */
+html,
+body {
+  overscroll-behavior-y: contain;
+  /* stops the rubber-band pull-to-refresh bounce */
+  -webkit-tap-highlight-color: transparent;
+  /* removes gray flash on tap on iOS */
+}
+
+/* the built-in Dark theme sets color-scheme: dark itself, so this only stops browsers from forcing dark on Light / QuickBooks */
+html {
+  color-scheme: light;
 }
 
 body {
