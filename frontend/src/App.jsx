@@ -1246,7 +1246,10 @@ async function deleteAccount(id) {
   const res = await apiFetch(`${BASE_URL}/accounts/${id}`, {
     method: "DELETE",
   });
-  if (!res.ok) throw new Error("Failed to delete account");
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || "Failed to delete account");
+  }
   return res.json();
 }
 
@@ -11444,8 +11447,8 @@ function CustomerForm({ initialData, onClose, onSubmit }) {
 // key = account_type stored in the database (must match backend/app/account_types.py)
 // cogs / income / asset are the original item-linked types; the rest are the new Zoho-style types.
 const ACCOUNT_TYPES = [
-  { key: "cash", label: "Cash Accounts", name: "Cash account", group: "Asset" },
   { key: "bank", label: "Bank Accounts", name: "Bank account", group: "Asset" },
+  { key: "cash", label: "Cash Accounts", name: "Cash account", group: "Asset" },
   {
     key: "accounts_receivable",
     label: "Accounts Receivable",
@@ -11502,12 +11505,6 @@ const ACCOUNT_TYPES = [
     group: "Income",
   },
   {
-    key: "other_income",
-    label: "Other Income",
-    name: "Other income",
-    group: "Income",
-  },
-  {
     key: "cogs",
     label: "Cost of Goods Sold (COGS) Accounts",
     name: "COGS account",
@@ -11520,18 +11517,37 @@ const ACCOUNT_TYPES = [
     group: "Expense",
   },
   {
+    key: "other_income",
+    label: "Other Income",
+    name: "Other income",
+    group: "Income",
+  },
+  {
     key: "other_expense",
     label: "Other Expenses",
     name: "Other expense",
     group: "Expense",
   },
 ];
+
+const ACCOUNT_TYPE_ORDER = Object.fromEntries(
+  ACCOUNT_TYPES.map((t, i) => [t.key, i]),
+);
+
 const ACCOUNT_GROUPS = ["Asset", "Liability", "Equity", "Income", "Expense"];
 const ACCOUNT_GROUP_OF = Object.fromEntries(
   ACCOUNT_TYPES.map((t) => [t.key, t.group]),
 );
 // only these three can be picked on an item (Items form); they show stock value instead of ledger balance
 const ITEM_LINKED_TYPES = new Set(["cogs", "income", "asset"]);
+
+const BLANK_BALANCE_GROUPS = new Set(["Income", "Expense"]);
+function accountShowsBalance(a) {
+  const group = ACCOUNT_GROUP_OF[a.account_type];
+  if (BLANK_BALANCE_GROUPS.has(group)) return false;
+  if (group === "Equity") return Number(a.ledger_balance || 0) !== 0; // always blank? -> return false;
+  return true; // Asset / Liability always show, even 0.00
+}
 
 const formatRs = (n) =>
   `Rs.${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -11583,8 +11599,6 @@ function TypedDeleteConfirm({ label, onConfirm, onCancel }) {
     </div>
   );
 }
-// ---------- Account detail: total value + the items behind it ----------
-//   /?view=accounting&account=3
 function AccountDetail({ accountId, go, fromParam }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -11622,6 +11636,25 @@ function AccountDetail({ accountId, go, fromParam }) {
       alert(err.message);
     }
   };
+
+  // QuickBooks: Ctrl+D deletes the account being viewed
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "d") return;
+      const el = document.activeElement;
+      if (
+        el &&
+        (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) ||
+          el.isContentEditable)
+      )
+        return;
+      e.preventDefault();
+      if (data && !showEditForm && !showDeleteConfirm)
+        setShowDeleteConfirm(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [data, showEditForm, showDeleteConfirm]);
 
   const basisLabel = data?.value_basis === "price" ? "sales price" : "cost";
   const itemLinked = data ? ITEM_LINKED_TYPES.has(data.account_type) : false;
@@ -11963,8 +11996,10 @@ function AccountingPage({ isAdmin, go }) {
   const [search, setSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [sort, setSort] = useState({ key: "name", dir: "asc" });
+  // QuickBooks order: by account type (ACCOUNT_TYPES order), then by name
+  const [sort, setSort] = useState({ key: "type", dir: "asc" });
   const [selectedId, setSelectedId] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const load = async () => {
     try {
@@ -11980,6 +12015,38 @@ function AccountingPage({ isAdmin, go }) {
   useEffect(() => {
     load();
   }, []);
+
+  // QuickBooks: select an account, press Ctrl+D to delete it
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "d") return;
+      const el = document.activeElement;
+      if (
+        el &&
+        (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) ||
+          el.isContentEditable)
+      )
+        return;
+      e.preventDefault(); // stops the browser's "bookmark this page"
+      if (deleteTarget || formOpen || panelOpen) return;
+      const a = accounts.find((x) => x.id === selectedId);
+      if (a) setDeleteTarget(a);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [accounts, selectedId, deleteTarget, formOpen, panelOpen]);
+
+  const handleDeleteAccount = async () => {
+    try {
+      await deleteAccount(deleteTarget.id);
+      setSelectedId(null);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setDeleteTarget(null);
+    }
+  };
 
   const balanceOf = (a) =>
     ITEM_LINKED_TYPES.has(a.account_type) ? a.total_value : a.ledger_balance;
@@ -11997,7 +12064,7 @@ function AccountingPage({ isAdmin, go }) {
   const sortVal = (key, a) => {
     if (key === "balance") return Number(balanceOf(a) || 0);
     if (key === "items") return Number(a.item_count || 0);
-    if (key === "type") return ACCOUNT_TYPE_NAMES[a.account_type] || "";
+    if (key === "type") return ACCOUNT_TYPE_ORDER[a.account_type] ?? 99;
     if (key === "code") return a.account_code || "";
     if (key === "description") return a.description || "";
     return a.name || "";
@@ -12022,7 +12089,7 @@ function AccountingPage({ isAdmin, go }) {
       const y = sortVal(sort.key, b);
       const r =
         typeof x === "number"
-          ? x - y
+          ? x - y || compareNames(a.name, b.name)
           : compareNames(x, y) || compareNames(a.name, b.name);
       return sort.dir === "asc" ? r : -r;
     });
@@ -12068,6 +12135,7 @@ function AccountingPage({ isAdmin, go }) {
       case "description":
         return <span className={sub}>{a.description || ""}</span>;
       case "balance":
+        if (!accountShowsBalance(a)) return "";
         return (
           <>
             {formatRs(balanceOf(a))}
@@ -12177,7 +12245,7 @@ function AccountingPage({ isAdmin, go }) {
                     {g}
                   </span>
                   <span className="block text-lg font-semibold leading-tight">
-                    {formatRs(total)}
+                    {BLANK_BALANCE_GROUPS.has(g) ? "" : formatRs(total)}
                   </span>
                   <span className="block text-[10px] uppercase opacity-90">
                     {count} account{count === 1 ? "" : "s"}
@@ -12283,7 +12351,9 @@ function AccountingPage({ isAdmin, go }) {
                               {a.name}
                             </span>
                             <span className="font-semibold shrink-0">
-                              {formatRs(balanceOf(a))}
+                              {accountShowsBalance(a)
+                                ? formatRs(balanceOf(a))
+                                : ""}
                             </span>
                           </span>
                           <span
@@ -12355,12 +12425,16 @@ function AccountingPage({ isAdmin, go }) {
                               {s.title} ({s.list.length})
                             </span>
                             <span>
-                              {formatRs(
-                                s.list.reduce(
-                                  (sum, a) => sum + Number(balanceOf(a) || 0),
-                                  0,
-                                ),
-                              )}
+                              {s.list.some(accountShowsBalance) &&
+                                formatRs(
+                                  s.list
+                                    .filter(accountShowsBalance)
+                                    .reduce(
+                                      (sum, a) =>
+                                        sum + Number(balanceOf(a) || 0),
+                                      0,
+                                    ),
+                                )}
                             </span>
                           </span>
                         </td>
@@ -12582,9 +12656,19 @@ function AccountingPage({ isAdmin, go }) {
           }}
         />
       )}
+
+      {deleteTarget && (
+        <TypedDeleteConfirm
+          label={deleteTarget.name}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDeleteAccount}
+        />
+      )}
     </div>
   );
 }
+
+
 
 function AccountForm({ initialData, onClose, onSubmit }) {
   const isEditMode = Boolean(initialData);

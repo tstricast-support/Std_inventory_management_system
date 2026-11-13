@@ -32,8 +32,9 @@ DEBIT_NORMAL = {"Asset", "Expense"}
 DEFAULT_ACCOUNTS = [
     ("Accounts Receivable", "accounts_receivable"),
     ("Accounts Payable", "accounts_payable"),
-    ("Petty Cash", "cash"),
-    ("Undeposited Funds", "other_current_asset"),
     ("Opening Balance Offset", "equity"),
     ("Retained Earnings", "equity"),
+    ("Sales", "income"),                  # item-linked income
+    ("Cost of Goods Sold", "cogs"),       # item-linked COGS
+    ("Inventory Asset", "asset"),         # item-linked inventory asset
 ]

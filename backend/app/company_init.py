@@ -81,10 +81,8 @@ def _column_upgrades(conn, S: str) -> None:
 
 
 def _seed_default_accounts(conn, S: str) -> None:
-    """Zoho-style default accounts, added once (same rule as before)."""
-    has_new_types = conn.execute(text(
-        f"SELECT 1 FROM {S}.accounts WHERE account_type NOT IN ('cogs', 'income', 'asset') LIMIT 1")).first()
-    if has_new_types:
+    """QuickBooks-style starter chart: only the basic accounts, and only for a company with no accounts yet."""
+    if conn.execute(text(f"SELECT 1 FROM {S}.accounts LIMIT 1")).first():
         return
     for name, account_type in DEFAULT_ACCOUNTS:
         conn.execute(text(f"INSERT INTO {S}.accounts (name, account_type) VALUES (:n, :t)"),
@@ -114,7 +112,6 @@ def init_company_schema(schema: str, conn=None) -> None:
     conn.execution_options(schema_translate_map=None)   # the caller's connection must not keep the routing
     _column_upgrades(conn, S)
     _seed_default_accounts(conn, S)
-    _seed_tax_accounts(conn, S)
 
 
 # ---------------------------------------------------------------------------------------------

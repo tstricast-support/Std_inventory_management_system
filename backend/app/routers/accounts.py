@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
+from sqlalchemy import func,or_
 from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..account_types import ACCOUNT_CATEGORY, DEBIT_NORMAL
@@ -181,9 +181,15 @@ def delete_account(account_id: int, db: Session = Depends(get_db)):
     if not account:
         raise HTTPException(404, "Account not found")
     if db.query(models.JournalLine).filter(models.JournalLine.account_id == account_id).first():
-        raise HTTPException(400, "This account has journal entries, so it can't be deleted")
+        raise HTTPException(400, "This account has transactions, so it can't be deleted")
     if db.query(models.Account).filter(models.Account.parent_id == account_id).first():
         raise HTTPException(400, "This account has sub-accounts. Move or delete them first")
+    if db.query(models.Product).filter(or_(
+        models.Product.cogs_account_id == account_id,
+        models.Product.income_account_id == account_id,
+        models.Product.asset_account_id == account_id,
+    )).first():
+        raise HTTPException(400, "Items are linked to this account. Change those items to another account first")
     db.delete(account)
     db.commit()
     return {"message": "Deleted"}
