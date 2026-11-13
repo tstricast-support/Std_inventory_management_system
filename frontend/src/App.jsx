@@ -2740,6 +2740,7 @@ function AccountSetupModal({
   accountType,
   initialName,
   parents = [],
+  onCreateParent, // creates a brand-new parent account from the typed name
   onSave,
   onClose,
 }) {
@@ -2758,16 +2759,25 @@ function AccountSetupModal({
 
   const save = async () => {
     if (!name.trim()) return setError("Account name is required");
-    let parentId = null;
-    if (isSub) {
-      const q = parentText.trim().toLowerCase();
-      const match = parents.find((a) => a.name.trim().toLowerCase() === q);
-      if (!match) return setError("Pick the parent account from the list");
-      parentId = match.id;
-    }
+    if (isSub && !parentText.trim())
+      return setError("Type or pick the parent account");
+    if (isSub && parentText.trim().toLowerCase() === name.trim().toLowerCase())
+      return setError("An account can't be a sub-account of itself");
     setSaving(true);
     setError(null);
     try {
+      let parentId = null;
+      if (isSub) {
+        const q = parentText.trim().toLowerCase();
+        const match = parents.find((a) => a.name.trim().toLowerCase() === q);
+        if (match) {
+          parentId = match.id;
+        } else {
+          // not in the list -> create it first (same account type), then use it as the parent
+          const createdParent = await onCreateParent(parentText.trim());
+          parentId = createdParent.id;
+        }
+      }
       await onSave({
         name: name.trim(),
         account_code: code.trim() || null,
@@ -2839,6 +2849,18 @@ function AccountSetupModal({
                 <option key={a.id} value={a.name} />
               ))}
             </datalist>
+            {isSub &&
+              parentText.trim() &&
+              !parents.some(
+                (a) =>
+                  a.name.trim().toLowerCase() ===
+                  parentText.trim().toLowerCase(),
+              ) && (
+                <p className="text-xs text-blue-600 mt-1">
+                  "{parentText.trim()}" doesn't exist yet - it will be created
+                  as a new parent account.
+                </p>
+              )}
           </div>
           <div>
             <label className="block text-xs text-gray-600 mb-0.5">
@@ -2884,7 +2906,6 @@ function AccountSetupModal({
   );
 }
 
-// ---------- AccountSelect (COGS / Income / Asset box) ----------
 function AccountSelect({
   accounts,
   accountType,
@@ -2917,6 +2938,13 @@ function AccountSelect({
           accountType={accountType}
           initialName={setupName}
           parents={sameType}
+          onCreateParent={(parentName) =>
+            onCreateAccount(parentName, accountType, {
+              account_code: null,
+              description: null,
+              parent_id: null,
+            })
+          }
           onClose={() => setSetupName(null)}
           onSave={async (extra) => {
             const created = await onCreateAccount(
