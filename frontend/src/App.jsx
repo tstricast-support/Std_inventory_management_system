@@ -7136,19 +7136,46 @@ function TaxForm({ initialData, onClose, onSubmit }) {
   );
 }
 
-// ---------- Step 9: Reports (admin only): Profit & Loss, Balance Sheet, Receivables / Payables Ageing ----------
+
 const localIso = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-const REPORT_TABS = [
-  ["daily", "Daily Sales & Collection"],
-  ["pl", "Profit & Loss"],
-  ["sales", "Sales Summary"],
-  ["bs", "Balance Sheet"],
-  ["ar", "Receivables Ageing"],
-  ["ap", "Payables Ageing"],
-  ["graphs", "Graphs"],
+// Reports are grouped so the menu stays tidy as more reports are added.
+const REPORT_GROUPS = [
+  {
+    title: "Financial",
+    items: [
+      ["pl", "Profit & Loss"],
+      ["bs", "Balance Sheet"],
+      ["cf", "Cash Flow"],
+      ["tb", "Trial Balance"],
+      ["gl", "General Ledger"],
+    ],
+  },
+  {
+    title: "Sales",
+    items: [
+      ["daily", "Daily Sales & Collection"],
+      ["sales", "Sales Summary"],
+      ["sbc", "Sales by Customer"],
+      ["sbi", "Sales by Item"],
+      ["graphs", "Graphs"],
+    ],
+  },
+  {
+    title: "Customers & Vendors",
+    items: [
+      ["ar", "Receivables Ageing"],
+      ["ap", "Payables Ageing"],
+      ["ebv", "Expenses by Vendor"],
+    ],
+  },
+  {
+    title: "Inventory",
+    items: [["inv", "Inventory Valuation"]],
+  },
 ];
+const REPORT_TABS = REPORT_GROUPS.flatMap((g) => g.items);
 
 function ReportsPage({ isAdmin, go }) {
   const [report, setReport] = useState("daily");
@@ -7159,30 +7186,78 @@ function ReportsPage({ isAdmin, go }) {
         active="reports"
         onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
       />
-      <main className="p-4 sm:p-6 w-full max-w-5xl">
+      <main className="p-4 sm:p-6 w-full max-w-7xl">
         <h1 className="text-xl font-bold text-gray-900 mb-3">Reports</h1>
-        <div className="flex flex-wrap gap-2 mb-5">
-          {REPORT_TABS.map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setReport(key)}
-              className={`px-3 py-1.5 rounded-full text-sm font-medium border ${
-                report === key
-                  ? "bg-blue-600 text-white border-blue-600"
-                  : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
-              }`}
+        <div className="lg:flex lg:items-start lg:gap-6">
+          {/* phone / tablet: one tidy dropdown */}
+          <div className="lg:hidden mb-4">
+            <label className="block text-xs font-medium text-gray-500 mb-1">
+              Choose a report
+            </label>
+            <select
+              value={report}
+              onChange={(e) => setReport(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg bg-white px-3 py-2.5 text-base font-medium text-gray-900"
             >
-              {label}
-            </button>
-          ))}
+              {REPORT_GROUPS.map((g) => (
+                <optgroup key={g.title} label={g.title}>
+                  {g.items.map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+
+          {/* desktop: grouped side menu */}
+          <nav
+            aria-label="Reports"
+            className="hidden lg:block w-60 shrink-0 sticky top-4 bg-white border border-gray-200 rounded-xl p-2"
+          >
+            {REPORT_GROUPS.map((g, i) => (
+              <div key={g.title} className={i > 0 ? "mt-3" : ""}>
+                <p className="px-3 pt-1 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+                  {g.title}
+                </p>
+                {g.items.map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setReport(key)}
+                    aria-current={report === key ? "page" : undefined}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-sm border-l-4 ${
+                      report === key
+                        ? "bg-blue-50 text-blue-700 font-semibold border-blue-600"
+                        : "text-gray-600 hover:bg-gray-50 border-transparent"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </nav>
+
+          {/* the report itself (min-w-0 lets wide tables scroll inside instead of stretching the page) */}
+          <section className="min-w-0 flex-1">
+            {report === "daily" && <DailySalesReport />}
+            {report === "pl" && <ProfitLossReport />}
+            {report === "sales" && <SalesSummaryReport />}
+            {report === "bs" && <BalanceSheetReport />}
+            {report === "ar" && <AgeingReport key="ar" kind="receivables" />}
+            {report === "ap" && <AgeingReport key="ap" kind="payables" />}
+            {report === "graphs" && <SalesGraphsReport />}
+            {report === "cf" && <CashFlowReport />}
+            {report === "tb" && <TrialBalanceReport />}
+            {report === "gl" && <GeneralLedgerReport />}
+            {report === "sbc" && <SalesByCustomerReport />}
+            {report === "sbi" && <SalesByItemReport />}
+            {report === "inv" && <InventoryValuationReport />}
+            {report === "ebv" && <ExpensesByVendorReport />}
+          </section>
         </div>
-        {report === "daily" && <DailySalesReport />}
-        {report === "pl" && <ProfitLossReport />}
-        {report === "sales" && <SalesSummaryReport />}
-        {report === "bs" && <BalanceSheetReport />}
-        {report === "ar" && <AgeingReport key="ar" kind="receivables" />}
-        {report === "ap" && <AgeingReport key="ap" kind="payables" />}
-        {report === "graphs" && <SalesGraphsReport />}
       </main>
     </div>
   );
@@ -9926,6 +10001,1166 @@ function AgeingReport({ kind }) {
         </>
       )}
     </ReportBody>
+  );
+}
+
+// ======================================================================================================
+// ACCOUNTING REPORTS: Trial Balance, General Ledger, Cash Flow, Sales by Customer, Sales by Item,
+// Inventory Valuation, Expenses by Vendor.  (All read-only; the numbers come from /api/reports/...)
+// ======================================================================================================
+const getTrialBalanceReport = (from, to, showZero) =>
+  reportRequest(
+    `trial-balance?date_to=${to}&show_zero=${showZero}${from ? `&date_from=${from}` : ""}`,
+    "Failed to load the Trial Balance",
+  );
+const getGeneralLedger = (from, to) =>
+  reportRequest(
+    `general-ledger?date_from=${from}&date_to=${to}`,
+    "Failed to load the General Ledger",
+  );
+const getCashFlow = (from, to) =>
+  reportRequest(
+    `cash-flow?date_from=${from}&date_to=${to}`,
+    "Failed to load the Cash Flow",
+  );
+const getSalesByCustomer = (from, to) =>
+  reportRequest(
+    `sales-by-customer?date_from=${from}&date_to=${to}`,
+    "Failed to load Sales by Customer",
+  );
+const getSalesByItem = (from, to) =>
+  reportRequest(
+    `sales-by-item?date_from=${from}&date_to=${to}`,
+    "Failed to load Sales by Item",
+  );
+const getInventoryValuation = (showZero) =>
+  reportRequest(
+    `inventory-valuation?show_zero=${showZero}`,
+    "Failed to load the Inventory Valuation",
+  );
+const getExpensesByVendor = (from, to) =>
+  reportRequest(
+    `expenses-by-vendor?date_from=${from}&date_to=${to}`,
+    "Failed to load Expenses by Vendor",
+  );
+
+// ----- shared bits -----
+const rptTh = "px-3 py-2 font-medium text-gray-500 whitespace-nowrap";
+const rptTd = "px-3 py-2 whitespace-nowrap tabular-nums text-right";
+const rptBtn =
+  "flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50";
+
+function downloadReportCsv(filename, rows) {
+  const esc = (v) => {
+    let s = String(v ?? "");
+    if (/^[=+\-@]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = `'${s}`; // stop Excel running text as a formula
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+  const blob = new Blob(
+    ["﻿" + rows.map((r) => r.map(esc).join(",")).join("\r\n")],
+    { type: "text/csv;charset=utf-8" },
+  );
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function ReportHeading({ title, sub, onCsv, csvDisabled }) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+      <div>
+        <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+        {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+      </div>
+      {onCsv && (
+        <button
+          type="button"
+          onClick={onCsv}
+          disabled={csvDisabled}
+          className={rptBtn}
+        >
+          <Download size={14} /> CSV
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ReportNotice({ tone = "warn", children }) {
+  const cls =
+    tone === "good"
+      ? "text-green-700 bg-green-50 border-green-200"
+      : tone === "bad"
+        ? "text-red-700 bg-red-50 border-red-200"
+        : "text-amber-700 bg-amber-50 border-amber-200";
+  return (
+    <p className={`text-sm border rounded-lg px-3 py-2 mb-3 ${cls}`}>
+      {children}
+    </p>
+  );
+}
+
+const rptRange = (from, to) =>
+  `${formatJournalDate(from)} to ${formatJournalDate(to)}`;
+
+// ---------- Trial Balance ----------
+function TrialBalanceReport() {
+  const [asOf, setAsOf] = useState(localIso());
+  const [from, setFrom] = useState(""); // optional: show opening balance + movement of a period
+  const [showZero, setShowZero] = useState(false);
+  const [quick, setQuick] = useState(null); // account whose entries are open
+  const { data, loading, error } = useReport(
+    () => getTrialBalanceReport(from, asOf, showZero),
+    [from, asOf, showZero],
+  );
+
+  const exportCsv = () => {
+    if (!data) return;
+    const head = ["Account"];
+    if (data.has_period)
+      head.push("Opening", "Period debit", "Period credit");
+    head.push("Debit", "Credit");
+    const rows = [["Trial Balance"], [`As of ${asOf}`], [], head];
+    data.groups.forEach((g) => {
+      rows.push([g.category.toUpperCase()]);
+      g.rows.forEach((r) => {
+        const line = [`${r.account_code ? r.account_code + " " : ""}${r.name}`];
+        if (data.has_period)
+          line.push(
+            r.opening.toFixed(2),
+            r.period_debit.toFixed(2),
+            r.period_credit.toFixed(2),
+          );
+        line.push(r.debit.toFixed(2), r.credit.toFixed(2));
+        rows.push(line);
+      });
+    });
+    const total = ["TOTAL"];
+    if (data.has_period)
+      total.push(
+        "",
+        data.period_debit.toFixed(2),
+        data.period_credit.toFixed(2),
+      );
+    total.push(data.total_debit.toFixed(2), data.total_credit.toFixed(2));
+    rows.push(total);
+    downloadReportCsv(`trial-balance_${asOf}.csv`, rows);
+  };
+
+  const cols = data?.has_period ? 6 : 3;
+  return (
+    <>
+      <div className="flex flex-wrap items-end gap-3 mb-4 max-w-xl">
+        <label className="text-xs text-gray-500 flex-1 min-w-[140px]">
+          As of
+          <input
+            type="date"
+            value={asOf}
+            min={from || undefined}
+            onChange={(e) => e.target.value && setAsOf(e.target.value)}
+            className={dateInputCls}
+          />
+        </label>
+        <label className="text-xs text-gray-500 flex-1 min-w-[140px]">
+          Period from (optional)
+          <input
+            type="date"
+            value={from}
+            max={asOf}
+            onChange={(e) => setFrom(e.target.value)}
+            className={dateInputCls}
+          />
+        </label>
+        {from && (
+          <button
+            type="button"
+            onClick={() => setFrom("")}
+            className="text-sm text-blue-700 underline pb-2"
+          >
+            Clear
+          </button>
+        )}
+        <label className="flex items-center gap-2 text-sm text-gray-600 pb-2">
+          <input
+            type="checkbox"
+            checked={showZero}
+            onChange={(e) => setShowZero(e.target.checked)}
+          />
+          Show zero accounts
+        </label>
+      </div>
+
+      <ReportBody loading={loading} error={error} data={data}>
+        {data && (
+          <>
+            <ReportHeading
+              title="Trial Balance"
+              sub={
+                data.has_period
+                  ? `Opening balance, movement from ${formatJournalDate(data.date_from)} and closing balance as of ${formatJournalDate(data.date_to)}`
+                  : `Balance of every account as of ${formatJournalDate(data.date_to)}`
+              }
+              onCsv={exportCsv}
+            />
+            {data.balanced ? (
+              <ReportNotice tone="good">
+                Debits equal credits ({formatRs(data.total_debit)}).
+              </ReportNotice>
+            ) : (
+              <ReportNotice tone="bad">
+                Out of balance by {formatRs(Math.abs(data.difference))}. Total
+                debits {formatRs(data.total_debit)} vs total credits{" "}
+                {formatRs(data.total_credit)}.
+              </ReportNotice>
+            )}
+            {data.groups.length === 0 ? (
+              <p className="text-gray-400 text-center py-16">
+                No entries up to this date.
+              </p>
+            ) : (
+              <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+                <table className="w-full text-sm min-w-[560px]">
+                  <thead className="bg-gray-50 text-xs">
+                    <tr>
+                      <th className={`${rptTh} text-left`}>Account</th>
+                      {data.has_period && (
+                        <>
+                          <th className={`${rptTh} text-right`}>
+                            Opening Dr / (Cr)
+                          </th>
+                          <th className={`${rptTh} text-right`}>Period debit</th>
+                          <th className={`${rptTh} text-right`}>
+                            Period credit
+                          </th>
+                        </>
+                      )}
+                      <th className={`${rptTh} text-right`}>Debit</th>
+                      <th className={`${rptTh} text-right`}>Credit</th>
+                    </tr>
+                  </thead>
+                  {data.groups.map((g) => (
+                    <tbody key={g.category} className="border-t border-gray-100">
+                      <tr className="bg-gray-50">
+                        <td
+                          colSpan={cols}
+                          className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500"
+                        >
+                          {g.category}
+                        </td>
+                      </tr>
+                      {g.rows.map((r) => (
+                        <tr key={r.id} className="border-t border-gray-50">
+                          <td className="px-3 py-2 text-gray-900">
+                            {r.account_code && (
+                              <span className="text-gray-400 mr-1">
+                                {r.account_code}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setQuick(r.id)}
+                              className="text-blue-700 hover:underline text-left"
+                            >
+                              {r.name}
+                            </button>
+                          </td>
+                          {data.has_period && (
+                            <>
+                              <td className={rptTd}>{plNum(r.opening)}</td>
+                              <td className={rptTd}>{plNum(r.period_debit)}</td>
+                              <td className={rptTd}>{plNum(r.period_credit)}</td>
+                            </>
+                          )}
+                          <td className={rptTd}>{plNum(r.debit)}</td>
+                          <td className={rptTd}>{plNum(r.credit)}</td>
+                        </tr>
+                      ))}
+                      <tr className="text-xs text-gray-500">
+                        <td
+                          className="px-3 py-1.5 text-right"
+                          colSpan={data.has_period ? 4 : 1}
+                        >
+                          Total {g.category}
+                        </td>
+                        <td className={`${rptTd} py-1.5`}>{plNum(g.debit)}</td>
+                        <td className={`${rptTd} py-1.5`}>{plNum(g.credit)}</td>
+                      </tr>
+                    </tbody>
+                  ))}
+                  <tfoot className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
+                    <tr>
+                      <td className="px-3 py-2">TOTAL</td>
+                      {data.has_period && (
+                        <>
+                          <td />
+                          <td className={rptTd}>{plNum(data.period_debit)}</td>
+                          <td className={rptTd}>{plNum(data.period_credit)}</td>
+                        </>
+                      )}
+                      <td className={rptTd}>{plNum(data.total_debit)}</td>
+                      <td className={rptTd}>{plNum(data.total_credit)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </ReportBody>
+      {quick && (
+        <QuickReportModal accountId={quick} onClose={() => setQuick(null)} />
+      )}
+    </>
+  );
+}
+
+// ---------- General Ledger ----------
+function GeneralLedgerReport() {
+  const [range, setRange] = useDateRange("year");
+  const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(null); // null = automatic (all open when the ledger is small)
+  const [txOpen, setTxOpen] = useState(null);
+  const { data, loading, error } = useReport(
+    () => getGeneralLedger(range.from, range.to),
+    [range.from, range.to],
+  );
+
+  const accounts = data
+    ? data.accounts.filter((a) => {
+        const q = search.trim().toLowerCase();
+        return (
+          !q ||
+          a.name.toLowerCase().includes(q) ||
+          (a.account_code || "").toLowerCase().includes(q)
+        );
+      })
+    : [];
+  const openSet =
+    open ?? new Set(data && data.row_count <= 300 ? accounts.map((a) => a.id) : []);
+  const toggle = (id) => {
+    const next = new Set(openSet);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setOpen(next);
+  };
+
+  const exportCsv = () => {
+    if (!data) return;
+    const rows = [
+      ["General Ledger"],
+      [`${range.from} to ${range.to}`],
+      [],
+      ["Account", "Date", "Transaction", "Name", "Memo", "Debit", "Credit", "Balance"],
+    ];
+    accounts.forEach((a) => {
+      rows.push([a.name, "", "Opening balance", "", "", "", "", a.opening.toFixed(2)]);
+      a.rows.forEach((r) =>
+        rows.push([
+          a.name,
+          r.date,
+          `${r.type} ${r.number}`,
+          r.name,
+          r.memo,
+          r.debit ? r.debit.toFixed(2) : "",
+          r.credit ? r.credit.toFixed(2) : "",
+          r.balance.toFixed(2),
+        ]),
+      );
+      rows.push([a.name, "", "Total / closing balance", "", "",
+        a.total_debit.toFixed(2), a.total_credit.toFixed(2), a.closing.toFixed(2)]);
+    });
+    downloadReportCsv(`general-ledger_${range.from}_to_${range.to}.csv`, rows);
+  };
+
+  const th = "px-2 py-1.5 text-xs font-semibold text-gray-500";
+  return (
+    <>
+      <DateRangeFilter value={range} onChange={setRange} />
+      <ReportBody loading={loading} error={error} data={data}>
+        {data && (
+          <>
+            <ReportHeading
+              title="General Ledger"
+              sub={`${rptRange(data.date_from, data.date_to)} · every entry per account with a running balance`}
+              onCsv={exportCsv}
+              csvDisabled={accounts.length === 0}
+            />
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Find an account..."
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-60 max-w-full"
+              />
+              <button
+                type="button"
+                className={rptBtn}
+                onClick={() => setOpen(new Set(accounts.map((a) => a.id)))}
+              >
+                Expand all
+              </button>
+              <button
+                type="button"
+                className={rptBtn}
+                onClick={() => setOpen(new Set())}
+              >
+                Collapse all
+              </button>
+            </div>
+            {accounts.length === 0 ? (
+              <p className="text-gray-400 text-center py-16">
+                No entries in this period.
+              </p>
+            ) : (
+              accounts.map((a) => {
+                const isOpen = openSet.has(a.id);
+                return (
+                  <div
+                    key={a.id}
+                    className="bg-white border border-gray-200 rounded-xl mb-3 overflow-hidden"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggle(a.id)}
+                      className="w-full flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2.5 bg-gray-50 hover:bg-gray-100 text-left"
+                    >
+                      <span className="font-semibold text-gray-900 flex items-center gap-1">
+                        {isOpen ? (
+                          <ChevronDown size={14} className="text-gray-400" />
+                        ) : (
+                          <ChevronRight size={14} className="text-gray-400" />
+                        )}
+                        {a.account_code && (
+                          <span className="text-gray-400 font-normal">
+                            {a.account_code}
+                          </span>
+                        )}
+                        {a.name}
+                      </span>
+                      <span className="text-xs text-gray-500 tabular-nums">
+                        Opening {plNum(a.opening) || "-"} · Dr {plNum(a.total_debit)} · Cr{" "}
+                        {plNum(a.total_credit)} ·{" "}
+                        <b className="text-gray-900">
+                          Closing {plNum(a.closing)}
+                        </b>
+                      </span>
+                    </button>
+                    {isOpen && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm min-w-[640px]">
+                          <thead>
+                            <tr className="border-b border-gray-200 text-left">
+                              <th className={th}>Date</th>
+                              <th className={th}>Transaction</th>
+                              <th className={th}>Name / memo</th>
+                              <th className={`${th} text-right`}>Debit</th>
+                              <th className={`${th} text-right`}>Credit</th>
+                              <th className={`${th} text-right`}>Balance</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr className="border-b border-gray-100 text-gray-500">
+                              <td className="px-2 py-1.5" colSpan={5}>
+                                Opening balance
+                              </td>
+                              <td className="px-2 py-1.5 text-right tabular-nums">
+                                {plNum(a.opening)}
+                              </td>
+                            </tr>
+                            {a.rows.map((r) => (
+                              <tr key={r.id} className="border-b border-gray-100">
+                                <td className="px-2 py-1.5 whitespace-nowrap">
+                                  {formatJournalDate(r.date)}
+                                </td>
+                                <td className="px-2 py-1.5 whitespace-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => setTxOpen(r)}
+                                    className="text-blue-700 underline font-medium"
+                                  >
+                                    {r.type} {r.number}
+                                  </button>
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  {r.name}
+                                  {r.memo && (
+                                    <span className="text-gray-400"> - {r.memo}</span>
+                                  )}
+                                </td>
+                                <td className="px-2 py-1.5 text-right tabular-nums">
+                                  {r.debit ? plNum(r.debit) : ""}
+                                </td>
+                                <td className="px-2 py-1.5 text-right tabular-nums">
+                                  {r.credit ? plNum(r.credit) : ""}
+                                </td>
+                                <td className="px-2 py-1.5 text-right tabular-nums">
+                                  {plNum(r.balance)}
+                                </td>
+                              </tr>
+                            ))}
+                            <tr className="font-semibold bg-gray-50">
+                              <td className="px-2 py-1.5" colSpan={3}>
+                                Total · closing balance
+                              </td>
+                              <td className="px-2 py-1.5 text-right tabular-nums">
+                                {plNum(a.total_debit)}
+                              </td>
+                              <td className="px-2 py-1.5 text-right tabular-nums">
+                                {plNum(a.total_credit)}
+                              </td>
+                              <td className="px-2 py-1.5 text-right tabular-nums">
+                                {plNum(a.closing)}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </>
+        )}
+      </ReportBody>
+      {txOpen && (
+        <PLTransactionModal tx={txOpen} onClose={() => setTxOpen(null)} />
+      )}
+    </>
+  );
+}
+
+// ---------- Cash Flow (indirect method) ----------
+function CfLine({ label, amount, depth = 0, bold = false, top = false }) {
+  return (
+    <div
+      className={`flex justify-between gap-3 py-1.5 text-sm ${bold ? "font-semibold text-gray-900" : "text-gray-600"} ${top ? "border-t border-gray-300 mt-1 pt-2" : ""}`}
+      style={{ paddingLeft: depth * 16 }}
+    >
+      <span>{label}</span>
+      {amount !== undefined && (
+        <span className="shrink-0 tabular-nums text-gray-900">
+          {plNum(amount) === "-" ? "0.00" : plNum(amount)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function CashFlowReport() {
+  const [range, setRange] = useDateRange("year");
+  const { data, loading, error } = useReport(
+    () => getCashFlow(range.from, range.to),
+    [range.from, range.to],
+  );
+
+  const exportCsv = () => {
+    if (!data) return;
+    const rows = [["Cash Flow"], [`${range.from} to ${range.to}`], [], ["", "Amount"]];
+    rows.push(["Net income", data.net_income.toFixed(2)]);
+    data.operating.accounts.forEach((a) => rows.push([`  ${a.name}`, a.amount.toFixed(2)]));
+    rows.push(["Net cash from operating activities", data.operating.total.toFixed(2)]);
+    data.investing.accounts.forEach((a) => rows.push([`  ${a.name}`, a.amount.toFixed(2)]));
+    rows.push(["Net cash from investing activities", data.investing.total.toFixed(2)]);
+    data.financing.accounts.forEach((a) => rows.push([`  ${a.name}`, a.amount.toFixed(2)]));
+    rows.push(["Net cash from financing activities", data.financing.total.toFixed(2)]);
+    rows.push(["Net cash increase / (decrease)", data.net_change.toFixed(2)]);
+    rows.push(["Cash at beginning of period", data.beginning_cash.toFixed(2)]);
+    rows.push(["Cash at end of period", data.ending_cash.toFixed(2)]);
+    downloadReportCsv(`cash-flow_${range.from}_to_${range.to}.csv`, rows);
+  };
+
+  const section = (s, extra) => (
+    <div className="mb-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
+        {s.title}
+      </p>
+      {extra}
+      {s.accounts.map((a) => (
+        <CfLine key={a.id} depth={1} label={a.name} amount={a.amount} />
+      ))}
+      {s.accounts.length === 0 && !extra && (
+        <CfLine depth={1} label="No movement" />
+      )}
+      <CfLine
+        bold
+        top
+        label={`Net cash from ${s.title.toLowerCase()}`}
+        amount={s.total}
+      />
+    </div>
+  );
+
+  return (
+    <>
+      <DateRangeFilter value={range} onChange={setRange} />
+      <ReportBody loading={loading} error={error} data={data}>
+        {data && (
+          <>
+            <ReportHeading
+              title="Cash Flow"
+              sub={`${rptRange(data.date_from, data.date_to)} · how cash and bank balances changed (indirect method)`}
+              onCsv={exportCsv}
+            />
+            {!data.matches && (
+              <ReportNotice>
+                The statement ({formatRs(data.net_change)}) does not match the
+                change in your cash and bank accounts (
+                {formatRs(data.ending_cash - data.beginning_cash)}). Please
+                check the ledger.
+              </ReportNotice>
+            )}
+            <ReportCard>
+              {section(
+                data.operating,
+                <>
+                  <CfLine bold label="Net income" amount={data.net_income} />
+                  <p className="text-xs text-gray-400 pl-4 py-1">
+                    Adjustments for receivables, stock and payables
+                  </p>
+                </>,
+              )}
+              {section(data.investing)}
+              {section(data.financing)}
+              <CfLine
+                bold
+                top
+                label="Net cash increase / (decrease) for the period"
+                amount={data.net_change}
+              />
+              <CfLine label="Cash at beginning of period" amount={data.beginning_cash} />
+              <CfLine bold top label="Cash at end of period" amount={data.ending_cash} />
+            </ReportCard>
+
+            {data.cash_accounts.length > 0 && (
+              <ReportCard title="Cash & bank accounts">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[420px]">
+                    <thead className="text-xs">
+                      <tr>
+                        <th className={`${rptTh} text-left px-0`}>Account</th>
+                        <th className={`${rptTh} text-right`}>Beginning</th>
+                        <th className={`${rptTh} text-right`}>Change</th>
+                        <th className={`${rptTh} text-right`}>Ending</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.cash_accounts.map((c) => (
+                        <tr key={c.id} className="border-t border-gray-100">
+                          <td className="py-2 text-gray-900">{c.name}</td>
+                          <td className={rptTd}>{plNum(c.opening)}</td>
+                          <td className={rptTd}>{plNum(c.change)}</td>
+                          <td className={rptTd}>{plNum(c.closing)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </ReportCard>
+            )}
+          </>
+        )}
+      </ReportBody>
+    </>
+  );
+}
+
+// ---------- Sales by Customer ----------
+function SalesByCustomerReport() {
+  const [range, setRange] = useDateRange("year");
+  const { data, loading, error } = useReport(
+    () => getSalesByCustomer(range.from, range.to),
+    [range.from, range.to],
+  );
+
+  const exportCsv = () => {
+    if (!data) return;
+    const rows = [
+      ["Sales by Customer"],
+      [`${range.from} to ${range.to}`],
+      [],
+      ["Customer", "Invoices", "Sales", "Returns", "Net sales", "% of net sales", "Gross profit", "Paid", "Balance"],
+      ...data.rows.map((r) => [
+        r.customer_name, r.invoices, r.sales.toFixed(2), r.returns.toFixed(2), r.net_sales.toFixed(2),
+        r.share.toFixed(1), r.gross_profit.toFixed(2), r.paid.toFixed(2), r.balance.toFixed(2),
+      ]),
+      [
+        "TOTAL", data.totals.invoices, data.totals.sales.toFixed(2), data.totals.returns.toFixed(2),
+        data.totals.net_sales.toFixed(2), "", data.totals.gross_profit.toFixed(2),
+        data.totals.paid.toFixed(2), data.totals.balance.toFixed(2),
+      ],
+    ];
+    downloadReportCsv(`sales-by-customer_${range.from}_to_${range.to}.csv`, rows);
+  };
+
+  return (
+    <>
+      <DateRangeFilter value={range} onChange={setRange} />
+      <ReportBody loading={loading} error={error} data={data}>
+        {data && (
+          <>
+            <ReportHeading
+              title="Sales by Customer"
+              sub={`${rptRange(data.date_from, data.date_to)} · void invoices are not counted · returns are credit notes`}
+              onCsv={exportCsv}
+              csvDisabled={data.rows.length === 0}
+            />
+            {data.rows.length === 0 ? (
+              <p className="text-gray-400 text-center py-16">
+                No sales in this period.
+              </p>
+            ) : (
+              <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+                <table className="w-full text-sm min-w-[820px]">
+                  <thead className="bg-gray-50 text-xs">
+                    <tr>
+                      <th className={`${rptTh} text-left`}>Customer</th>
+                      <th className={`${rptTh} text-right`}>Invoices</th>
+                      <th className={`${rptTh} text-right`}>Sales</th>
+                      <th className={`${rptTh} text-right`}>Returns</th>
+                      <th className={`${rptTh} text-right`}>Net sales</th>
+                      <th className={`${rptTh} text-right`}>%</th>
+                      <th className={`${rptTh} text-right`}>Gross profit</th>
+                      <th className={`${rptTh} text-right`}>Paid</th>
+                      <th className={`${rptTh} text-right`}>Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.rows.map((r) => (
+                      <tr key={r.customer_id} className="border-t border-gray-100">
+                        <td className="px-3 py-2 font-medium text-gray-900">
+                          {r.customer_name}
+                        </td>
+                        <td className={rptTd}>{r.invoices}</td>
+                        <td className={rptTd}>{plNum(r.sales)}</td>
+                        <td className={`${rptTd} ${r.returns ? "text-red-600" : ""}`}>
+                          {plNum(r.returns)}
+                        </td>
+                        <td className={`${rptTd} font-medium`}>{plNum(r.net_sales)}</td>
+                        <td className={`${rptTd} text-gray-500`}>{r.share.toFixed(1)}%</td>
+                        <td className={`${rptTd} ${r.gross_profit < 0 ? "text-red-600" : ""}`}>
+                          {plNum(r.gross_profit)}
+                        </td>
+                        <td className={rptTd}>{plNum(r.paid)}</td>
+                        <td className={`${rptTd} ${r.balance > 0 ? "text-red-600" : ""}`}>
+                          {plNum(r.balance)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
+                    <tr>
+                      <td className="px-3 py-2">
+                        TOTAL ({data.totals.customers} customers)
+                      </td>
+                      <td className={rptTd}>{data.totals.invoices}</td>
+                      <td className={rptTd}>{plNum(data.totals.sales)}</td>
+                      <td className={rptTd}>{plNum(data.totals.returns)}</td>
+                      <td className={rptTd}>{plNum(data.totals.net_sales)}</td>
+                      <td />
+                      <td className={rptTd}>{plNum(data.totals.gross_profit)}</td>
+                      <td className={rptTd}>{plNum(data.totals.paid)}</td>
+                      <td className={rptTd}>{plNum(data.totals.balance)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </ReportBody>
+    </>
+  );
+}
+
+// ---------- Sales by Item ----------
+function SalesByItemReport() {
+  const [range, setRange] = useDateRange("year");
+  const { data, loading, error } = useReport(
+    () => getSalesByItem(range.from, range.to),
+    [range.from, range.to],
+  );
+
+  const exportCsv = () => {
+    if (!data) return;
+    const t = data.totals;
+    const rows = [
+      ["Sales by Item"],
+      [`${range.from} to ${range.to}`],
+      [],
+      ["Item", "SKU", "Qty sold", "Sales", "Qty returned", "Returns", "Net sales", "Cost", "Gross profit"],
+      ...data.rows.map((r) => [
+        r.item_name, r.sku || "", r.sold_qty, r.sales.toFixed(2), r.returned_qty, r.returns.toFixed(2),
+        r.net_sales.toFixed(2), r.cost.toFixed(2), r.gross_profit.toFixed(2),
+      ]),
+      ["Invoice discounts", "", "", "", "", "", (-t.discounts).toFixed(2), "", (-t.discounts).toFixed(2)],
+      ["TOTAL", "", t.sold_qty, t.sales.toFixed(2), t.returned_qty, t.returns.toFixed(2),
+        t.net_sales.toFixed(2), t.cost.toFixed(2), t.gross_profit.toFixed(2)],
+    ];
+    downloadReportCsv(`sales-by-item_${range.from}_to_${range.to}.csv`, rows);
+  };
+
+  const sum = (key) => (data ? data.rows.reduce((s, r) => s + r[key], 0) : 0);
+
+  return (
+    <>
+      <DateRangeFilter value={range} onChange={setRange} />
+      <ReportBody loading={loading} error={error} data={data}>
+        {data && (
+          <>
+            <ReportHeading
+              title="Sales by Item"
+              sub={`${rptRange(data.date_from, data.date_to)} · void invoices are not counted · cost = item cost at the time of sale`}
+              onCsv={exportCsv}
+              csvDisabled={data.rows.length === 0}
+            />
+            {data.rows.length === 0 ? (
+              <p className="text-gray-400 text-center py-16">
+                No sales in this period.
+              </p>
+            ) : (
+              <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+                <table className="w-full text-sm min-w-[820px]">
+                  <thead className="bg-gray-50 text-xs">
+                    <tr>
+                      <th className={`${rptTh} text-left`}>Item</th>
+                      <th className={`${rptTh} text-right`}>Qty sold</th>
+                      <th className={`${rptTh} text-right`}>Sales</th>
+                      <th className={`${rptTh} text-right`}>Qty returned</th>
+                      <th className={`${rptTh} text-right`}>Returns</th>
+                      <th className={`${rptTh} text-right`}>Net sales</th>
+                      <th className={`${rptTh} text-right`}>Cost</th>
+                      <th className={`${rptTh} text-right`}>Gross profit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.rows.map((r, i) => (
+                      <tr key={r.product_id ?? `n${i}`} className="border-t border-gray-100">
+                        <td className="px-3 py-2 text-gray-900">
+                          <span className="font-medium">{r.item_name}</span>
+                          {r.sku && <span className="text-gray-400"> · {r.sku}</span>}
+                        </td>
+                        <td className={rptTd}>{r.sold_qty}</td>
+                        <td className={rptTd}>{plNum(r.sales)}</td>
+                        <td className={`${rptTd} ${r.returned_qty ? "text-red-600" : ""}`}>
+                          {r.returned_qty || "-"}
+                        </td>
+                        <td className={`${rptTd} ${r.returns ? "text-red-600" : ""}`}>
+                          {plNum(r.returns)}
+                        </td>
+                        <td className={`${rptTd} font-medium`}>{plNum(r.net_sales)}</td>
+                        <td className={rptTd}>{plNum(r.cost)}</td>
+                        <td className={`${rptTd} ${r.gross_profit < 0 ? "text-red-600" : ""}`}>
+                          {plNum(r.gross_profit)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="border-t-2 border-gray-300 bg-gray-50">
+                    <tr className="text-gray-600">
+                      <td className="px-3 py-2">Items total</td>
+                      <td className={rptTd}>{data.totals.sold_qty}</td>
+                      <td className={rptTd}>{plNum(data.totals.sales)}</td>
+                      <td className={rptTd}>{data.totals.returned_qty || "-"}</td>
+                      <td className={rptTd}>{plNum(data.totals.returns)}</td>
+                      <td className={rptTd}>{plNum(sum("net_sales"))}</td>
+                      <td className={rptTd}>{plNum(data.totals.cost)}</td>
+                      <td className={rptTd}>{plNum(sum("gross_profit"))}</td>
+                    </tr>
+                    <tr className="text-gray-600">
+                      <td className="px-3 py-2" colSpan={5}>
+                        Invoice discounts (given on whole invoices)
+                      </td>
+                      <td className={rptTd}>{plNum(-data.totals.discounts)}</td>
+                      <td />
+                      <td className={rptTd}>{plNum(-data.totals.discounts)}</td>
+                    </tr>
+                    <tr className="font-semibold">
+                      <td className="px-3 py-2" colSpan={5}>
+                        TOTAL
+                      </td>
+                      <td className={rptTd}>{plNum(data.totals.net_sales)}</td>
+                      <td className={rptTd}>{plNum(data.totals.cost)}</td>
+                      <td className={rptTd}>{plNum(data.totals.gross_profit)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </ReportBody>
+    </>
+  );
+}
+
+// ---------- Inventory Valuation ----------
+function InventoryValuationReport() {
+  const [showZero, setShowZero] = useState(false);
+  const [search, setSearch] = useState("");
+  const { data, loading, error } = useReport(
+    () => getInventoryValuation(showZero),
+    [showZero],
+  );
+
+  const q = search.trim().toLowerCase();
+  const rows = data
+    ? data.rows.filter(
+        (r) =>
+          !q ||
+          r.name.toLowerCase().includes(q) ||
+          (r.sku || "").toLowerCase().includes(q),
+      )
+    : [];
+
+  const exportCsv = () => {
+    if (!data) return;
+    const out = [
+      ["Inventory Valuation"],
+      [`As of ${data.as_of}`],
+      [],
+      ["Item", "SKU", "Qty on hand", "Unit cost", "Asset value", "Sales price", "Retail value"],
+      ...rows.map((r) => [
+        r.name, r.sku || "", r.quantity, r.cost.toFixed(2), r.value.toFixed(2),
+        r.price.toFixed(2), r.retail_value.toFixed(2),
+      ]),
+      ["TOTAL", "", data.totals.quantity, "", data.totals.value.toFixed(2), "", data.totals.retail_value.toFixed(2)],
+    ];
+    downloadReportCsv(`inventory-valuation_${data.as_of}.csv`, out);
+  };
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Find an item or SKU..."
+          className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-60 max-w-full"
+        />
+        <label className="flex items-center gap-2 text-sm text-gray-600">
+          <input
+            type="checkbox"
+            checked={showZero}
+            onChange={(e) => setShowZero(e.target.checked)}
+          />
+          Show items with no stock
+        </label>
+      </div>
+      <ReportBody loading={loading} error={error} data={data}>
+        {data && (
+          <>
+            <ReportHeading
+              title="Inventory Valuation"
+              sub={`Stock on hand x item cost · as of ${formatJournalDate(data.as_of)} (current stock)`}
+              onCsv={exportCsv}
+              csvDisabled={rows.length === 0}
+            />
+            {!data.matches_ledger && (
+              <ReportNotice>
+                Stock value here ({formatRs(data.totals.value)}) differs from
+                the Inventory Asset balance in your ledger (
+                {formatRs(data.ledger_balance)}) by{" "}
+                {formatRs(Math.abs(data.difference))}. Usually a manual journal
+                posted to the inventory account, or stock added before costs
+                were set.
+              </ReportNotice>
+            )}
+            {data.negative_count > 0 && (
+              <ReportNotice tone="bad">
+                {data.negative_count} item(s) have negative stock - stock was
+                sold or issued without being added first.
+              </ReportNotice>
+            )}
+            {data.no_cost_count > 0 && (
+              <ReportNotice>
+                {data.no_cost_count} item(s) have stock but no cost, so they add
+                nothing to the value. Set their cost on the item.
+              </ReportNotice>
+            )}
+            {rows.length === 0 ? (
+              <p className="text-gray-400 text-center py-16">
+                No stock items found.
+              </p>
+            ) : (
+              <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+                <table className="w-full text-sm min-w-[680px]">
+                  <thead className="bg-gray-50 text-xs">
+                    <tr>
+                      <th className={`${rptTh} text-left`}>Item</th>
+                      <th className={`${rptTh} text-left`}>SKU</th>
+                      <th className={`${rptTh} text-right`}>Qty on hand</th>
+                      <th className={`${rptTh} text-right`}>Unit cost</th>
+                      <th className={`${rptTh} text-right`}>Asset value</th>
+                      <th className={`${rptTh} text-right`}>Sales price</th>
+                      <th className={`${rptTh} text-right`}>Retail value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={r.product_id} className="border-t border-gray-100">
+                        <td className="px-3 py-2 font-medium text-gray-900">{r.name}</td>
+                        <td className="px-3 py-2 text-gray-500">{r.sku || ""}</td>
+                        <td className={`${rptTd} ${r.quantity < 0 ? "text-red-600" : ""}`}>
+                          {r.quantity}
+                        </td>
+                        <td className={rptTd}>{plNum(r.cost)}</td>
+                        <td className={`${rptTd} font-medium`}>{plNum(r.value)}</td>
+                        <td className={rptTd}>{plNum(r.price)}</td>
+                        <td className={rptTd}>{plNum(r.retail_value)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
+                    <tr>
+                      <td className="px-3 py-2" colSpan={2}>
+                        TOTAL ({data.totals.items} items)
+                      </td>
+                      <td className={rptTd}>{data.totals.quantity}</td>
+                      <td />
+                      <td className={rptTd}>{plNum(data.totals.value)}</td>
+                      <td />
+                      <td className={rptTd}>{plNum(data.totals.retail_value)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </ReportBody>
+    </>
+  );
+}
+
+// ---------- Expenses by Vendor ----------
+function ExpensesByVendorReport() {
+  const [range, setRange] = useDateRange("year");
+  const [open, setOpen] = useState(() => new Set());
+  const { data, loading, error } = useReport(
+    () => getExpensesByVendor(range.from, range.to),
+    [range.from, range.to],
+  );
+  const toggle = (id) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const exportCsv = () => {
+    if (!data) return;
+    const rows = [
+      ["Expenses by Vendor"],
+      [`${range.from} to ${range.to}`],
+      [],
+      ["Vendor", "Bills", "Stock purchases", "Other expenses", "Total billed", "% of total", "Paid", "Balance due"],
+      ...data.rows.map((v) => [
+        v.vendor_name, v.bill_count, v.stock.toFixed(2), v.other.toFixed(2), v.total.toFixed(2),
+        v.share.toFixed(1), v.paid.toFixed(2), v.balance.toFixed(2),
+      ]),
+      ["TOTAL", data.totals.bills, data.totals.stock.toFixed(2), data.totals.other.toFixed(2),
+        data.totals.total.toFixed(2), "", data.totals.paid.toFixed(2), data.totals.balance.toFixed(2)],
+    ];
+    downloadReportCsv(`expenses-by-vendor_${range.from}_to_${range.to}.csv`, rows);
+  };
+
+  return (
+    <>
+      <DateRangeFilter value={range} onChange={setRange} />
+      <ReportBody loading={loading} error={error} data={data}>
+        {data && (
+          <>
+            <ReportHeading
+              title="Expenses by Vendor"
+              sub={`${rptRange(data.date_from, data.date_to)} · purchase bills by bill date · void bills are not counted · click a vendor to see its bills`}
+              onCsv={exportCsv}
+              csvDisabled={data.rows.length === 0}
+            />
+            {data.rows.length === 0 ? (
+              <p className="text-gray-400 text-center py-16">
+                No bills in this period.
+              </p>
+            ) : (
+              <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+                <table className="w-full text-sm min-w-[780px]">
+                  <thead className="bg-gray-50 text-xs">
+                    <tr>
+                      <th className={`${rptTh} text-left`}>Vendor</th>
+                      <th className={`${rptTh} text-right`}>Bills</th>
+                      <th className={`${rptTh} text-right`}>Stock purchases</th>
+                      <th className={`${rptTh} text-right`}>Other expenses</th>
+                      <th className={`${rptTh} text-right`}>Total billed</th>
+                      <th className={`${rptTh} text-right`}>%</th>
+                      <th className={`${rptTh} text-right`}>Paid</th>
+                      <th className={`${rptTh} text-right`}>Balance due</th>
+                    </tr>
+                  </thead>
+                  {data.rows.map((v) => (
+                    <tbody key={v.vendor_id} className="border-t border-gray-100">
+                      <tr
+                        onClick={() => toggle(v.vendor_id)}
+                        className="cursor-pointer hover:bg-gray-50"
+                      >
+                        <td className="px-3 py-2 font-medium text-gray-900">
+                          {open.has(v.vendor_id) ? (
+                            <ChevronDown size={14} className="inline mr-1 text-gray-400" />
+                          ) : (
+                            <ChevronRight size={14} className="inline mr-1 text-gray-400" />
+                          )}
+                          {v.vendor_name}
+                        </td>
+                        <td className={rptTd}>{v.bill_count}</td>
+                        <td className={rptTd}>{plNum(v.stock)}</td>
+                        <td className={rptTd}>{plNum(v.other)}</td>
+                        <td className={`${rptTd} font-medium`}>{plNum(v.total)}</td>
+                        <td className={`${rptTd} text-gray-500`}>{v.share.toFixed(1)}%</td>
+                        <td className={rptTd}>{plNum(v.paid)}</td>
+                        <td className={`${rptTd} ${v.balance > 0 ? "text-red-600" : ""}`}>
+                          {plNum(v.balance)}
+                        </td>
+                      </tr>
+                      {open.has(v.vendor_id) &&
+                        v.bills.map((b) => (
+                          <tr key={b.id} className="bg-gray-50 text-xs text-gray-500">
+                            <td className="pl-8 pr-3 py-1.5">
+                              {b.number}
+                              {b.vendor_ref && ` (${b.vendor_ref})`} ·{" "}
+                              {formatJournalDate(b.bill_date)}
+                            </td>
+                            <td />
+                            <td className={`${rptTd} py-1.5`}>{plNum(b.stock)}</td>
+                            <td className={`${rptTd} py-1.5`}>{plNum(b.other)}</td>
+                            <td className={`${rptTd} py-1.5`}>{plNum(b.total)}</td>
+                            <td />
+                            <td className={`${rptTd} py-1.5`}>{plNum(b.paid)}</td>
+                            <td className={`${rptTd} py-1.5`}>{plNum(b.balance)}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  ))}
+                  <tfoot className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
+                    <tr>
+                      <td className="px-3 py-2">
+                        TOTAL ({data.totals.vendors} vendors)
+                      </td>
+                      <td className={rptTd}>{data.totals.bills}</td>
+                      <td className={rptTd}>{plNum(data.totals.stock)}</td>
+                      <td className={rptTd}>{plNum(data.totals.other)}</td>
+                      <td className={rptTd}>{plNum(data.totals.total)}</td>
+                      <td />
+                      <td className={rptTd}>{plNum(data.totals.paid)}</td>
+                      <td className={rptTd}>{plNum(data.totals.balance)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </ReportBody>
+    </>
   );
 }
 

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from .. import models
 from ..account_types import ACCOUNT_CATEGORY, DEBIT_NORMAL
 from ..database import get_db
+from .invoices import STOCK_TRACKED_TYPE
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -869,4 +870,519 @@ def daily_sales_collection_detail(day: date, db: Session = Depends(get_db)):
                       "total": float(_money(i.total)), "paid": float(_money(i.amount_paid))} for i in invoices],
         "payments": [{"id": p.id, "number": p.payment_number, "customer": p.customer_name,
                       "mode": p.payment_mode, "amount": float(_money(p.amount))} for p in payments],
+    }
+
+ 
+ZERO = Decimal("0")
+CATEGORY_ORDER = ["Asset", "Liability", "Equity", "Income", "Expense"]
+
+CASH_TYPES = {"cash", "bank"}
+CF_INVESTING_TYPES = {"fixed_asset"}
+CF_FINANCING_TYPES = {"long_term_liability", "equity"}
+
+
+def _check_range(date_from: date | None, date_to: date | None):
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(400, "'From' date is after 'To' date")
+
+
+def _account_labels(accounts: list) -> dict[int, str]:
+    """account id -> 'Parent:Child' (QuickBooks style) so sub-accounts read clearly in a flat list."""
+    by_id = {a.id: a for a in accounts}
+    out: dict[int, str] = {}
+    for a in accounts:
+        parts, seen, cur = [a.name], {a.id}, a
+        while cur.parent_id in by_id and cur.parent_id not in seen:
+            cur = by_id[cur.parent_id]
+            seen.add(cur.id)
+            parts.append(cur.name)
+        out[a.id] = ":".join(reversed(parts))
+    return out
+
+
+def _account_order(accounts: list, labels: dict[int, str]) -> list:
+    """Assets, Liabilities, Equity, Income, Expenses - then by account code, then by name."""
+    def key(a):
+        cat = ACCOUNT_CATEGORY.get(a.account_type)
+        return (CATEGORY_ORDER.index(cat) if cat in CATEGORY_ORDER else 99, a.account_code or "~", labels[a.id].lower())
+    return sorted(accounts, key=key)
+
+
+def _normal_sign(account_type: str) -> int:
+    """+1 when the account grows with a debit (assets, expenses), -1 when it grows with a credit."""
+    return 1 if ACCOUNT_CATEGORY.get(account_type) in DEBIT_NORMAL else -1
+
+
+def _debit_credit(db: Session, date_from: date | None = None, date_to: date | None = None) -> dict[int, tuple[Decimal, Decimal]]:
+    """account_id -> (total debits, total credits) of the journal lines dated inside the range."""
+    query = (
+        db.query(
+            models.JournalLine.account_id,
+            func.coalesce(func.sum(models.JournalLine.debit), 0),
+            func.coalesce(func.sum(models.JournalLine.credit), 0),
+        )
+        .join(models.Journal, models.JournalLine.journal_id == models.Journal.id)
+    )
+    if date_from:
+        query = query.filter(models.Journal.journal_date >= date_from)
+    if date_to:
+        query = query.filter(models.Journal.journal_date <= date_to)
+    return {aid: (_money(d), _money(c)) for aid, d, c in query.group_by(models.JournalLine.account_id).all()}
+
+
+# ---------------------------------------------------------------- Trial Balance
+@router.get("/trial-balance")
+def trial_balance_report(
+    date_from: date | None = None,
+    date_to: date | None = None,
+    show_zero: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Every account with its debit / credit balance as at `date_to`.
+    With `date_from` it also shows the opening balance and the debits / credits made inside the period."""
+    date_to = date_to or date.today()
+    _check_range(date_from, date_to)
+
+    accounts = db.query(models.Account).all()
+    labels = _account_labels(accounts)
+    opening = _nets(db, None, date_from - timedelta(days=1)) if date_from else {}
+    period = _debit_credit(db, date_from, date_to)
+
+    groups: dict[str, dict] = {}
+    total_dr = total_cr = period_dr = period_cr = ZERO
+    for a in _account_order(accounts, labels):
+        op = opening.get(a.id, ZERO)
+        p_dr, p_cr = period.get(a.id, (ZERO, ZERO))
+        if not show_zero and op == 0 and p_dr == 0 and p_cr == 0:
+            continue
+        closing = op + p_dr - p_cr
+        dr = closing if closing > 0 else ZERO
+        cr = -closing if closing < 0 else ZERO
+
+        cat = ACCOUNT_CATEGORY.get(a.account_type) or "Other"
+        g = groups.setdefault(cat, {"category": cat, "rows": [], "debit": ZERO, "credit": ZERO})
+        g["rows"].append({
+            "id": a.id, "name": labels[a.id], "account_code": a.account_code, "account_type": a.account_type,
+            "opening": float(op), "period_debit": float(p_dr), "period_credit": float(p_cr),
+            "debit": float(dr), "credit": float(cr),
+        })
+        g["debit"] += dr
+        g["credit"] += cr
+        total_dr += dr
+        total_cr += cr
+        period_dr += p_dr
+        period_cr += p_cr
+
+    ordered = [groups[c] for c in CATEGORY_ORDER if c in groups] + [g for c, g in groups.items() if c not in CATEGORY_ORDER]
+    return {
+        "date_from": date_from, "date_to": date_to, "has_period": date_from is not None,
+        "groups": [{**g, "debit": float(g["debit"]), "credit": float(g["credit"])} for g in ordered],
+        "total_debit": float(total_dr), "total_credit": float(total_cr),
+        "period_debit": float(period_dr), "period_credit": float(period_cr),
+        "difference": float(total_dr - total_cr), "balanced": total_dr == total_cr,
+    }
+
+
+# ---------------------------------------------------------------- General Ledger
+@router.get("/general-ledger")
+def general_ledger(
+    date_from: date | None = None,
+    date_to: date | None = None,
+    account_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    """Every account with its opening balance, each entry in the period (with a running balance) and its closing balance."""
+    date_to = date_to or date.today()
+    date_from = date_from or date(date_to.year, 1, 1)
+    _check_range(date_from, date_to)
+
+    accounts = db.query(models.Account).all()
+    by_id = {a.id: a for a in accounts}
+    if account_id and account_id not in by_id:
+        raise HTTPException(404, "Account not found")
+    labels = _account_labels(accounts)
+    opening = _nets(db, None, date_from - timedelta(days=1))
+
+    query = (
+        db.query(models.JournalLine, models.Journal)
+        .join(models.Journal, models.JournalLine.journal_id == models.Journal.id)
+        .filter(models.Journal.journal_date >= date_from, models.Journal.journal_date <= date_to)
+    )
+    if account_id:
+        query = query.filter(models.JournalLine.account_id == account_id)
+    entries: dict[int, list] = {}
+    for line, journal in query.order_by(models.Journal.journal_date, models.Journal.id, models.JournalLine.id).all():
+        entries.setdefault(line.account_id, []).append((line, journal))
+
+    out, row_count = [], 0
+    grand_dr = grand_cr = ZERO
+    for a in _account_order(accounts, labels):
+        if account_id and a.id != account_id:
+            continue
+        op = opening.get(a.id, ZERO)
+        if not account_id and a.id not in entries and op == 0:
+            continue                                   # nothing to show for this account
+        sign = _normal_sign(a.account_type)
+        running = sign * op
+        rows, t_dr, t_cr = [], ZERO, ZERO
+        for line, journal in entries.get(a.id, []):
+            debit, credit = _money(line.debit), _money(line.credit)
+            running += sign * (debit - credit)
+            t_dr += debit
+            t_cr += credit
+            rows.append({
+                "id": line.id, "journal_id": journal.id, "date": journal.journal_date,
+                "type": _source_label(journal.source_type), "source_type": journal.source_type,
+                "source_id": journal.source_id, "number": journal.journal_number,
+                "name": journal.reference or "", "memo": line.description or journal.notes or "",
+                "debit": float(debit), "credit": float(credit), "balance": float(running),
+            })
+        row_count += len(rows)
+        grand_dr += t_dr
+        grand_cr += t_cr
+        out.append({
+            "id": a.id, "name": labels[a.id], "account_code": a.account_code, "account_type": a.account_type,
+            "opening": float(sign * op), "rows": rows,
+            "total_debit": float(t_dr), "total_credit": float(t_cr), "closing": float(running),
+        })
+    return {
+        "date_from": date_from, "date_to": date_to, "accounts": out, "row_count": row_count,
+        "total_debit": float(grand_dr), "total_credit": float(grand_cr),
+    }
+
+
+# ---------------------------------------------------------------- Sales by Customer
+def _sales_range(date_from: date | None, date_to: date | None) -> tuple[date, date]:
+    date_to = date_to or date.today()
+    date_from = date_from or date(date_to.year, 1, 1)
+    _check_range(date_from, date_to)
+    return date_from, date_to
+
+
+@router.get("/sales-by-customer")
+def sales_by_customer(date_from: date | None = None, date_to: date | None = None, db: Session = Depends(get_db)):
+    """One row per customer: invoices, sales, credit-note returns, net sales, gross profit, paid and still owed (void documents ignored)."""
+    date_from, date_to = _sales_range(date_from, date_to)
+
+    inv_filter = (models.Invoice.status != "void",
+                  models.Invoice.invoice_date >= date_from, models.Invoice.invoice_date <= date_to)
+    cn_filter = (models.CreditNote.status != "void",
+                 models.CreditNote.credit_date >= date_from, models.CreditNote.credit_date <= date_to)
+
+    customers: dict[int, dict] = {}
+
+    def row(cid: int) -> dict:
+        if cid not in customers:
+            customers[cid] = {"invoices": 0, "sales": ZERO, "returns": ZERO, "cost": ZERO, "paid": ZERO}
+        return customers[cid]
+
+    for cid, count, total, paid in (
+        db.query(models.Invoice.customer_id, func.count(models.Invoice.id),
+                 func.coalesce(func.sum(models.Invoice.total), 0), func.coalesce(func.sum(models.Invoice.amount_paid), 0))
+        .filter(*inv_filter).group_by(models.Invoice.customer_id).all()
+    ):
+        r = row(cid)
+        r["invoices"], r["sales"], r["paid"] = count, _money(total), _money(paid)
+
+    for cid, cost in (
+        db.query(models.Invoice.customer_id,
+                 func.coalesce(func.sum(models.InvoiceItem.unit_cost * models.InvoiceItem.quantity), 0))
+        .join(models.InvoiceItem, models.InvoiceItem.invoice_id == models.Invoice.id)
+        .filter(*inv_filter).group_by(models.Invoice.customer_id).all()
+    ):
+        row(cid)["cost"] += _money(cost)
+
+    for cid, total in (
+        db.query(models.CreditNote.customer_id, func.coalesce(func.sum(models.CreditNote.total), 0))
+        .filter(*cn_filter).group_by(models.CreditNote.customer_id).all()
+    ):
+        row(cid)["returns"] = _money(total)
+
+    for cid, cost in (          # goods that came back to the shelf also bring their cost back
+        db.query(models.CreditNote.customer_id,
+                 func.coalesce(func.sum(models.CreditNoteItem.unit_cost * models.CreditNoteItem.quantity), 0))
+        .join(models.CreditNoteItem, models.CreditNoteItem.credit_note_id == models.CreditNote.id)
+        .filter(*cn_filter, models.CreditNote.restock.is_(True)).group_by(models.CreditNote.customer_id).all()
+    ):
+        row(cid)["cost"] -= _money(cost)
+
+    names = {}
+    if customers:
+        names = dict(db.query(models.Customer.id, models.Customer.display_name).filter(models.Customer.id.in_(customers.keys())).all())
+
+    rows = []
+    for cid, r in customers.items():
+        net = r["sales"] - r["returns"]
+        rows.append({
+            "customer_id": cid, "customer_name": names.get(cid, f"Customer #{cid}"),
+            "invoices": r["invoices"], "sales": r["sales"], "returns": r["returns"], "net_sales": net,
+            "gross_profit": net - r["cost"], "paid": r["paid"], "balance": r["sales"] - r["paid"],
+        })
+    rows.sort(key=lambda x: x["net_sales"], reverse=True)
+
+    keys = ("sales", "returns", "net_sales", "gross_profit", "paid", "balance")
+    totals = {k: sum((r[k] for r in rows), ZERO) for k in keys}
+    for r in rows:
+        r["share"] = float((r["net_sales"] / totals["net_sales"] * 100).quantize(Decimal("0.1"), ROUND_HALF_UP)) if totals["net_sales"] else 0.0
+        for k in keys:
+            r[k] = float(r[k])
+    return {
+        "date_from": date_from, "date_to": date_to, "rows": rows,
+        "totals": {**{k: float(v) for k, v in totals.items()}, "invoices": sum(r["invoices"] for r in rows), "customers": len(rows)},
+    }
+
+
+# ---------------------------------------------------------------- Sales by Item
+@router.get("/sales-by-item")
+def sales_by_item(date_from: date | None = None, date_to: date | None = None, db: Session = Depends(get_db)):
+    """One row per item: quantity sold, sales, returns, cost and gross profit.
+    Invoice-level discounts belong to the whole invoice, so they are shown as one separate line in the totals."""
+    date_from, date_to = _sales_range(date_from, date_to)
+
+    inv_filter = (models.Invoice.status != "void",
+                  models.Invoice.invoice_date >= date_from, models.Invoice.invoice_date <= date_to)
+    cn_filter = (models.CreditNote.status != "void",
+                 models.CreditNote.credit_date >= date_from, models.CreditNote.credit_date <= date_to)
+
+    items: dict[str, dict] = {}
+
+    def row(product_id, item_name) -> dict:
+        key = f"p{product_id}" if product_id else f"n{item_name}"
+        if key not in items:
+            items[key] = {"product_id": product_id, "item_name": item_name, "sold_qty": 0, "sales": ZERO,
+                          "returned_qty": 0, "returns": ZERO, "cost": ZERO}
+        return items[key]
+
+    for pid, name, qty, amount, unit_cost in (
+        db.query(models.InvoiceItem.product_id, models.InvoiceItem.item_name, models.InvoiceItem.quantity,
+                 models.InvoiceItem.amount, models.InvoiceItem.unit_cost)
+        .join(models.Invoice, models.InvoiceItem.invoice_id == models.Invoice.id)
+        .filter(*inv_filter).all()
+    ):
+        r = row(pid, name)
+        r["sold_qty"] += int(qty or 0)
+        r["sales"] += _money(amount)
+        r["cost"] += _money(unit_cost) * int(qty or 0)
+
+    for pid, name, qty, amount, unit_cost, restock in (
+        db.query(models.CreditNoteItem.product_id, models.CreditNoteItem.item_name, models.CreditNoteItem.quantity,
+                 models.CreditNoteItem.amount, models.CreditNoteItem.unit_cost, models.CreditNote.restock)
+        .join(models.CreditNote, models.CreditNoteItem.credit_note_id == models.CreditNote.id)
+        .filter(*cn_filter).all()
+    ):
+        r = row(pid, name)
+        r["returned_qty"] += int(qty or 0)
+        r["returns"] += _money(amount)
+        if restock:
+            r["cost"] -= _money(unit_cost) * int(qty or 0)
+
+    discounts = _money(
+        db.query(func.coalesce(func.sum(models.Invoice.discount_amount), 0)).filter(*inv_filter).scalar()
+    )
+
+    catalog, parents = {}, {}
+    pids = [r["product_id"] for r in items.values() if r["product_id"]]
+    if pids:
+        catalog = {p.id: p for p in db.query(models.Product).filter(models.Product.id.in_(pids)).all()}
+        parent_ids = {p.parent_id for p in catalog.values() if p.parent_id}
+        parents = {p.id: p.name for p in db.query(models.Product).filter(models.Product.id.in_(parent_ids)).all()} if parent_ids else {}
+
+    rows = []
+    for r in items.values():
+        p = catalog.get(r["product_id"])
+        name = r["item_name"]
+        if p:
+            name = f"{parents[p.parent_id]}:{p.name}" if p.parent_id in parents else p.name
+        net = r["sales"] - r["returns"]
+        rows.append({
+            "product_id": r["product_id"], "item_name": name, "sku": p.sku if p else None,
+            "sold_qty": r["sold_qty"], "sales": r["sales"],
+            "returned_qty": r["returned_qty"], "returns": r["returns"],
+            "net_qty": r["sold_qty"] - r["returned_qty"], "net_sales": net,
+            "cost": r["cost"], "gross_profit": net - r["cost"],
+            "avg_price": (r["sales"] / r["sold_qty"]).quantize(CENT, ROUND_HALF_UP) if r["sold_qty"] else ZERO,
+        })
+    rows.sort(key=lambda x: x["net_sales"], reverse=True)
+
+    t = {k: sum((r[k] for r in rows), ZERO) for k in ("sales", "returns", "cost")}
+    totals = {
+        "sold_qty": sum(r["sold_qty"] for r in rows), "returned_qty": sum(r["returned_qty"] for r in rows),
+        "net_qty": sum(r["net_qty"] for r in rows),
+        "sales": t["sales"], "discounts": discounts, "returns": t["returns"],
+        "net_sales": t["sales"] - discounts - t["returns"], "cost": t["cost"],
+        "gross_profit": t["sales"] - discounts - t["returns"] - t["cost"],
+    }
+    for r in rows:
+        for k in ("sales", "returns", "net_sales", "cost", "gross_profit", "avg_price"):
+            r[k] = float(r[k])
+    return {
+        "date_from": date_from, "date_to": date_to, "rows": rows,
+        "totals": {k: (float(v) if isinstance(v, Decimal) else v) for k, v in totals.items()},
+    }
+
+
+# ---------------------------------------------------------------- Inventory Valuation
+@router.get("/inventory-valuation")
+def inventory_valuation(show_zero: bool = False, db: Session = Depends(get_db)):
+    """Stock on hand x cost, per item, as of right now - compared with the Inventory Asset balance in the ledger."""
+    all_products = db.query(models.Product).all()
+    parent_ids = {p.parent_id for p in all_products if p.parent_id}
+    names = {p.id: p.name for p in all_products}
+
+    rows = []
+    negative = no_cost = 0
+    for p in all_products:
+        if p.item_type != STOCK_TRACKED_TYPE or p.id in parent_ids:      # only real stock items (not parents, not services)
+            continue
+        qty = int(p.quantity or 0)
+        if qty == 0 and not show_zero:
+            continue
+        cost, price = _money(p.cost), _money(p.price)
+        if qty < 0:
+            negative += 1
+        if qty > 0 and cost == 0:
+            no_cost += 1
+        rows.append({
+            "product_id": p.id,
+            "name": f"{names[p.parent_id]}:{p.name}" if p.parent_id in names else p.name,
+            "sku": p.sku, "quantity": qty, "cost": cost, "value": cost * qty,
+            "price": price, "retail_value": price * qty,
+        })
+    rows.sort(key=lambda r: r["name"].lower())
+
+    total_qty = sum(r["quantity"] for r in rows)
+    total_value = sum((r["value"] for r in rows), ZERO)
+    total_retail = sum((r["retail_value"] for r in rows), ZERO)
+
+    nets = _nets(db)
+    ledger = sum(
+        (nets.get(a.id, ZERO) for a in db.query(models.Account).filter(models.Account.account_type == "asset")), ZERO
+    )
+    # item costs are kept to 2 decimals (a weighted average), so a few cents of rounding per unit is normal
+    tolerance = sum((Decimal("0.005") * abs(r["quantity"]) for r in rows), ZERO).quantize(CENT, ROUND_HALF_UP)
+    for r in rows:
+        for k in ("cost", "value", "price", "retail_value"):
+            r[k] = float(r[k])
+    return {
+        "as_of": date.today(), "rows": rows,
+        "totals": {"items": len(rows), "quantity": total_qty, "value": float(total_value), "retail_value": float(total_retail)},
+        "ledger_balance": float(ledger), "difference": float(total_value - ledger),
+        "matches_ledger": abs(total_value - ledger) <= max(tolerance, CENT), "rounding_tolerance": float(tolerance),
+        "negative_count": negative, "no_cost_count": no_cost,
+    }
+
+
+# ---------------------------------------------------------------- Expenses by Vendor
+@router.get("/expenses-by-vendor")
+def expenses_by_vendor(date_from: date | None = None, date_to: date | None = None, db: Session = Depends(get_db)):
+    """What each vendor billed in the period, split into stock purchases and other expenses, with what is paid / still owed (void bills ignored)."""
+    date_from, date_to = _sales_range(date_from, date_to)
+
+    bills = (
+        db.query(models.PurchaseBill)
+        .options(
+            joinedload(models.PurchaseBill.vendor),
+            joinedload(models.PurchaseBill.items).joinedload(models.PurchaseBillItem.product),
+        )
+        .filter(models.PurchaseBill.status != "void",
+                models.PurchaseBill.bill_date >= date_from, models.PurchaseBill.bill_date <= date_to)
+        .order_by(models.PurchaseBill.bill_date, models.PurchaseBill.id)
+        .all()
+    )
+
+    vendors: dict[int, dict] = {}
+    for bill in bills:
+        stock = other = ZERO
+        for it in bill.items:
+            amount = _money(it.amount)
+            # a line charged to an expense account is an expense; an item line is stock when the item is tracked
+            # (a line whose item was deleted later is counted as stock, because that is what it was posted as)
+            if it.account_id is None and (it.product is None or it.product.item_type == STOCK_TRACKED_TYPE):
+                stock += amount
+            else:
+                other += amount
+        total, paid = _money(bill.total), _money(bill.amount_paid)
+        v = vendors.setdefault(bill.vendor_id, {
+            "vendor_id": bill.vendor_id, "vendor_name": bill.vendor_name, "bill_count": 0,
+            "stock": ZERO, "other": ZERO, "total": ZERO, "paid": ZERO, "bills": [],
+        })
+        v["bill_count"] += 1
+        v["stock"] += stock
+        v["other"] += other
+        v["total"] += total
+        v["paid"] += paid
+        v["bills"].append({
+            "id": bill.id, "number": bill.bill_number, "vendor_ref": bill.vendor_ref or "",
+            "bill_date": bill.bill_date, "due_date": bill.due_date,
+            "stock": float(stock), "other": float(other), "total": float(total),
+            "paid": float(paid), "balance": float(total - paid),
+        })
+
+    rows = sorted(vendors.values(), key=lambda v: v["total"], reverse=True)
+    totals = {k: sum((v[k] for v in rows), ZERO) for k in ("stock", "other", "total", "paid")}
+    for v in rows:
+        v["balance"] = float(v["total"] - v["paid"])
+        v["share"] = float((v["total"] / totals["total"] * 100).quantize(Decimal("0.1"), ROUND_HALF_UP)) if totals["total"] else 0.0
+        for k in ("stock", "other", "total", "paid"):
+            v[k] = float(v[k])
+    return {
+        "date_from": date_from, "date_to": date_to, "rows": rows,
+        "totals": {**{k: float(x) for k, x in totals.items()}, "balance": float(totals["total"] - totals["paid"]),
+                   "bills": sum(v["bill_count"] for v in rows), "vendors": len(rows)},
+    }
+
+
+# ---------------------------------------------------------------- Cash Flow (indirect method)
+@router.get("/cash-flow")
+def cash_flow(date_from: date | None = None, date_to: date | None = None, db: Session = Depends(get_db)):
+    """Net income, adjusted for what moved in receivables / stock / payables (operating), fixed assets (investing)
+    and loans / equity (financing) - which must add up to the change in cash and bank balances."""
+    date_from, date_to = _sales_range(date_from, date_to)
+
+    accounts = db.query(models.Account).all()
+    labels = _account_labels(accounts)
+    moved = _nets(db, date_from, date_to)                       # debits - credits inside the period
+    before = _nets(db, None, date_from - timedelta(days=1))     # balances at the start
+    upto = _nets(db, None, date_to)                             # balances at the end
+
+    net_income = ZERO
+    operating, investing, financing, cash_accounts = [], [], [], []
+    for a in sorted(accounts, key=lambda a: labels[a.id].lower()):
+        net = moved.get(a.id, ZERO)
+        category = ACCOUNT_CATEGORY.get(a.account_type)
+        if category in ("Income", "Expense"):
+            net_income -= net
+        elif a.account_type in CASH_TYPES:
+            cash_accounts.append({
+                "id": a.id, "name": labels[a.id],
+                "opening": float(before.get(a.id, ZERO)), "closing": float(upto.get(a.id, ZERO)), "change": float(net),
+            })
+        elif net != 0:
+            effect = -net                      # money that went up in an asset is cash spent, and the reverse
+            row = {"id": a.id, "name": labels[a.id], "amount": float(effect)}
+            if a.account_type in CF_INVESTING_TYPES:
+                investing.append(row)
+            elif a.account_type in CF_FINANCING_TYPES:
+                financing.append(row)
+            else:
+                operating.append(row)
+
+    op_adjust = sum((Decimal(str(r["amount"])) for r in operating), ZERO)
+    investing_total = sum((Decimal(str(r["amount"])) for r in investing), ZERO)
+    financing_total = sum((Decimal(str(r["amount"])) for r in financing), ZERO)
+    operating_total = net_income + op_adjust
+    net_change = operating_total + investing_total + financing_total
+
+    beginning = sum((Decimal(str(c["opening"])) for c in cash_accounts), ZERO)
+    ending = sum((Decimal(str(c["closing"])) for c in cash_accounts), ZERO)
+    return {
+        "date_from": date_from, "date_to": date_to,
+        "net_income": float(net_income),
+        "operating": {"title": "Operating Activities", "accounts": operating, "adjustments": float(op_adjust), "total": float(operating_total)},
+        "investing": {"title": "Investing Activities", "accounts": investing, "total": float(investing_total)},
+        "financing": {"title": "Financing Activities", "accounts": financing, "total": float(financing_total)},
+        "net_change": float(net_change),
+        "beginning_cash": float(beginning), "ending_cash": float(ending),
+        "cash_accounts": cash_accounts,
+        "matches": beginning + net_change == ending,
     }
