@@ -3061,6 +3061,7 @@ function ProductFormBody({
   onImagesChanged,
   kind = "item",
   initialName = "",
+  openingStockFromBill = false, // opened from a purchase bill: the bill adds the stock, so On Hand is locked at 0
 }) {
   const isEditMode = Boolean(initialData);
   const isDuplicate = !isEditMode && Boolean(duplicateFrom);
@@ -3452,13 +3453,19 @@ function ProductFormBody({
                     />
                   </div>
                   <div>
-                    <label className={lbl}>On Hand</label>
+                    <label className={lbl}>
+                      On Hand
+                      {openingStockFromBill ? " (this bill adds it)" : ""}
+                    </label>
                     <input
                       type="number"
                       min="0"
-                      value={form.quantity}
+                      disabled={openingStockFromBill}
+                      value={openingStockFromBill ? 0 : form.quantity}
                       onChange={(e) => handleChange("quantity", e.target.value)}
-                      className={inp}
+                      className={
+                        inp + (openingStockFromBill ? " bg-gray-100" : "")
+                      }
                     />
                   </div>
                 </div>
@@ -15811,6 +15818,7 @@ function InvoiceForm({
     "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
   const [quickCustomerName, setQuickCustomerName] = useState(null); // typed name, or null = popup closed
   const [quickItem, setQuickItem] = useState(null); // { name, lineIndex } or null = popup closed
+  const [confirmItem, setConfirmItem] = useState(null); // { name, lineIndex } or null = question closed
   const [invoiceNo, setInvoiceNo] = useState(editInvoice?.invoice_number || "");
   const [pos, setPos] = useState({ x: 0, y: 0 }); // how far the window has been dragged
   const [size, setSize] = useState({ w: null, h: null }); // null = default size until the user resizes
@@ -16000,8 +16008,8 @@ function InvoiceForm({
   };
 
   // Enter on "+ Create new item": save from the popup, reload the list, and fill the line it was typed on
-  const handleQuickItem = async (values) => {
-    const created = await createProduct(values, []);
+  const handleQuickItem = async (values, imageFiles = []) => {
+    const created = await createProduct(values, imageFiles);
     const tree = await getProducts();
     setItems(flattenParents(tree).filter((x) => !(x.subitems?.length > 0)));
     const at = quickItem.lineIndex;
@@ -16122,6 +16130,7 @@ function InvoiceForm({
       Boolean(preview) ||
       showItemForm ||
       Boolean(quickItem) ||
+      Boolean(confirmItem) ||
       quickCustomerName !== null,
   };
   useEffect(() => {
@@ -16433,7 +16442,7 @@ function InvoiceForm({
                             placeholder="Select an item..."
                             searchPlaceholder="Search items..."
                             onCreateNew={(name) =>
-                              setQuickItem({ name, lineIndex: i })
+                              setConfirmItem({ name, lineIndex: i })
                             }
                             createLabel="item"
                             emptyText="No items found"
@@ -16709,10 +16718,20 @@ function InvoiceForm({
             onClose={() => setQuickCustomerName(null)}
           />
         )}
+        {confirmItem && (
+          <ConfirmCreateItemModal
+            name={confirmItem.name}
+            onNo={() => setConfirmItem(null)}
+            onYes={() => {
+              setQuickItem(confirmItem);
+              setConfirmItem(null);
+            }}
+          />
+        )}
         {quickItem && (
-          <QuickItemModal
+          <ProductForm
             initialName={quickItem.name}
-            onSave={handleQuickItem}
+            onSubmit={handleQuickItem}
             onClose={() => setQuickItem(null)}
           />
         )}
@@ -18171,6 +18190,294 @@ const blankBillLine = () => ({
   quantity: "1",
   rate: "",
 });
+// Small popup for "+ New vendor" inside the New Bill form (name is the only required field)
+function QuickVendorModal({ initialName, onSave, onClose }) {
+  const [form, setForm] = useState({
+    name: initialName || "",
+    contact_person: "",
+    phone: "",
+    email: "",
+    address: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  const submit = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!form.name.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({
+        name: form.name.trim(),
+        contact_person: form.contact_person.trim() || null,
+        phone: form.phone.trim() || null,
+        email: form.email.trim() || null,
+        address: form.address.trim() || null,
+      });
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60]">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-1">New vendor</h2>
+        <p className="text-xs text-gray-500 mb-4">
+          Only the name is required. You can edit the vendor later on the
+          Vendors tab.
+        </p>
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">
+            {error}
+          </div>
+        )}
+        <form onSubmit={submit} className="space-y-3">
+          <label className="block text-xs text-gray-500">
+            Vendor name *
+            <input
+              required
+              autoFocus={!initialName}
+              value={form.name}
+              onChange={(e) => set("name", e.target.value)}
+              className={cls + " mt-1"}
+            />
+          </label>
+          <label className="block text-xs text-gray-500">
+            Phone (optional)
+            <input
+              autoFocus={Boolean(initialName)}
+              type="tel"
+              value={form.phone}
+              onChange={(e) => set("phone", e.target.value)}
+              className={cls + " mt-1"}
+            />
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block text-xs text-gray-500">
+              Contact person (optional)
+              <input
+                value={form.contact_person}
+                onChange={(e) => set("contact_person", e.target.value)}
+                className={cls + " mt-1"}
+              />
+            </label>
+            <label className="block text-xs text-gray-500">
+              Email (optional)
+              <input
+                type="email"
+                value={form.email}
+                onChange={(e) => set("email", e.target.value)}
+                className={cls + " mt-1"}
+              />
+            </label>
+          </div>
+          <label className="block text-xs text-gray-500">
+            Address (optional)
+            <textarea
+              rows={2}
+              value={form.address}
+              onChange={(e) => set("address", e.target.value)}
+              className={cls + " mt-1"}
+            />
+          </label>
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !form.name.trim()}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save vendor"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Small popup for "+ New item" inside the New Bill form. No opening stock here: the bill itself adds the stock.
+function QuickBillItemModal({ initialName, onSave, onClose }) {
+  const [form, setForm] = useState({
+    name: initialName || "",
+    item_type: "Inventory Part",
+    sku: "",
+    cost: "",
+    price: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  const submit = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!form.name.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({
+        name: form.name.trim(),
+        item_type: form.item_type,
+        sku: form.sku.trim(),
+        cost: Number(form.cost) || 0,
+        price: Number(form.price) || 0,
+      });
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60]">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold mb-1">New item</h2>
+        <p className="text-xs text-gray-500 mb-4">
+          Stock comes from this bill, so there is no opening quantity. You can
+          edit the item fully later in Products.
+        </p>
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">
+            {error}
+          </div>
+        )}
+        <form onSubmit={submit} className="space-y-3">
+          <label className="block text-xs text-gray-500">
+            Item name *
+            <input
+              required
+              autoFocus={!initialName}
+              value={form.name}
+              onChange={(e) => set("name", e.target.value)}
+              className={cls + " mt-1"}
+            />
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block text-xs text-gray-500">
+              Item type
+              <select
+                value={form.item_type}
+                onChange={(e) => set("item_type", e.target.value)}
+                className={cls + " mt-1"}
+              >
+                {ITEM_TYPES.filter((t) => t !== "Inventory Assembly").map((t) => (
+                  <option key={t}>{t}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-xs text-gray-500">
+              SKU (optional)
+              <input
+                value={form.sku}
+                onChange={(e) => set("sku", e.target.value)}
+                className={cls + " mt-1"}
+              />
+            </label>
+            <label className="block text-xs text-gray-500">
+              Purchase cost (optional)
+              <input
+                autoFocus={Boolean(initialName)}
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.cost}
+                onChange={(e) => set("cost", e.target.value)}
+                className={cls + " mt-1"}
+              />
+            </label>
+            <label className="block text-xs text-gray-500">
+              Selling price (optional)
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.price}
+                onChange={(e) => set("price", e.target.value)}
+                className={cls + " mt-1"}
+              />
+            </label>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !form.name.trim()}
+              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save item"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Asked first when a typed item is not found: lets the user decide before the full item form opens.
+function ConfirmCreateItemModal({ name, onYes, onNo }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60]">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+        <h2 className="text-lg font-semibold mb-2">Item not in stock</h2>
+        <p className="text-sm text-gray-600 mb-4">
+          {name ? (
+            <>
+              <span className="font-medium text-gray-900">"{name}"</span> is
+              not in your item list yet.
+            </>
+          ) : (
+            "This item is not in your item list yet."
+          )}{" "}
+          Do you want to create it now? You can choose Item or Subitem on the
+          next screen.
+        </p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onNo}
+            className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+          >
+            No
+          </button>
+          <button
+            type="button"
+            autoFocus
+            onClick={onYes}
+            className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700"
+          >
+            Yes, create item
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function PurchaseBillForm({ onClose, onSaved }) {
   const [vendors, setVendors] = useState([]);
@@ -18185,6 +18492,9 @@ function PurchaseBillForm({ onClose, onSaved }) {
   const [lines, setLines] = useState([blankBillLine()]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [quickVendorName, setQuickVendorName] = useState(null); // typed name, or null = popup closed
+  const [quickItem, setQuickItem] = useState(null); // { name, lineIndex } or null = popup closed
+  const [confirmItem, setConfirmItem] = useState(null); // { name, lineIndex } or null = question closed
   const cls =
     "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
 
@@ -18232,6 +18542,28 @@ function PurchaseBillForm({ onClose, onSaved }) {
       product_id: productId,
       description: p?.purchase_description || "",
       rate: p && Number(p.cost) > 0 ? String(p.cost) : "",
+    });
+  };
+
+  // "+ New vendor": save from the popup, add it to the dropdown and select it
+  const handleQuickVendor = async (payload) => {
+    const created = await createVendor(payload);
+    setVendors((prev) => [...prev, created]);
+    setVendorId(created.id);
+  };
+
+  // "+ New item": save from the popup, reload the item list and fill the line it was opened from.
+  // Stock is NOT entered here - this bill adds it (so it is logged and posted to the ledger).
+  const handleQuickItem = async (values, imageFiles = []) => {
+    const created = await createProduct({ ...values, quantity: 0 }, imageFiles);
+    const tree = await getProducts();
+    setItems(flattenParents(tree).filter((x) => !(x.subitems?.length > 0)));
+    setLine(quickItem.lineIndex, {
+      kind: "item",
+      product_id: created.id,
+      account_id: "",
+      description: created.purchase_description || "",
+      rate: Number(created.cost) > 0 ? String(created.cost) : "",
     });
   };
 
@@ -18292,14 +18624,28 @@ function PurchaseBillForm({ onClose, onSaved }) {
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <FieldLabel>Vendor</FieldLabel>
+            <FieldLabel
+              action={
+                <button
+                  type="button"
+                  onClick={() => setQuickVendorName("")}
+                  className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+                >
+                  <Plus size={14} /> New vendor
+                </button>
+              }
+            >
+              Vendor
+            </FieldLabel>
             <SearchSelect
               value={vendorId}
               onChange={setVendorId}
               options={vendorOptions}
               placeholder="Select a vendor..."
               searchPlaceholder="Search vendors..."
-              emptyText="No vendors found. Add one on the Vendors tab first."
+              emptyText="No vendors found. Type a name to create one."
+              onCreateNew={(name) => setQuickVendorName(name)}
+              createLabel="vendor"
             />
           </div>
 
@@ -18373,29 +18719,42 @@ function PurchaseBillForm({ onClose, onSaved }) {
                       </div>
                     )}
                     <div className="flex-1 min-w-0 space-y-2">
-                      <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs">
-                        {[
-                          ["item", "Item"],
-                          ["expense", "Expense"],
-                        ].map(([k, label]) => (
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs">
+                          {[
+                            ["item", "Item"],
+                            ["expense", "Expense"],
+                          ].map(([k, label]) => (
+                            <button
+                              key={k}
+                              type="button"
+                              onClick={() =>
+                                l.kind !== k &&
+                                setLine(i, {
+                                  kind: k,
+                                  product_id: "",
+                                  account_id: "",
+                                  description: "",
+                                  rate: "",
+                                })
+                              }
+                              className={`px-3 py-1 ${l.kind === k ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        {l.kind === "item" && (
                           <button
-                            key={k}
                             type="button"
                             onClick={() =>
-                              l.kind !== k &&
-                              setLine(i, {
-                                kind: k,
-                                product_id: "",
-                                account_id: "",
-                                description: "",
-                                rate: "",
-                              })
+                              setConfirmItem({ name: "", lineIndex: i })
                             }
-                            className={`px-3 py-1 ${l.kind === k ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                            className="text-xs text-blue-600 font-medium inline-flex items-center gap-1"
                           >
-                            {label}
+                            <Plus size={12} /> New item
                           </button>
-                        ))}
+                        )}
                       </div>
                       {l.kind === "item" ? (
                         <SearchSelect
@@ -18404,7 +18763,11 @@ function PurchaseBillForm({ onClose, onSaved }) {
                           options={itemOptions}
                           placeholder="Select an item..."
                           searchPlaceholder="Search items..."
-                          emptyText="No items found"
+                          emptyText="No items found. Type a name to create one."
+                          onCreateNew={(name) =>
+                            setConfirmItem({ name, lineIndex: i })
+                          }
+                          createLabel="item"
                         />
                       ) : (
                         <SearchSelect
@@ -18522,6 +18885,32 @@ function PurchaseBillForm({ onClose, onSaved }) {
           </div>
         </form>
       </div>
+
+      {quickVendorName !== null && (
+        <QuickVendorModal
+          initialName={quickVendorName}
+          onSave={handleQuickVendor}
+          onClose={() => setQuickVendorName(null)}
+        />
+      )}
+      {confirmItem && (
+        <ConfirmCreateItemModal
+          name={confirmItem.name}
+          onNo={() => setConfirmItem(null)}
+          onYes={() => {
+            setQuickItem(confirmItem);
+            setConfirmItem(null);
+          }}
+        />
+      )}
+      {quickItem && (
+        <ProductForm
+          initialName={quickItem.name}
+          openingStockFromBill
+          onSubmit={handleQuickItem}
+          onClose={() => setQuickItem(null)}
+        />
+      )}
     </div>
   );
 }
@@ -19390,7 +19779,6 @@ function SubmitBillModal({ lines, onSubmit, onClose, initialName = "" }) {
     </div>
   );
 }
-// ---------- New bill form ----------
 function NewBillForm({ onBack, onSaved, editBill = null }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -19401,7 +19789,9 @@ function NewBillForm({ onBack, onSaved, editBill = null }) {
   const [lines, setLines] = useState([]); // [{ product, quantity }]
   const [formError, setFormError] = useState(null);
 
-  const [showCreateItem, setShowCreateItem] = useState(false);
+  const [showCreateItem, setShowCreateItem] = useState(false); // true = full item form open
+  const [newItemName, setNewItemName] = useState(""); // name typed in the item box, pre-filled in the form
+  const [confirmItem, setConfirmItem] = useState(null); // { name } or null = question closed
   const [showSubmit, setShowSubmit] = useState(false);
 
   useEffect(() => {
@@ -19447,11 +19837,11 @@ function NewBillForm({ onBack, onSaved, editBill = null }) {
     label: p.label,
     hint: `${p.quantity} in stock`,
   }));
-  const handleCreateItem = async (values, imageFiles) => {
-    const created = await createProduct(values, imageFiles);
-    setProducts((prev) => [...prev, created]);
+  // Stock is NOT entered in the item form - this bill adds it (so it is logged with a timestamp)
+  const handleCreateItem = async (values, imageFiles = []) => {
+    const created = await createProduct({ ...values, quantity: 0 }, imageFiles);
+    setProducts(await getProducts()); // reload the tree so a new subitem shows under its parent
     setItemId(String(created.id));
-    setShowCreateItem(false);
   };
 
   const handleAddToList = () => {
@@ -19529,22 +19919,13 @@ function NewBillForm({ onBack, onSaved, editBill = null }) {
               <div>
                 <FieldLabel
                   action={
-                    <FieldButton onClick={() => setShowCreateItem((v) => !v)}>
+                    <FieldButton onClick={() => setConfirmItem({ name: "" })}>
                       Create Item
                     </FieldButton>
                   }
                 >
                   Item
                 </FieldLabel>
-
-                {showCreateItem && (
-                  <CreateItemPanel
-                    existingNames={allItems.map((p) => p.name.toLowerCase())}
-                    parentOptions={allItems.filter((p) => !p.parent_id)}
-                    onCreate={handleCreateItem}
-                    onCancel={() => setShowCreateItem(false)}
-                  />
-                )}
 
                 <SearchSelect
                   value={itemId}
@@ -19559,6 +19940,8 @@ function NewBillForm({ onBack, onSaved, editBill = null }) {
                   emptyText={
                     billableItems.length ? "No item found" : "No items yet"
                   }
+                  onCreateNew={(name) => setConfirmItem({ name })}
+                  createLabel="item"
                 />
                 {billableItems.length === 0 && !showCreateItem && (
                   <p className="text-xs text-gray-400 mt-1.5">
@@ -19712,6 +20095,26 @@ function NewBillForm({ onBack, onSaved, editBill = null }) {
           </>
         )}
       </main>
+
+      {confirmItem && (
+        <ConfirmCreateItemModal
+          name={confirmItem.name}
+          onNo={() => setConfirmItem(null)}
+          onYes={() => {
+            setNewItemName(confirmItem.name);
+            setShowCreateItem(true);
+            setConfirmItem(null);
+          }}
+        />
+      )}
+      {showCreateItem && (
+        <ProductForm
+          initialName={newItemName}
+          openingStockFromBill
+          onSubmit={handleCreateItem}
+          onClose={() => setShowCreateItem(false)}
+        />
+      )}
 
       {showSubmit && (
         <SubmitBillModal
