@@ -5873,7 +5873,495 @@ function ItemRowWithSubitems({
   );
 }
 
-// ---------- Items page: flat A-Z item list (with subitems nested) -> full item card ----------
+// ---------- Items "Table version" (QuickBooks Desktop style Item List) ----------
+// Saved per company on this device. "show" = visible by default; "locked" = can't be removed.
+const ITEM_TABLE_COLS_KEY = "item_table_cols_v1";
+const ITEM_TABLE_DEFS = [
+  { key: "name", label: "Item Name", locked: true, show: true },
+  { key: "type", label: "Type", show: true },
+  { key: "description", label: "Description", show: true },
+  { key: "account", label: "Account", show: true },
+  { key: "cost", label: "Cost", right: true, show: true },
+  { key: "price", label: "Sales Price", right: true, show: true },
+  { key: "onhand", label: "On Hand", right: true, show: true },
+  { key: "value", label: "On Hand Value", right: true, show: true },
+  { key: "reorder", label: "Reorder Point", right: true, show: true },
+  { key: "vendor", label: "Preferred Vendor", show: true },
+  // extra columns, hidden until chosen in Customize Columns
+  { key: "sku", label: "SKU", show: false },
+  { key: "mpn", label: "Manufacturer Part No.", show: false },
+  { key: "purchase_description", label: "Purchase Description", show: false },
+  { key: "cogs", label: "COGS Account", show: false },
+  { key: "asset", label: "Asset Account", show: false },
+  { key: "reorder_max", label: "Max Stock", right: true, show: false },
+];
+
+function useItemTableColumns() {
+  const { company } = useCompany();
+  const storageKey = `${ITEM_TABLE_COLS_KEY}${company?.id ? `:${company.id}` : ""}`;
+  const defaults = ITEM_TABLE_DEFS.map((c) => ({ key: c.key, visible: c.show }));
+
+  const read = (key) => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(key) || "null");
+      if (Array.isArray(saved)) {
+        const known = ITEM_TABLE_DEFS.map((c) => c.key);
+        const savedCols = saved.filter((c) => known.includes(c.key));
+        const missing = defaults.filter(
+          (c) => !savedCols.some((s) => s.key === c.key),
+        );
+        return [...savedCols, ...missing].map((c) => ({
+          key: c.key,
+          visible:
+            Boolean(ITEM_TABLE_DEFS.find((d) => d.key === c.key)?.locked) ||
+            Boolean(c.visible),
+        }));
+      }
+    } catch (e) {
+      /* ignore broken saved data */
+    }
+    return defaults;
+  };
+
+  const [cols, setCols] = useState(() => read(storageKey));
+  useEffect(() => {
+    setCols(read(storageKey));
+  }, [storageKey]);
+
+  const save = (next) => {
+    setCols(next);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(next));
+    } catch (e) {
+      /* storage blocked */
+    }
+  };
+  return [cols, save, defaults];
+}
+
+const itemTableNum = (n) =>
+  Number(n || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+// Builds the visible rows: filters (search + type), rolls stock up into parent rows,
+// sorts every level, then flattens the tree into one ordered list.
+function buildItemTableRows(products, { q, typeFilter, sort, collapsed }) {
+  const haystack = (p) =>
+    [
+      p.name,
+      p.sku,
+      p.description,
+      p.purchase_description,
+      p.manufacturer_part_number,
+      p.item_type,
+      p.income_account?.name,
+      p.preferred_vendor?.name,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+  const build = (p, depth, parentHit) => {
+    const hit = parentHit || !q || haystack(p).includes(q);
+    const kids = (p.subitems || [])
+      .map((k) => build(k, depth + 1, hit))
+      .filter(Boolean);
+    const isParent = (p.subitems || []).length > 0;
+    if (isParent) {
+      if (kids.length === 0) return null;
+    } else if (!hit || (typeFilter !== "all" && p.item_type !== typeFilter)) {
+      return null;
+    }
+    const tracked = isParent
+      ? kids.some((k) => k._tracked)
+      : p.item_type === STOCK_TRACKED_TYPE;
+    const qty = isParent
+      ? kids.reduce((s, k) => s + k._qty, 0)
+      : tracked
+        ? Number(p.quantity || 0)
+        : 0;
+    const value = isParent
+      ? kids.reduce((s, k) => s + k._value, 0)
+      : tracked
+        ? qty * Number(p.cost || 0)
+        : 0;
+    return {
+      ...p,
+      _src: p,
+      _depth: depth,
+      _isParent: isParent,
+      _kids: kids,
+      _tracked: tracked,
+      _qty: qty,
+      _value: value,
+    };
+  };
+
+  const sortVal = (n) => {
+    switch (sort.key) {
+      case "type":
+        return n.item_type || "";
+      case "description":
+        return n.description || "";
+      case "purchase_description":
+        return n.purchase_description || "";
+      case "account":
+        return n.income_account?.name || "";
+      case "cogs":
+        return n.cogs_account?.name || "";
+      case "asset":
+        return n.asset_account?.name || "";
+      case "vendor":
+        return n.preferred_vendor?.name || "";
+      case "sku":
+        return n.sku || "";
+      case "mpn":
+        return n.manufacturer_part_number || "";
+      case "cost":
+        return n._isParent ? 0 : Number(n.cost || 0);
+      case "price":
+        return n._isParent ? 0 : Number(n.price || 0);
+      case "onhand":
+        return n._qty;
+      case "value":
+        return n._value;
+      case "reorder":
+        return n.reorder_min ?? -1;
+      case "reorder_max":
+        return n.reorder_max ?? -1;
+      default:
+        return n.name || "";
+    }
+  };
+  const cmp = (a, b) => {
+    const x = sortVal(a);
+    const y = sortVal(b);
+    const r =
+      typeof x === "number"
+        ? x - y || compareNames(a.name, b.name)
+        : compareNames(x, y) || compareNames(a.name, b.name);
+    return sort.dir === "asc" ? r : -r;
+  };
+
+  const out = [];
+  const walk = (n) => {
+    out.push(n);
+    if (!collapsed.has(n.id) || q) [...n._kids].sort(cmp).forEach(walk);
+  };
+  products
+    .map((p) => build(p, 0, false))
+    .filter(Boolean)
+    .sort(cmp)
+    .forEach(walk);
+  return out;
+}
+
+function ItemsTableView({
+  products,
+  loading,
+  error,
+  onContextMenuItem,
+  onOpenItem,
+}) {
+  const [cols, saveCols, colsDefault] = useItemTableColumns();
+  const [colsOpen, setColsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [sort, setSort] = useState({ key: "name", dir: "asc" });
+  const [selectedId, setSelectedId] = useState(null);
+  const [collapsed, setCollapsed] = useState(() => new Set());
+
+  const q = search.trim().toLowerCase();
+  const rows = buildItemTableRows(products, { q, typeFilter, sort, collapsed });
+  const visCols = cols
+    .filter((c) => c.visible)
+    .map((c) => ITEM_TABLE_DEFS.find((d) => d.key === c.key))
+    .filter(Boolean);
+
+  // totals count real (leaf) items only, so a parent's rolled-up stock is never added twice
+  const leaves = rows.filter((r) => !r._isParent);
+  const totalQty = leaves.reduce((s, r) => s + r._qty, 0);
+  const totalValue = leaves.reduce((s, r) => s + r._value, 0);
+
+  const toggleSort = (key) =>
+    setSort((s) =>
+      s.key === key
+        ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "asc" },
+    );
+  const toggleCollapsed = (id) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const cell = (key, n) => {
+    const blank = <span className="text-gray-300">—</span>;
+    switch (key) {
+      case "name":
+        return (
+          <span
+            className="inline-flex items-center gap-1"
+            style={{ paddingLeft: n._depth * 18 }}
+          >
+            {n._isParent ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleCollapsed(n.id);
+                }}
+                className="text-gray-500 hover:text-gray-800 shrink-0"
+                aria-label={collapsed.has(n.id) ? "Expand" : "Collapse"}
+              >
+                {collapsed.has(n.id) && !q ? (
+                  <ChevronRight size={14} />
+                ) : (
+                  <ChevronDown size={14} />
+                )}
+              </button>
+            ) : n._depth > 0 ? (
+              <span className="text-gray-400 shrink-0 w-3.5 text-center">
+                ↳
+              </span>
+            ) : (
+              <span className="w-3.5 shrink-0" />
+            )}
+            <span className={n._isParent ? "font-semibold" : "font-medium"}>
+              {n.name}
+            </span>
+          </span>
+        );
+      case "type":
+        return n._isParent ? blank : n.item_type;
+      case "description":
+        return (
+          <span
+            className="block max-w-[22rem] truncate text-gray-600"
+            title={n.description || ""}
+          >
+            {n.description || ""}
+          </span>
+        );
+      case "purchase_description":
+        return (
+          <span
+            className="block max-w-[22rem] truncate text-gray-600"
+            title={n.purchase_description || ""}
+          >
+            {n.purchase_description || ""}
+          </span>
+        );
+      case "account":
+        return n.income_account?.name || "";
+      case "cogs":
+        return n.cogs_account?.name || "";
+      case "asset":
+        return n.asset_account?.name || "";
+      case "vendor":
+        return n.preferred_vendor?.name || "";
+      case "sku":
+        return n.sku || "";
+      case "mpn":
+        return n.manufacturer_part_number || "";
+      case "cost":
+        return n._isParent ? "" : itemTableNum(n.cost);
+      case "price":
+        return n._isParent ? "" : itemTableNum(n.price);
+      case "onhand": {
+        if (!n._tracked) return "";
+        const low = !n._isParent && isLowStock(n);
+        return (
+          <span
+            className={
+              n._qty <= 0
+                ? "text-red-600 font-medium"
+                : low
+                  ? "text-amber-600 font-medium"
+                  : ""
+            }
+          >
+            {n._qty}
+          </span>
+        );
+      }
+      case "value":
+        return n._tracked ? itemTableNum(n._value) : "";
+      case "reorder":
+        return n._isParent || n.reorder_min == null ? "" : n.reorder_min;
+      case "reorder_max":
+        return n._isParent || n.reorder_max == null ? "" : n.reorder_max;
+      default:
+        return "";
+    }
+  };
+
+  const th =
+    "px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-600 border-r border-gray-300 cursor-pointer select-none whitespace-nowrap";
+
+  return (
+    <div className="bg-white border border-gray-300 rounded-sm">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2 border-b border-gray-200 bg-gray-50">
+        <label className="flex items-center gap-2 text-[11px] uppercase text-gray-500">
+          Search
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Name, SKU, description, vendor..."
+            className="border border-gray-300 rounded-sm px-2 py-1 text-sm normal-case w-60 bg-white focus:outline-none focus:border-blue-500"
+          />
+        </label>
+        <label className="flex items-center gap-2 text-[11px] uppercase text-gray-500">
+          Type
+          <select
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+            className="border border-gray-300 rounded-sm px-2 py-1 text-sm normal-case bg-white focus:outline-none focus:border-blue-500"
+          >
+            <option value="all">All</option>
+            {ITEM_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={() => setColsOpen(true)}
+          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-sm text-sm border border-gray-300 bg-white hover:bg-gray-100 text-gray-700"
+        >
+          <Settings size={14} /> Customize Columns
+        </button>
+        <span className="ml-auto text-xs text-gray-500">
+          {leaves.length} {leaves.length === 1 ? "item" : "items"}
+        </span>
+      </div>
+
+      {loading ? (
+        <p className="text-gray-400 text-center py-16">Loading...</p>
+      ) : error && products.length === 0 ? (
+        <p className="text-red-500 text-center py-16">{error}</p>
+      ) : products.length === 0 ? (
+        <p className="text-gray-400 text-center py-16">No items yet.</p>
+      ) : rows.length === 0 ? (
+        <p className="text-gray-400 text-center py-16">
+          Nothing matches your search.
+        </p>
+      ) : (
+        <div className="overflow-auto max-h-[calc(100vh-250px)]">
+          <table className="w-full text-sm border-collapse">
+            <thead className="sticky top-0 z-10 bg-gray-100 border-b border-gray-300">
+              <tr>
+                {visCols.map((c) => (
+                  <th
+                    key={c.key}
+                    onClick={() => toggleSort(c.key)}
+                    onContextMenu={(e) => {
+                      e.preventDefault(); // right-click a header = Customize Columns (like QuickBooks)
+                      setColsOpen(true);
+                    }}
+                    className={`${th} ${c.right ? "text-right" : "text-left"}`}
+                  >
+                    {c.label}
+                    {sort.key === c.key && (
+                      <span className="ml-1 text-[9px]">
+                        {sort.dir === "asc" ? "▲" : "▼"}
+                      </span>
+                    )}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((n, i) => {
+                const selected = n.id === selectedId;
+                return (
+                  <tr
+                    key={n.id}
+                    onClick={() => setSelectedId(n.id)}
+                    onDoubleClick={() => onOpenItem(n.id)}
+                    onContextMenu={
+                      onContextMenuItem
+                        ? (e) => {
+                            e.preventDefault();
+                            setSelectedId(n.id);
+                            onContextMenuItem(n._src, e.clientX, e.clientY);
+                          }
+                        : undefined
+                    }
+                    className={`cursor-default border-b border-gray-100 ${
+                      selected
+                        ? "bg-blue-600 text-white"
+                        : n._isParent
+                          ? "bg-gray-100 hover:bg-gray-200"
+                          : i % 2
+                            ? "bg-gray-50 hover:bg-blue-50"
+                            : "bg-white hover:bg-blue-50"
+                    }`}
+                  >
+                    {visCols.map((c) => (
+                      <td
+                        key={c.key}
+                        className={`px-3 py-1 border-r border-gray-100 whitespace-nowrap ${
+                          c.right ? "text-right tabular-nums" : "text-left"
+                        }`}
+                      >
+                        {cell(c.key, n)}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot className="sticky bottom-0 bg-gray-100 border-t-2 border-gray-300 font-semibold">
+              <tr>
+                {visCols.map((c, i) => (
+                  <td
+                    key={c.key}
+                    className={`px-3 py-1.5 whitespace-nowrap ${c.right ? "text-right tabular-nums" : "text-left"}`}
+                  >
+                    {i === 0
+                      ? "Total"
+                      : c.key === "onhand"
+                        ? totalQty
+                        : c.key === "value"
+                          ? itemTableNum(totalValue)
+                          : ""}
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+
+      <p className="px-3 py-1.5 text-[11px] text-gray-400 border-t border-gray-200">
+        Click a column to sort · double-click an item to open it · right-click
+        for more options · right-click a column heading to customize columns
+      </p>
+
+      {colsOpen && (
+        <BillColumnsDialog
+          title="Item List"
+          defs={ITEM_TABLE_DEFS}
+          defaults={colsDefault}
+          cols={cols}
+          onSave={(next) => {
+            saveCols(next);
+            setColsOpen(false);
+          }}
+          onClose={() => setColsOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+
 function ItemsPage({
   isAdmin,
   itemId,
@@ -5883,6 +6371,8 @@ function ItemsPage({
   onProductAdded,
 }) {
   const { can } = useAuth();
+  const [params] = useSearchParams();
+  const tableMode = params.get("list") === "table"; // sidebar > Items > "Table version"
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -5945,6 +6435,11 @@ function ItemsPage({
     setProducts(await getProducts());
   };
 
+  // Back from an item opened out of the table version returns to the table version
+  const itemsHome = tableMode
+    ? { view: "items", list: "table" }
+    : { view: "items" };
+
   const handleDelete = async () => {
     const target = deleteTarget;
     try {
@@ -5952,7 +6447,7 @@ function ItemsPage({
       setDeleteTarget(null);
       setProducts(await getProducts());
       if (String(itemId) === String(target.id)) {
-        navigateFrom(fromParam, go, { view: "items" }); // the open item is gone
+        navigateFrom(fromParam, go, itemsHome); // the open item is gone
       }
     } catch (err) {
       alert(err.message);
@@ -6021,7 +6516,7 @@ function ItemsPage({
   );
 
   if (itemId) {
-    const back = () => navigateFrom(fromParam, go, { view: "items" });
+    const back = () => navigateFrom(fromParam, go, itemsHome);
     const item = findItemById(products, itemId);
     const parentName = item?.parent_id
       ? findItemById(products, item.parent_id)?.name
@@ -6053,6 +6548,74 @@ function ItemsPage({
     );
   }
 
+  // small "Default list | Table version" switch (also works for the top-toolbar menu and non-admin users)
+  const modeSwitch = (
+    <div className="inline-flex shrink-0 text-xs">
+      {[
+        ["default", "Default list"],
+        ["table", "Table version"],
+      ].map(([mode, label]) => {
+        const on = (mode === "table") === tableMode;
+        return (
+          <button
+            key={mode}
+            type="button"
+            onClick={() =>
+              go(
+                mode === "table"
+                  ? { view: "items", list: "table" }
+                  : { view: "items" },
+              )
+            }
+            className={`px-3 py-1.5 border first:rounded-l-md last:rounded-r-md -ml-px first:ml-0 ${
+              on
+                ? "bg-blue-600 border-blue-600 text-white relative z-10"
+                : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  // ---------- TABLE VERSION (QuickBooks Desktop style Item List) ----------
+  if (tableMode) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <AppHeader
+          isAdmin={isAdmin}
+          active="items"
+          onProductAdded={onProductAdded}
+          onTab={(tab) => go(tab === "home" ? {} : { view: tab })}
+        />
+        <main className="p-3 sm:p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h1 className="text-base font-semibold text-gray-800">Item List</h1>
+            {modeSwitch}
+          </div>
+          <ItemsTableView
+            products={products}
+            loading={loading}
+            error={error}
+            onOpenItem={(id) =>
+              go({
+                view: "items",
+                item: String(id),
+                from: "view=items&list=table",
+              })
+            }
+            onContextMenuItem={
+              hasAnyAction ? (p, x, y) => setMenu({ item: p, x, y }) : undefined
+            }
+          />
+        </main>
+        {overlays}
+      </div>
+    );
+  }
+
   // flat A-Z list of top-level items, each with its subitems nested underneath
   const q = search.trim().toLowerCase();
   const sortedProducts = [...products].sort((a, b) =>
@@ -6071,11 +6634,16 @@ function ItemsPage({
       <main className="p-4 sm:p-6 w-full max-w-6xl flex items-start gap-6">
         <div className="flex-1 min-w-0 max-w-3xl">
           <div className="mb-5">
-            <SearchBox
-              value={search}
-              onChange={setSearch}
-              placeholder="Search items..."
-            />
+            <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0">
+                <SearchBox
+                  value={search}
+                  onChange={setSearch}
+                  placeholder="Search items..."
+                />
+              </div>
+              {modeSwitch}
+            </div>
             {isAdmin && (
               <p className="text-xs text-gray-400 mt-1.5">
                 Hold an item to add stock · right-click for more options
@@ -22548,26 +23116,52 @@ function windowLabel(params) {
 function ZohoSidebar({ onNavigate }) {
   const [params, setParams] = useSearchParams();
   const activeId = params.get("view") || "home";
+  const itemsMode = params.get("list") === "table" ? "table" : "default";
   const { can, hasRight, openMode } = useAuth();
 
-    const wins = useWindows();
-    const [, setNavLayout] = useNavLayout();
+  const wins = useWindows();
+  const [, setNavLayout] = useNavLayout();
 
-    // Ctrl / Cmd / Shift + click = open that page in a new window
-    const go = (id, inNewWindow = false) => {
-      if (inNewWindow && wins) {
-        wins.openWindow(id === "home" ? "" : `view=${id}`);
-      } else {
-        setParams(id === "home" ? {} : { view: id });
-      }
-      onNavigate?.();
-    };
+  // the Items button has a child dropdown: "Default list" and "Table version"
+  const [itemsOpen, setItemsOpen] = useState(activeId === "items");
+  useEffect(() => {
+    if (activeId === "items") setItemsOpen(true);
+  }, [activeId]);
+
+  // Ctrl / Cmd / Shift + click = open that page in a new window
+  const go = (id, inNewWindow = false, mode = "default") => {
+    const tableQuery = id === "items" && mode === "table";
+    if (inNewWindow && wins) {
+      wins.openWindow(
+        id === "home" ? "" : `view=${id}${tableQuery ? "&list=table" : ""}`,
+      );
+    } else {
+      setParams(
+        id === "home"
+          ? {}
+          : tableQuery
+            ? { view: id, list: "table" }
+            : { view: id },
+      );
+    }
+    onNavigate?.();
+  };
   const rowCls = (active) =>
     `w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-left transition ${
       active
         ? "bg-blue-500 text-white"
         : "text-gray-300 hover:bg-white/10 hover:text-white"
     }`;
+  const childCls = (active) =>
+    `w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-[13px] text-left transition ${
+      active
+        ? "bg-blue-500 text-white"
+        : "text-gray-300 hover:bg-white/10 hover:text-white"
+    }`;
+  const ITEMS_CHILDREN = [
+    { mode: "default", label: "Default list" },
+    { mode: "table", label: "Table version" },
+  ];
 
   return (
     <div className="flex flex-col min-h-full">
@@ -22584,19 +23178,68 @@ function ZohoSidebar({ onNavigate }) {
               key={gi}
               className={gi > 0 ? "mt-2 pt-2 border-t border-white/10" : ""}
             >
-              {items.map(({ id, label, Icon }) => (
-                <div key={id}>
-                  <button
-                    onClick={(e) =>
-                      go(id, e.ctrlKey || e.metaKey || e.shiftKey)
-                    }
-                    className={rowCls(activeId === id)}
-                  >
-                    <Icon size={16} className="shrink-0" />
-                    <span className="flex-1 truncate">{label}</span>
-                  </button>
-                </div>
-              ))}
+              {items.map(({ id, label, Icon }) => {
+                const hasChildren = id === "items";
+                const open = hasChildren && itemsOpen;
+                return (
+                  <div key={id}>
+                    <button
+                      onClick={(e) =>
+                        go(id, e.ctrlKey || e.metaKey || e.shiftKey)
+                      }
+                      className={rowCls(
+                        activeId === id && !(hasChildren && open),
+                      )}
+                    >
+                      <Icon size={16} className="shrink-0" />
+                      <span className="flex-1 truncate">{label}</span>
+                      {hasChildren && (
+                        <span
+                          role="button"
+                          aria-label={
+                            open ? "Hide Items options" : "Show Items options"
+                          }
+                          onClick={(e) => {
+                            e.stopPropagation(); // only opens / closes the dropdown, does not leave the page
+                            setItemsOpen((v) => !v);
+                          }}
+                          className="shrink-0 p-0.5 -mr-1 rounded hover:bg-white/10"
+                        >
+                          <ChevronDown
+                            size={14}
+                            className={`transition-transform ${open ? "" : "-rotate-90"}`}
+                          />
+                        </span>
+                      )}
+                    </button>
+                    {open && (
+                      <div className="ml-5 mt-0.5 mb-1 pl-2 border-l border-white/15 space-y-0.5">
+                        {ITEMS_CHILDREN.map((c) => (
+                          <button
+                            key={c.mode}
+                            onClick={(e) =>
+                              go(
+                                "items",
+                                e.ctrlKey || e.metaKey || e.shiftKey,
+                                c.mode,
+                              )
+                            }
+                            className={childCls(
+                              activeId === "items" && itemsMode === c.mode,
+                            )}
+                          >
+                            <CornerDownRight
+                              size={12}
+                              className="shrink-0 opacity-70"
+                            />
+                            <span className="truncate">{c.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           );
         })}
