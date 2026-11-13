@@ -1017,6 +1017,8 @@ const createPurchaseBill = (payload) =>
   purchaseBillRequest("", "POST", payload, "Failed to save bill");
 const voidPurchaseBill = (id) =>
   purchaseBillRequest(`${id}/void`, "PUT", null, "Failed to void bill");
+const deletePurchaseBill = (id) =>
+  purchaseBillRequest(String(id), "DELETE", null, "Failed to delete bill");
 
 // ---------- Vendor payments (payments made) ----------
 async function vendorPaymentRequest(path, method, payload, failMsg) {
@@ -16720,6 +16722,21 @@ function PurchaseBillsPage({ isAdmin, go }) {
     }
   };
 
+    const handleDelete = async (b) => {
+      if (
+        !window.confirm(
+          `Permanently delete ${b.bill_number}? This can't be undone.`,
+        )
+      )
+        return;
+      try {
+        await deletePurchaseBill(b.id);
+        await load();
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+
   const q = search.trim().toLowerCase();
   const shown = bills.filter(
     (b) =>
@@ -16868,6 +16885,19 @@ function PurchaseBillsPage({ isAdmin, go }) {
                               className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
                             >
                               <Trash2 size={14} /> Void bill
+                            </button>
+                          </Gate>
+                        </div>
+                      )}
+
+                      {b.status === "void" && (
+                        <div className="flex flex-wrap gap-2">
+                          <Gate right="delete_records">
+                            <button
+                              onClick={() => handleDelete(b)}
+                              className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                            >
+                              <Trash2 size={14} /> Delete bill
                             </button>
                           </Gate>
                         </div>

@@ -244,3 +244,27 @@ def void_purchase_bill(bill_id: int, db: Session = Depends(get_db)):
     bill.status = "void"
     db.commit()
     return db.query(models.PurchaseBill).options(*_options()).filter(models.PurchaseBill.id == bill_id).one()
+
+@router.delete("/{bill_id}")
+def delete_purchase_bill(bill_id: int, db: Session = Depends(get_db)):
+    """Permanently deletes a VOID bill (its stock and ledger entry were already reversed when it was voided)."""
+    bill = db.query(models.PurchaseBill).filter(models.PurchaseBill.id == bill_id).with_for_update().first()
+    if not bill:
+        raise HTTPException(404, "Bill not found")
+    if bill.status != "void":
+        raise HTTPException(400, "Only a void bill can be deleted. Void it first.")
+    if db.query(models.VendorPaymentAllocation).filter(models.VendorPaymentAllocation.bill_id == bill.id).first():
+        raise HTTPException(400, "This bill still has vendor payments linked to it. Remove the payments first.")
+
+    # leftover ledger entries from this bill (normally already removed by void)
+    for journal in db.query(models.Journal).filter(
+        models.Journal.source_type == "purchase_bill", models.Journal.source_id == bill.id
+    ).all():
+        db.delete(journal)
+
+    # leftover Stock History rows (normally already removed by void)
+    db.query(models.StockMovement).filter(models.StockMovement.note == f"Purchase bill {bill.bill_number}").delete()
+
+    db.delete(bill)   # its lines go with it
+    db.commit()
+    return {"message": "Deleted"}
