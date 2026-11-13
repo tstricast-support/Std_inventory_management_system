@@ -13551,6 +13551,12 @@ function InvoicesPage({ isAdmin, go }) {
   const [payFor, setPayFor] = useState(null); // the invoice whose "Record payment" button was pressed
   const [creditFor, setCreditFor] = useState(null); // the invoice whose "Credit note" button was pressed
   const [editFor, setEditFor] = useState(null); // the invoice whose "Edit invoice" button was pressed
+    // Previous / Next arrows (Alt+P / Alt+N) inside the invoice window: show another saved invoice
+  const goToInvoice = (inv) => {
+    setFormOpen(false);
+    setEditFor(inv);
+  };
+
   const handleVoid = async (inv) => {
     if (
       !window.confirm(
@@ -13792,12 +13798,20 @@ function InvoicesPage({ isAdmin, go }) {
       </main>
 
       {formOpen && (
-        <InvoiceForm onClose={() => setFormOpen(false)} onSaved={load} />
+        <InvoiceForm
+          invoices={invoices}
+          onNavigate={goToInvoice}
+          onClose={() => setFormOpen(false)}
+          onSaved={load}
+        />
       )}
 
       {editFor && (
         <InvoiceForm
+          key={editFor.id}
           editInvoice={editFor}
+          invoices={invoices}
+          onNavigate={goToInvoice}
           onClose={() => setEditFor(null)}
           onSaved={load}
         />
@@ -14361,7 +14375,14 @@ const blankInvoiceLine = () => ({
 });
 
 
-function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
+function InvoiceForm({
+  fromDoc = null,
+  editInvoice = null,
+  invoices = [],
+  onNavigate = null,
+  onClose,
+  onSaved,
+}) {
   const [customers, setCustomers] = useState([]);
   const [items, setItems] = useState([]);
   const [customerId, setCustomerId] = useState(
@@ -14654,8 +14675,7 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
   const netCents = totalCents - discountCents; // what the customer owes
   const payCents = payAmount === "" ? netCents : toCents(payAmount); // amount received now
   const payOk =
-    !payNow ||
-    (Boolean(payDepositId) && payCents > 0 && payCents <= netCents);
+    !payNow || (Boolean(payDepositId) && payCents > 0 && payCents <= netCents);
   const canSave =
     Boolean(customerId) &&
     filled.length > 0 &&
@@ -14671,6 +14691,77 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
     payOk;
 
   const canPreview = Boolean(customerId) && filled.length > 0;
+
+  // ---- QuickBooks-style Previous / Next invoice (Alt+P / Alt+N) ----
+  // the list is newest first, so the "previous" invoice is the next one DOWN the list
+  const winActive = useWindowActive();
+  const curIdx = editInvoice
+    ? invoices.findIndex((i) => i.id === editInvoice.id)
+    : -1;
+  const prevInvoice = !onNavigate
+    ? null
+    : editInvoice
+      ? curIdx >= 0
+        ? invoices[curIdx + 1] || null
+        : null
+      : invoices[0] || null; // on a New Invoice window, "previous" = the latest saved invoice
+  const nextInvoice =
+    onNavigate && editInvoice && curIdx > 0 ? invoices[curIdx - 1] : null;
+  // a paid / void invoice can only be looked at (the server refuses to edit it)
+  const readOnly =
+    Boolean(editInvoice) &&
+    (editInvoice.status === "void" || Number(editInvoice.amount_paid) > 0.004);
+  // has anything been typed since this window opened?
+  const formSnap = JSON.stringify([
+    customerId,
+    date,
+    dueDate,
+    orderNumber,
+    notes,
+    discountType,
+    discountValue,
+    lines,
+  ]);
+  const startSnap = useRef(formSnap);
+  const isDirty = !readOnly && formSnap !== startSnap.current;
+
+  const goTo = (inv) => {
+    if (!inv || !onNavigate || submitting) return;
+    if (
+      isDirty &&
+      !window.confirm(
+        "You have unsaved changes on this invoice. Leave without saving?",
+      )
+    )
+      return;
+    onNavigate(inv);
+  };
+  // the key listener below is registered once, so it reads the latest values through this ref
+  const navRef = useRef({});
+  navRef.current = {
+    goTo,
+    prevInvoice,
+    nextInvoice,
+    blocked:
+      !winActive ||
+      Boolean(preview) ||
+      showItemForm ||
+      Boolean(quickItem) ||
+      quickCustomerName !== null,
+  };
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (e.code !== "KeyP" && e.code !== "KeyN") return;
+      const nav = navRef.current;
+      if (nav.blocked) return;
+      e.preventDefault();
+      e.stopPropagation();
+      nav.goTo(e.code === "KeyP" ? nav.prevInvoice : nav.nextInvoice);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // builds the same PDF that "Download PDF" makes, from what is typed in the form (nothing is saved)
   const handlePreview = async () => {
@@ -14703,7 +14794,11 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
           product: itemById[l.product_id],
         })),
       };
-      const file = await pdf.downloadInvoicePdf(draft, customer, true);
+      const file = await pdf.downloadInvoicePdf(
+        readOnly ? editInvoice : draft,
+        customer,
+        true,
+      );
       setPreview({ url: URL.createObjectURL(file) });
     } catch (err) {
       setError(err.message || "Could not create the preview");
@@ -14750,9 +14845,7 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
               deposit_account_id: Number(payDepositId),
               reference: payReference.trim() || null,
               notes: null,
-              allocations: [
-                { invoice_id: created.id, amount: payCents / 100 },
-              ],
+              allocations: [{ invoice_id: created.id, amount: payCents / 100 }],
             });
           } catch (payErr) {
             // the invoice is already saved, so close the form and tell the user what is left to do
@@ -14799,17 +14892,49 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
           className="-mx-6 -mt-6 mb-4 px-6 pt-6 pb-2 rounded-t-xl text-lg font-semibold cursor-move select-none touch-none flex items-center justify-between"
         >
           <span>
-            {editInvoice ? `Edit ${editInvoice.invoice_number}` : "New Invoice"}
+            {editInvoice
+              ? `${readOnly ? "View" : "Edit"} ${editInvoice.invoice_number}`
+              : "New Invoice"}
           </span>
-          <button
-            type="button"
-            onClick={onClose}
-            title="Close"
-            aria-label="Close"
-            className="p-1 rounded-md text-red-600 hover:bg-red-50 hover:text-red-700 cursor-pointer"
-          >
-            <X size={22} strokeWidth={2.5} />
-          </button>
+          <div className="flex items-center gap-1">
+            {onNavigate && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => goTo(prevInvoice)}
+                  disabled={!prevInvoice}
+                  title="Previous invoice (Alt+P)"
+                  aria-label="Previous invoice"
+                  className="p-1 rounded-md text-gray-600 hover:bg-gray-100 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                >
+                  <ChevronRight
+                    size={22}
+                    strokeWidth={2.5}
+                    className="rotate-180"
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => goTo(nextInvoice)}
+                  disabled={!nextInvoice}
+                  title="Next invoice (Alt+N)"
+                  aria-label="Next invoice"
+                  className="p-1 rounded-md text-gray-600 hover:bg-gray-100 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                >
+                  <ChevronRight size={22} strokeWidth={2.5} />
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              title="Close"
+              aria-label="Close"
+              className="p-1 rounded-md text-red-600 hover:bg-red-50 hover:text-red-700 cursor-pointer"
+            >
+              <X size={22} strokeWidth={2.5} />
+            </button>
+          </div>
         </h2>
         {error && (
           <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
@@ -14817,342 +14942,351 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <FieldLabel>Customer</FieldLabel>
-            {editInvoice ? (
-              <p className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-700">
-                {editInvoice.customer_name}
-              </p>
-            ) : (
-              <SearchSelect
-                value={customerId}
-                onChange={setCustomerId}
-                options={customerOptions}
-                placeholder="Select a customer..."
-                searchPlaceholder="Search customers..."
-                onCreateNew={(name) => setQuickCustomerName(name)}
-                createLabel="customer"
-                emptyText="No customers found"
-              />
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <label className="text-xs text-gray-500">
-              Invoice no.
-              <input
-                readOnly
-                value={invoiceNo || "Auto"}
-                title="Assigned automatically when you save"
-                className={cls + " mt-1 bg-gray-50 text-gray-700 font-medium"}
-              />
-            </label>
-            <label className="text-xs text-gray-500">
-              Invoice date
-              <input
-                required
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className={cls + " mt-1"}
-              />
-            </label>
-            <label className="text-xs text-gray-500">
-              Due date{" "}
-              {customer && !dueDate && (
-                <span className="text-gray-400">
-                  ({customer.payment_terms})
-                </span>
+          {readOnly && (
+            <div className="bg-amber-50 text-amber-700 text-sm rounded-lg px-3 py-2">
+              {editInvoice.status === "void"
+                ? "This invoice is void, so it is view-only."
+                : "This invoice has payments or credits applied, so it is view-only."}
+            </div>
+          )}
+          <fieldset disabled={readOnly} className="space-y-4 min-w-0">
+            <div>
+              <FieldLabel>Customer</FieldLabel>
+              {editInvoice ? (
+                <p className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-700">
+                  {editInvoice.customer_name}
+                </p>
+              ) : (
+                <SearchSelect
+                  value={customerId}
+                  onChange={setCustomerId}
+                  options={customerOptions}
+                  placeholder="Select a customer..."
+                  searchPlaceholder="Search customers..."
+                  onCreateNew={(name) => setQuickCustomerName(name)}
+                  createLabel="customer"
+                  emptyText="No customers found"
+                />
               )}
-              <input
-                required
-                type="date"
-                value={effectiveDue}
-                min={date}
-                onChange={(e) => setDueDate(e.target.value)}
-                className={cls + " mt-1"}
-              />
-            </label>
-            <label className="text-xs text-gray-500">
-              Order / PO number
-              <input
-                value={orderNumber}
-                onChange={(e) => setOrderNumber(e.target.value)}
-                className={cls + " mt-1"}
-              />
-            </label>
-          </div>
+            </div>
 
-          <div className="space-y-3">
-            <FieldLabel
-              action={
-                <FieldButton onClick={() => setShowItemForm(true)}>
-                  Create Item
-                </FieldButton>
-              }
-            >
-              Items
-            </FieldLabel>
-            <div className="border border-gray-200 rounded-lg">
-              <div
-                className={`${INVOICE_ROW_GRID} hidden sm:grid bg-gray-50 border-b border-gray-200 rounded-t-lg px-2 py-2 text-[11px] font-semibold uppercase text-gray-500`}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <label className="text-xs text-gray-500">
+                Invoice no.
+                <input
+                  readOnly
+                  value={invoiceNo || "Auto"}
+                  title="Assigned automatically when you save"
+                  className={cls + " mt-1 bg-gray-50 text-gray-700 font-medium"}
+                />
+              </label>
+              <label className="text-xs text-gray-500">
+                Invoice date
+                <input
+                  required
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className={cls + " mt-1"}
+                />
+              </label>
+              <label className="text-xs text-gray-500">
+                Due date{" "}
+                {customer && !dueDate && (
+                  <span className="text-gray-400">
+                    ({customer.payment_terms})
+                  </span>
+                )}
+                <input
+                  required
+                  type="date"
+                  value={effectiveDue}
+                  min={date}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  className={cls + " mt-1"}
+                />
+              </label>
+              <label className="text-xs text-gray-500">
+                Order / PO number
+                <input
+                  value={orderNumber}
+                  onChange={(e) => setOrderNumber(e.target.value)}
+                  className={cls + " mt-1"}
+                />
+              </label>
+            </div>
+
+            <div className="space-y-3">
+              <FieldLabel
+                action={
+                  <FieldButton onClick={() => setShowItemForm(true)}>
+                    Create Item
+                  </FieldButton>
+                }
               >
-                <span>#</span>
-                <span>Product / Service</span>
-                <span>Description</span>
-                <span className="text-right">Qty</span>
-                <span className="text-right">Rate</span>
-                <span className="text-right">Amount</span>
-                <span />
-              </div>
+                Items
+              </FieldLabel>
+              <div className="border border-gray-200 rounded-lg">
+                <div
+                  className={`${INVOICE_ROW_GRID} hidden sm:grid bg-gray-50 border-b border-gray-200 rounded-t-lg px-2 py-2 text-[11px] font-semibold uppercase text-gray-500`}
+                >
+                  <span>#</span>
+                  <span>Product / Service</span>
+                  <span>Description</span>
+                  <span className="text-right">Qty</span>
+                  <span className="text-right">Rate</span>
+                  <span className="text-right">Amount</span>
+                  <span />
+                </div>
 
-              {lines.map((l, i) => {
-                const p = itemById[l.product_id];
-                return (
-                  <div
-                    key={i}
-                    className="border-b border-gray-100 last:border-b-0 px-2 py-2"
-                  >
-                    <div className={INVOICE_ROW_GRID}>
-                      <span className="hidden sm:block text-sm text-gray-400">
-                        {i + 1}
-                      </span>
-                      <div className="col-span-2 sm:col-span-1 min-w-0">
-                        <SearchSelect
-                          value={l.product_id}
-                          onChange={(v) => pickItem(i, v)}
-                          options={itemOptions}
-                          placeholder="Select an item..."
-                          searchPlaceholder="Search items..."
-                          onCreateNew={(name) =>
-                            setQuickItem({ name, lineIndex: i })
+                {lines.map((l, i) => {
+                  const p = itemById[l.product_id];
+                  return (
+                    <div
+                      key={i}
+                      className="border-b border-gray-100 last:border-b-0 px-2 py-2"
+                    >
+                      <div className={INVOICE_ROW_GRID}>
+                        <span className="hidden sm:block text-sm text-gray-400">
+                          {i + 1}
+                        </span>
+                        <div className="col-span-2 sm:col-span-1 min-w-0">
+                          <SearchSelect
+                            value={l.product_id}
+                            onChange={(v) => pickItem(i, v)}
+                            options={itemOptions}
+                            placeholder="Select an item..."
+                            searchPlaceholder="Search items..."
+                            onCreateNew={(name) =>
+                              setQuickItem({ name, lineIndex: i })
+                            }
+                            createLabel="item"
+                            emptyText="No items found"
+                            wrap
+                          />
+                        </div>
+                        <input
+                          placeholder="Description"
+                          title={l.description}
+                          value={l.description}
+                          onChange={(e) =>
+                            setLine(i, { description: e.target.value })
                           }
-                          createLabel="item"
-                          emptyText="No items found"
-                          wrap
+                          className={cls + " col-span-2 sm:col-span-1"}
                         />
-                      </div>
-                      <input
-                        placeholder="Description"
-                        title={l.description}
-                        value={l.description}
-                        onChange={(e) =>
-                          setLine(i, { description: e.target.value })
-                        }
-                        className={cls + " col-span-2 sm:col-span-1"}
-                      />
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        placeholder="Qty"
-                        aria-label="Quantity"
-                        value={l.quantity}
-                        onChange={(e) =>
-                          setLine(i, { quantity: e.target.value })
-                        }
-                        className={cls + " sm:text-right"}
-                      />
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="Rate"
-                        aria-label="Rate"
-                        value={l.rate}
-                        onChange={(e) => setLine(i, { rate: e.target.value })}
-                        className={cls + " sm:text-right"}
-                      />
-                      <p className="text-sm font-medium text-gray-900 sm:text-right truncate">
-                        {formatRs(lineCents(l) / 100)}
-                      </p>
-                      {lines.length > 1 ? (
-                        <button
-                          type="button"
-                          title="Remove line"
-                          onClick={() =>
-                            setLines((prev) =>
-                              prev.filter((_, idx) => idx !== i),
-                            )
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          placeholder="Qty"
+                          aria-label="Quantity"
+                          value={l.quantity}
+                          onChange={(e) =>
+                            setLine(i, { quantity: e.target.value })
                           }
-                          className="justify-self-end p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      ) : (
-                        <span />
+                          className={cls + " sm:text-right"}
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="Rate"
+                          aria-label="Rate"
+                          value={l.rate}
+                          onChange={(e) => setLine(i, { rate: e.target.value })}
+                          className={cls + " sm:text-right"}
+                        />
+                        <p className="text-sm font-medium text-gray-900 sm:text-right truncate">
+                          {formatRs(lineCents(l) / 100)}
+                        </p>
+                        {lines.length > 1 ? (
+                          <button
+                            type="button"
+                            title="Remove line"
+                            onClick={() =>
+                              setLines((prev) =>
+                                prev.filter((_, idx) => idx !== i),
+                              )
+                            }
+                            className="justify-self-end p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        ) : (
+                          <span />
+                        )}
+                      </div>
+
+                      {overStock(l) && (
+                        <p className="text-xs text-amber-600 mt-1 sm:pl-8">
+                          Only {p.quantity + (oldQty[l.product_id] || 0)} in
+                          stock. You can still sell it, but stock will go to{" "}
+                          {p.quantity +
+                            (oldQty[l.product_id] || 0) -
+                            used[l.product_id]}
+                          .
+                        </p>
                       )}
                     </div>
+                  );
+                })}
+              </div>
 
-                    {overStock(l) && (
-                      <p className="text-xs text-amber-600 mt-1 sm:pl-8">
-                        Only {p.quantity + (oldQty[l.product_id] || 0)} in
-                        stock. You can still sell it, but stock will go to{" "}
-                        {p.quantity +
-                          (oldQty[l.product_id] || 0) -
-                          used[l.product_id]}
-                        .
+              <div className="flex items-center gap-4">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setLines((prev) => [...prev, blankInvoiceLine()])
+                  }
+                  className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+                >
+                  <Plus size={14} /> Add lines
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLines([blankInvoiceLine()])}
+                  className="text-sm text-gray-500 hover:text-red-600"
+                >
+                  Clear all lines
+                </button>
+              </div>
+            </div>
+
+            <textarea
+              rows={2}
+              placeholder="Notes for the customer"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className={cls}
+            />
+
+            <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-2">
+              <div className="flex justify-between text-gray-600">
+                <span>Subtotal</span>
+                <span>{formatRs(totalCents / 100)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-gray-600">Discount</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={discountValue}
+                    onChange={(e) => setDiscountValue(e.target.value)}
+                    placeholder="0"
+                    className={`w-28 border rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500 ${discountOk ? "border-gray-300" : "border-red-400"}`}
+                  />
+                  <select
+                    value={discountType}
+                    onChange={(e) => setDiscountType(e.target.value)}
+                    className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
+                  >
+                    <option value="amount">Rs.</option>
+                    <option value="percent">%</option>
+                  </select>
+                </div>
+              </div>
+              {discountCents > 0 && discountOk && (
+                <div className="flex justify-between text-gray-600">
+                  <span>
+                    Discount
+                    {discountType === "percent" ? ` (${discountNum}%)` : ""}
+                  </span>
+                  <span>- {formatRs(discountCents / 100)}</span>
+                </div>
+              )}
+              {!discountOk && (
+                <p className="text-xs text-red-500">
+                  The discount can't be more than the subtotal (or 100%).
+                </p>
+              )}
+              <div className="flex justify-between font-semibold border-t border-gray-200 pt-2">
+                <span>Total</span>
+                <span>{formatRs(netCents / 100)}</span>
+              </div>
+            </div>
+
+            {!editInvoice && accounts.length > 0 && (
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => setPayNow((v) => !v)}
+                  className={`w-full inline-flex items-center justify-center gap-2 rounded-xl py-3.5 text-base font-bold text-green-700 bg-green-100 hover:bg-green-200 border-2 transition ${payNow ? "border-green-500" : "border-green-200"}`}
+                >
+                  {payNow ? <Check size={20} /> : <Wallet size={20} />}
+                  {payNow
+                    ? `Payment will be recorded: ${formatRs(payCents / 100)}`
+                    : "Record payment"}
+                </button>
+
+                {payNow && (
+                  <div className="border border-green-200 bg-green-50/60 rounded-xl p-3 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <label className="text-xs text-gray-500">
+                        Amount received
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder={String(netCents / 100)}
+                          value={payAmount}
+                          onChange={(e) => setPayAmount(e.target.value)}
+                          className={`${cls} mt-1 ${payOk ? "" : "!border-red-400"}`}
+                        />
+                      </label>
+                      <label className="text-xs text-gray-500">
+                        Payment mode
+                        <select
+                          value={payMode}
+                          onChange={(e) => setPayMode(e.target.value)}
+                          className={cls + " mt-1 bg-white"}
+                        >
+                          {PAYMENT_MODES.map((m) => (
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="text-xs text-gray-500">
+                        Deposit to
+                        <select
+                          value={payDepositId}
+                          onChange={(e) => setPayDepositId(e.target.value)}
+                          className={cls + " mt-1 bg-white"}
+                        >
+                          {accounts.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <input
+                      placeholder="Reference (cheque no., transfer ID...)"
+                      value={payReference}
+                      onChange={(e) => setPayReference(e.target.value)}
+                      className={cls + " bg-white"}
+                    />
+                    {!payOk && (
+                      <p className="text-xs text-red-600">
+                        The amount must be more than 0 and not more than the
+                        invoice total.
+                      </p>
+                    )}
+                    {payOk && payCents < netCents && (
+                      <p className="text-xs text-gray-500">
+                        Balance of {formatRs((netCents - payCents) / 100)} stays
+                        due on the invoice.
                       </p>
                     )}
                   </div>
-                );
-              })}
-            </div>
-
-            <div className="flex items-center gap-4">
-              <button
-                type="button"
-                onClick={() =>
-                  setLines((prev) => [...prev, blankInvoiceLine()])
-                }
-                className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
-              >
-                <Plus size={14} /> Add lines
-              </button>
-              <button
-                type="button"
-                onClick={() => setLines([blankInvoiceLine()])}
-                className="text-sm text-gray-500 hover:text-red-600"
-              >
-                Clear all lines
-              </button>
-            </div>
-          </div>
-
-          <textarea
-            rows={2}
-            placeholder="Notes for the customer"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className={cls}
-          />
-
-          <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-2">
-            <div className="flex justify-between text-gray-600">
-              <span>Subtotal</span>
-              <span>{formatRs(totalCents / 100)}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-gray-600">Discount</span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={discountValue}
-                  onChange={(e) => setDiscountValue(e.target.value)}
-                  placeholder="0"
-                  className={`w-28 border rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500 ${discountOk ? "border-gray-300" : "border-red-400"}`}
-                />
-                <select
-                  value={discountType}
-                  onChange={(e) => setDiscountType(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
-                >
-                  <option value="amount">Rs.</option>
-                  <option value="percent">%</option>
-                </select>
-              </div>
-            </div>
-            {discountCents > 0 && discountOk && (
-              <div className="flex justify-between text-gray-600">
-                <span>
-                  Discount
-                  {discountType === "percent" ? ` (${discountNum}%)` : ""}
-                </span>
-                <span>- {formatRs(discountCents / 100)}</span>
+                )}
               </div>
             )}
-            {!discountOk && (
-              <p className="text-xs text-red-500">
-                The discount can't be more than the subtotal (or 100%).
-              </p>
-            )}
-            <div className="flex justify-between font-semibold border-t border-gray-200 pt-2">
-              <span>Total</span>
-              <span>{formatRs(netCents / 100)}</span>
-            </div>
-          </div>
-
-          {!editInvoice && accounts.length > 0 && (
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => setPayNow((v) => !v)}
-                className={`w-full inline-flex items-center justify-center gap-2 rounded-xl py-3.5 text-base font-bold text-green-700 bg-green-100 hover:bg-green-200 border-2 transition ${payNow ? "border-green-500" : "border-green-200"}`}
-              >
-                {payNow ? <Check size={20} /> : <Wallet size={20} />}
-                {payNow
-                  ? `Payment will be recorded: ${formatRs(payCents / 100)}`
-                  : "Record payment"}
-              </button>
-
-              {payNow && (
-                <div className="border border-green-200 bg-green-50/60 rounded-xl p-3 space-y-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <label className="text-xs text-gray-500">
-                      Amount received
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder={String(netCents / 100)}
-                        value={payAmount}
-                        onChange={(e) => setPayAmount(e.target.value)}
-                        className={`${cls} mt-1 ${payOk ? "" : "!border-red-400"}`}
-                      />
-                    </label>
-                    <label className="text-xs text-gray-500">
-                      Payment mode
-                      <select
-                        value={payMode}
-                        onChange={(e) => setPayMode(e.target.value)}
-                        className={cls + " mt-1 bg-white"}
-                      >
-                        {PAYMENT_MODES.map((m) => (
-                          <option key={m} value={m}>
-                            {m}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="text-xs text-gray-500">
-                      Deposit to
-                      <select
-                        value={payDepositId}
-                        onChange={(e) => setPayDepositId(e.target.value)}
-                        className={cls + " mt-1 bg-white"}
-                      >
-                        {accounts.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  <input
-                    placeholder="Reference (cheque no., transfer ID...)"
-                    value={payReference}
-                    onChange={(e) => setPayReference(e.target.value)}
-                    className={cls + " bg-white"}
-                  />
-                  {!payOk && (
-                    <p className="text-xs text-red-600">
-                      The amount must be more than 0 and not more than the
-                      invoice total.
-                    </p>
-                  )}
-                  {payOk && payCents < netCents && (
-                    <p className="text-xs text-gray-500">
-                      Balance of {formatRs((netCents - payCents) / 100)} stays
-                      due on the invoice.
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          </fieldset>
 
           <div className="flex gap-2 pt-2">
             <button
@@ -15166,7 +15300,7 @@ function InvoiceForm({ fromDoc = null, editInvoice = null, onClose, onSaved }) {
 
             <button
               type="submit"
-              disabled={!canSave || submitting}
+              disabled={!canSave || submitting || readOnly}
               className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
               {submitting
@@ -19469,6 +19603,13 @@ const SHORTCUT_HELP = [
     ],
   ],
   [
+    "Inside an invoice window",
+    [
+      ["Alt + P", "Previous invoice (the one before it)"],
+      ["Alt + N", "Next invoice"],
+    ],
+  ],
+  [
     "Windows",
     [
       ["Alt + W", "Open a new window (a copy of this page)"],
@@ -19485,7 +19626,6 @@ const SHORTCUT_HELP = [
         "Alt + Shift + W  or  Esc",
         "Close this window (Esc: when no form is open in it)",
       ],
-      
     ],
   ],
   [
