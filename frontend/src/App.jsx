@@ -11557,7 +11557,7 @@ const ACCOUNT_TYPES = [
     group: "Expense",
   },
 ];
-
+// position of each type in the list above = the order the Chart of Accounts is sorted in
 const ACCOUNT_TYPE_ORDER = Object.fromEntries(
   ACCOUNT_TYPES.map((t, i) => [t.key, i]),
 );
@@ -11914,9 +11914,11 @@ const ACCT_COLUMNS = [
   { key: "code", label: "Number" },
   { key: "name", label: "Account name" },
   { key: "type", label: "Type" },
+  { key: "category", label: "Category" },
   { key: "description", label: "Description" },
   { key: "balance", label: "Balance", right: true },
   { key: "items", label: "Items", right: true },
+  { key: "created", label: "Date created" },
 ];
 
 const ACCT_LAYOUT_KEY = "acct_layout_v1";
@@ -11934,7 +11936,9 @@ const ACCT_LAYOUT_DEFAULT = {
     { key: "type", visible: true },
     { key: "description", visible: true },
     { key: "balance", visible: true },
+    { key: "category", visible: false },
     { key: "items", visible: false },
+    { key: "created", visible: false },
   ],
 };
 
@@ -12009,6 +12013,149 @@ function orderAccountTree(list) {
   return out;
 }
 
+function CustomizeColumnsDialog({ cols, onSave, onClose }) {
+  const [draft, setDraft] = useState(() => cols.map((c) => ({ ...c })));
+  const [selAvail, setSelAvail] = useState(null);
+  const [selChosen, setSelChosen] = useState(null);
+
+  const labelOf = (key) =>
+    ACCT_COLUMNS.find((x) => x.key === key)?.label || key;
+  const available = draft.filter((c) => !c.visible);
+  const chosen = draft.filter((c) => c.visible);
+  const LOCKED = "name"; // the account name column can't be removed
+
+  const add = (key = selAvail) => {
+    if (!key) return;
+    const rest = draft.filter((c) => c.key !== key);
+    const lastVisible = rest.map((c) => c.visible).lastIndexOf(true);
+    rest.splice(lastVisible + 1, 0, { key, visible: true });
+    setDraft(rest);
+    setSelAvail(null);
+    setSelChosen(key);
+  };
+  const remove = (key = selChosen) => {
+    if (!key || key === LOCKED) return;
+    setDraft(draft.map((c) => (c.key === key ? { ...c, visible: false } : c)));
+    setSelChosen(null);
+    setSelAvail(key);
+  };
+  const move = (dir) => {
+    if (!selChosen) return;
+    const idx = draft.map((c, i) => (c.visible ? i : -1)).filter((i) => i >= 0);
+    const pos = idx.findIndex((i) => draft[i].key === selChosen);
+    const swapWith = idx[pos + dir];
+    if (pos < 0 || swapWith === undefined) return;
+    const next = [...draft];
+    [next[idx[pos]], next[swapWith]] = [next[swapWith], next[idx[pos]]];
+    setDraft(next);
+  };
+  const setDefault = () => {
+    setDraft(ACCT_LAYOUT_DEFAULT.cols.map((c) => ({ ...c })));
+    setSelAvail(null);
+    setSelChosen(null);
+  };
+
+  const chosenPos = chosen.findIndex((c) => c.key === selChosen);
+  const btn =
+    "w-full border border-gray-300 rounded px-3 py-1.5 text-sm bg-white hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white";
+  const listBox = (list, selected, setSelected, onDouble) => (
+    <div className="border border-gray-400 bg-white h-56 overflow-y-auto">
+      {list.map((c) => (
+        <div
+          key={c.key}
+          onClick={() => setSelected(c.key)}
+          onDoubleClick={() => onDouble(c.key)}
+          className={`px-2 py-1 text-sm cursor-pointer select-none ${selected === c.key ? "bg-green-600 text-white" : "text-gray-800 hover:bg-gray-100"}`}
+        >
+          {labelOf(c.key)}
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center p-4"
+      style={{ zIndex: 60 }}
+    >
+      <div className="bg-white shadow-xl w-full max-w-2xl border border-gray-700">
+        <div className="bg-slate-800 text-white text-sm text-center py-2">
+          Customize Columns - Chart of Accounts
+        </div>
+        <div className="p-4">
+          <div className="grid grid-cols-[1fr_auto_1fr] gap-4">
+            <div>
+              <p className="text-sm text-gray-700 mb-1">Available Columns</p>
+              {listBox(available, selAvail, setSelAvail, add)}
+            </div>
+            <div className="flex flex-col justify-center gap-2 w-28 pt-5">
+              <button
+                type="button"
+                className={btn}
+                disabled={!selAvail}
+                onClick={() => add()}
+              >
+                Add &gt;
+              </button>
+              <button
+                type="button"
+                className={btn}
+                disabled={!selChosen || selChosen === LOCKED}
+                onClick={() => remove()}
+              >
+                &lt; Remove
+              </button>
+              <div className="h-3" />
+              <button
+                type="button"
+                className={btn}
+                disabled={!selChosen || chosenPos <= 0}
+                onClick={() => move(-1)}
+              >
+                Move Up
+              </button>
+              <button
+                type="button"
+                className={btn}
+                disabled={
+                  !selChosen || chosenPos < 0 || chosenPos >= chosen.length - 1
+                }
+                onClick={() => move(1)}
+              >
+                Move Down
+              </button>
+              <div className="h-3" />
+              <button type="button" className={btn} onClick={setDefault}>
+                Default
+              </button>
+            </div>
+            <div>
+              <p className="text-sm text-gray-700 mb-1">Chosen Columns</p>
+              {listBox(chosen, selChosen, setSelChosen, remove)}
+            </div>
+          </div>
+          <div className="flex justify-center gap-3 mt-4">
+            <button
+              type="button"
+              onClick={() => onSave(draft)}
+              className="w-28 bg-blue-600 text-white rounded py-1.5 text-sm font-medium hover:bg-blue-700"
+            >
+              OK
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-28 border border-gray-300 rounded py-1.5 text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AccountingPage({ isAdmin, go }) {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -12018,6 +12165,7 @@ function AccountingPage({ isAdmin, go }) {
 
   const [layout, updateLayout, resetLayout] = useAccountLayout();
   const [panelOpen, setPanelOpen] = useState(false);
+  const [colsOpen, setColsOpen] = useState(false); // QuickBooks "Customize Columns" dialog
   const t = ACCT_THEMES[layout.theme] || ACCT_THEMES.quickbooks;
   const pad = layout.density === "compact" ? "py-1" : "py-2.5";
 
@@ -12095,6 +12243,9 @@ function AccountingPage({ isAdmin, go }) {
     if (key === "type") return ACCOUNT_TYPE_ORDER[a.account_type] ?? 99;
     if (key === "code") return a.account_code || "";
     if (key === "description") return a.description || "";
+    if (key === "category") return ACCOUNT_GROUP_OF[a.account_type] || "";
+    if (key === "created")
+      return a.created_at ? new Date(a.created_at).getTime() : 0;
     return a.name || "";
   };
 
@@ -12176,6 +12327,10 @@ function AccountingPage({ isAdmin, go }) {
         );
       case "items":
         return linked ? a.item_count : "";
+      case "category":
+        return ACCOUNT_GROUP_OF[a.account_type] || "";
+      case "created":
+        return a.created_at ? new Date(a.created_at).toLocaleDateString() : "";
       default:
         return "";
     }
@@ -12239,6 +12394,13 @@ function AccountingPage({ isAdmin, go }) {
             Chart of Accounts
           </h1>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setColsOpen(true)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-sm border ${t.panel} ${t.text}`}
+            >
+              Columns
+            </button>
             <button
               type="button"
               onClick={() => setPanelOpen(true)}
@@ -12423,6 +12585,10 @@ function AccountingPage({ isAdmin, go }) {
                       <th
                         key={c.key}
                         onClick={() => toggleSort(c.key)}
+                        onContextMenu={(e) => {
+                          e.preventDefault(); // right-click a header = Customize Columns (like QuickBooks)
+                          setColsOpen(true);
+                        }}
                         className={`px-3 ${pad} text-[11px] font-semibold uppercase tracking-wide border-r ${t.line} cursor-pointer select-none whitespace-nowrap ${c.right ? "text-right" : "text-left"}`}
                       >
                         {c.label}
@@ -12613,43 +12779,16 @@ function AccountingPage({ isAdmin, go }) {
               <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
                 Columns (table layout)
               </h3>
-              <div className="space-y-1">
-                {layout.cols.map((c, i) => {
-                  const def = ACCT_COLUMNS.find((x) => x.key === c.key);
-                  if (!def) return null;
-                  return (
-                    <div
-                      key={c.key}
-                      className="flex items-center gap-2 border border-gray-200 rounded-md px-2 py-1"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={c.visible}
-                        onChange={() => toggleCol(c.key)}
-                      />
-                      <span className="flex-1 text-sm text-gray-800">
-                        {def.label}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={i === 0}
-                        onClick={() => moveCol(i, -1)}
-                        className="px-1 text-gray-500 disabled:opacity-30"
-                      >
-                        ▲
-                      </button>
-                      <button
-                        type="button"
-                        disabled={i === layout.cols.length - 1}
-                        onClick={() => moveCol(i, 1)}
-                        className="px-1 text-gray-500 disabled:opacity-30"
-                      >
-                        ▼
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPanelOpen(false);
+                  setColsOpen(true);
+                }}
+                className="w-full border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Customize columns...
+              </button>
             </section>
 
             <div className="flex gap-2 pt-2">
@@ -12685,6 +12824,17 @@ function AccountingPage({ isAdmin, go }) {
         />
       )}
 
+      {colsOpen && (
+        <CustomizeColumnsDialog
+          cols={layout.cols}
+          onClose={() => setColsOpen(false)}
+          onSave={(cols) => {
+            updateLayout({ cols });
+            setColsOpen(false);
+          }}
+        />
+      )}
+
       {deleteTarget && (
         <TypedDeleteConfirm
           label={deleteTarget.name}
@@ -12695,8 +12845,6 @@ function AccountingPage({ isAdmin, go }) {
     </div>
   );
 }
-
-
 
 function AccountForm({ initialData, onClose, onSubmit }) {
   const isEditMode = Boolean(initialData);
