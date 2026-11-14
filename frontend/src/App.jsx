@@ -4383,35 +4383,107 @@ function LowStockBell() {
   );
 }
 
-// ---------- App appearance: theme / accent colour / text size (whole app, saved on this device) ----------
-// The colours themselves live in src/index.css (html[data-theme=...] rules); this only picks + remembers them.
+// ---------- App appearance: QuickBooks colour preference / accent / text size / font colour (whole app, saved on this device) ----------
+// The colours are applied as CSS variables on <html> by applyAppTheme() below; src/index.css only holds the sidebar + page rules.
 const APP_THEME_KEY = "app_theme_v1";
-const APP_THEME_LAST_KEY = "app_theme_last_company"; // remembers which company was open (avoids a flash of the wrong theme on reload)
+const APP_THEME_LAST_KEY = "app_theme_last_company"; // remembers which company was open (avoids a flash of the wrong colours on reload)
 const themeKeyFor = (companyId) =>
   companyId ? `${APP_THEME_KEY}:${companyId}` : APP_THEME_KEY;
-const APP_THEMES = [
+
+// QuickBooks Desktop "Color Preferences". One click sets sidebar + accent + page tint.
+//   title = QuickBooks title-bar gradient [top, bottom]: used for the sidebar and as the accent (buttons / links / tabs / focus rings)
+//   page  = the four greys the app uses: [page background (QuickBooks cream/tint), soft panels, borders, stronger borders]
+const APP_COLOR_PREFS = [
   {
-    id: "light",
-    name: "Light",
-    note: "Default look",
-    swatch: ["#f9fafb", "#ffffff", "#1f2640"],
-    accent: "blue",
+    id: "blue-gray",
+    name: "Blue Gray",
+    title: ["#496283", "#405877"],
+    page: ["#ebeff5", "#f3f6f9", "#d4dae2", "#bbc3ce"],
   },
   {
-    id: "dark",
-    name: "Dark",
-    note: "Easy on the eyes",
-    swatch: ["#0f172a", "#1e293b", "#0b1220"],
-    accent: "blue",
+    id: "blue-green",
+    name: "Blue Green",
+    title: ["#147e8a", "#106f7a"],
+    page: ["#e4f9fb", "#effbfd", "#cbe8eb", "#aed6da"],
   },
   {
-    id: "quickbooks",
-    name: "QuickBooks",
-    note: "Blue-grey with green accent",
-    swatch: ["#dfe7ef", "#ffffff", "#0f3a5f"],
-    accent: "green",
+    id: "blue-medium",
+    name: "Blue Medium",
+    title: ["#275ea5", "#215497"],
+    page: ["#e6eef9", "#f0f5fc", "#ced9e9", "#b2c2d7"],
+  },
+  {
+    id: "brown",
+    name: "Brown",
+    title: ["#784726", "#6a3d20"],
+    page: ["#f8eee7", "#fbf5f1", "#e7d9d0", "#d4c1b4"],
+  },
+  {
+    id: "green-forest",
+    name: "Green Forest",
+    title: ["#668d62", "#42663d"],
+    accent: "#52754d",
+    page: ["#eef3ea", "#f5f8f2", "#d5e0cf", "#bccdb4"],
+  },
+  {
+    id: "green-lime",
+    name: "Green Lime",
+    title: ["#578217", "#4c7213"],
+    page: ["#f2fbe5", "#f7fcf0", "#deebcc", "#c9d9b0"],
+  },
+  {
+    id: "green-medium",
+    name: "Green Medium",
+    title: ["#257e37", "#1f702f"],
+    page: ["#e7f8ea", "#f1fbf3", "#cfe8d4", "#b3d5ba"],
+  },
+  {
+    id: "orange",
+    name: "Orange",
+    title: ["#ac5400", "#964c06"],
+    accent: "#ea580c",
+    page: ["#fff4e4", "#fff8ee", "#f0dcc3", "#e0c6a4"],
+  },
+  {
+    id: "pink",
+    name: "Pink",
+    title: ["#a12b5e", "#932554"],
+    page: ["#f9e6ee", "#fbf1f5", "#e8ceda", "#d6b3c2"],
+  },
+  {
+    id: "purple-blue",
+    name: "Purple Blue",
+    title: ["#49409c", "#40388f"],
+    page: ["#eae9f7", "#f3f2fa", "#d3d1e5", "#bab7d2"],
+  },
+  {
+    id: "purple-red",
+    name: "Purple Red",
+    title: ["#82357b", "#762e6e"],
+    page: ["#f7e9f5", "#faf2f9", "#e5d1e3", "#d2b7cf"],
+  },
+  {
+    id: "red",
+    name: "Red",
+    title: ["#9e1e1a", "#8e1915"],
+    page: ["#fbe5e5", "#fdf0f0", "#ebcdcc", "#dab0af"],
+  },
+  {
+    id: "yellow",
+    name: "Yellow",
+    title: ["#92770c", "#816909"],
+    page: ["#fdf7e3", "#fefbef", "#ede6c9", "#ddd3ac"],
+  },
+  {
+    id: "dark-gray",
+    name: "Dark Gray",
+    title: ["#4a4a4a", "#413e3e"],
+    page: ["#e0e0e0", "#ebebeb", "#cccccc", "#b2b2b2"],
   },
 ];
+
+
+// Optional accent override (the "Accent colour" row). null = use the colour preference's own accent.
 const APP_ACCENTS = [
   { id: "blue", name: "Blue", color: "#2563eb" },
   { id: "indigo", name: "Indigo", color: "#4f46e5" },
@@ -4427,10 +4499,10 @@ const APP_ACCENTS = [
   { id: "cyan", name: "Cyan", color: "#0891b2" },
   { id: "slate", name: "Slate", color: "#475569" },
 ];
-// Sidebar colours. All are dark so the white sidebar text stays readable.
-// "auto" = follow the theme; "accent" = a dark shade of the chosen accent colour.
+
+// Optional sidebar override. "auto" = use the colour preference's sidebar.
 const APP_SIDEBARS = [
-  { id: "auto", name: "Theme default", color: null },
+  { id: "auto", name: "Same as colour preference", color: null },
   { id: "accent", name: "Match accent", color: "var(--color-blue-800)" },
   { id: "navy", name: "Navy", color: "#1f2640" },
   { id: "midnight", name: "Midnight", color: "#0b1220" },
@@ -4444,77 +4516,31 @@ const APP_SIDEBARS = [
   { id: "maroon", name: "Maroon", color: "#7f1d1d" },
   { id: "brown", name: "Brown", color: "#3f2a1d" },
 ];
+
 const APP_SIZES = [
   ["small", "Small"],
   ["normal", "Normal"],
   ["large", "Large"],
 ];
-// QuickBooks-style colour schemes: one click sets the sidebar, accent AND tints the whole page.
-// page = the four greys the app uses: [page background, soft panels, borders, stronger borders]
-const APP_SCHEMES = [
-  {
-    id: "classic",
-    name: "Classic",
-    accent: "green",
-    sidebar: "ocean",
-    page: ["#dfe7ef", "#e8eef5", "#c9d4e0", "#b3c1d1"],
-  },
-  {
-    id: "green",
-    name: "Green",
-    accent: "green",
-    sidebar: "forest",
-    page: ["#e3efe6", "#ecf5ee", "#c7dccc", "#aec9b5"],
-  },
-  {
-    id: "teal",
-    name: "Teal",
-    accent: "teal",
-    sidebar: "teal",
-    page: ["#dcecec", "#e6f2f2", "#bfdada", "#a6c9c9"],
-  },
-  {
-    id: "indigo",
-    name: "Indigo",
-    accent: "indigo",
-    sidebar: "indigo",
-    page: ["#e3e6f3", "#ebeef8", "#c8cee6", "#b0b8d8"],
-  },
-  {
-    id: "purple",
-    name: "Purple",
-    accent: "purple",
-    sidebar: "purple",
-    page: ["#e9e3f2", "#f0ebf7", "#d3c8e4", "#bfb0d6"],
-  },
-  {
-    id: "rose",
-    name: "Rose",
-    accent: "rose",
-    sidebar: "maroon",
-    page: ["#f2e3e5", "#f7ebed", "#e2c7cb", "#d3adb3"],
-  },
-  {
-    id: "sand",
-    name: "Sand",
-    accent: "orange",
-    sidebar: "brown",
-    page: ["#f2e8dc", "#f7efe6", "#e3d2bd", "#d3bda0"],
-  },
-  {
-    id: "grey",
-    name: "Grey",
-    accent: "slate",
-    sidebar: "slate",
-    page: ["#e5e7ea", "#edeff1", "#cdd1d6", "#b8bec6"],
-  },
+
+// Quick SIDEBAR font-colour swatches (light colours read best on the dark sidebar); the colour picker next to them allows ANY colour
+const APP_SIDEBAR_FONTS = [
+  { name: "White", color: "#ffffff" },
+  { name: "Light grey", color: "#e5e7eb" },
+  { name: "Cream", color: "#fff4e4" },
+  { name: "Light yellow", color: "#fef08a" },
+  { name: "Light green", color: "#bbf7d0" },
+  { name: "Light blue", color: "#bfdbfe" },
+  { name: "Light pink", color: "#fbcfe8" },
 ];
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
 const APP_THEME_DEFAULT = {
-  theme: "light",
-  accent: "blue",
+  pref: "blue-medium", // one of APP_COLOR_PREFS
+  accent: null, // null = from the colour preference, or an APP_ACCENTS id
   size: "normal",
-  sidebar: "auto",
-  tint: null, // id of the colour scheme that tints the page (null = no tint)
+  sidebar: "auto", // "auto" = from the colour preference, or an APP_SIDEBARS id
+  sidebarFont: null, // null = default sidebar text colours, or "#rrggbb"
 };
 
 function loadAppTheme(companyId) {
@@ -4524,19 +4550,17 @@ function loadAppTheme(companyId) {
     );
     if (s && typeof s === "object") {
       return {
-        theme: APP_THEMES.some((t) => t.id === s.theme)
-          ? s.theme
-          : APP_THEME_DEFAULT.theme,
-        accent: APP_ACCENTS.some((a) => a.id === s.accent)
-          ? s.accent
-          : APP_THEME_DEFAULT.accent,
+        pref: APP_COLOR_PREFS.some((p) => p.id === s.pref)
+          ? s.pref
+          : APP_THEME_DEFAULT.pref,
+        accent: APP_ACCENTS.some((a) => a.id === s.accent) ? s.accent : null,
         size: APP_SIZES.some(([id]) => id === s.size)
           ? s.size
           : APP_THEME_DEFAULT.size,
         sidebar: APP_SIDEBARS.some((x) => x.id === s.sidebar)
           ? s.sidebar
           : APP_THEME_DEFAULT.sidebar,
-        tint: APP_SCHEMES.some((x) => x.id === s.tint) ? s.tint : null,
+        sidebarFont: HEX_RE.test(s.sidebarFont || "") ? s.sidebarFont : null,
       };
     }
   } catch (e) {
@@ -4545,30 +4569,74 @@ function loadAppTheme(companyId) {
   return APP_THEME_DEFAULT;
 }
 
+// builds Tailwind's blue-50…800 scale from ONE colour, so any accent works
+function setAccentScale(el, base) {
+  const mix = (pct, other) =>
+    `color-mix(in srgb, ${base} ${pct}%, ${other})`;
+  const scale = {
+    50: mix(8, "white"),
+    100: mix(16, "white"),
+    200: mix(30, "white"),
+    300: mix(48, "white"),
+    400: mix(70, "white"),
+    500: mix(88, "white"),
+    600: base,
+    700: mix(82, "black"),
+    800: mix(65, "black"),
+  };
+  Object.entries(scale).forEach(([k, v]) =>
+    el.style.setProperty(`--color-blue-${k}`, v),
+  );
+}
+
 function applyAppTheme(s) {
   const el = document.documentElement;
-  el.setAttribute("data-theme", s.theme);
-  el.setAttribute("data-accent", s.accent);
+  const pref =
+    APP_COLOR_PREFS.find((p) => p.id === s.pref) ||
+    APP_COLOR_PREFS.find((p) => p.id === APP_THEME_DEFAULT.pref);
+
+  el.setAttribute("data-theme", "light"); // single base theme now; index.css selectors still expect the attribute
   el.setAttribute("data-size", s.size);
+  el.removeAttribute("data-accent"); // accent is applied inline below
+
+  // accent: manual override, else the QuickBooks title-bar colour
+  const ov = APP_ACCENTS.find((a) => a.id === s.accent);
+  setAccentScale(el, ov ? ov.color : pref.accent || pref.title[0]);
+
+  // sidebar: manual override (flat colour, slightly darker at the bottom), else the preference's QuickBooks title-bar gradient
   const sb = APP_SIDEBARS.find((x) => x.id === s.sidebar);
-  if (sb && sb.color) el.style.setProperty("--sidebar-bg", sb.color);
-  else el.style.removeProperty("--sidebar-bg"); // "auto" → theme default from index.css
-  // colour scheme: tint the page greys (never on the Dark theme)
-  const greys = [
+  if (sb && sb.color) {
+    el.style.setProperty("--sidebar-bg", sb.color);
+    el.style.setProperty(
+      "--sidebar-bg-end",
+      `color-mix(in srgb, ${sb.color} 88%, black)`,
+    );
+  } else {
+    el.style.setProperty("--sidebar-bg", pref.title[0]);
+    el.style.setProperty("--sidebar-bg-end", sb.color);
+  }
+
+  // page tint (QuickBooks-style tinted greys)
+  [
     "--color-gray-50",
     "--color-gray-100",
     "--color-gray-200",
     "--color-gray-300",
-  ];
-  const scheme = APP_SCHEMES.find((x) => x.id === s.tint);
-  if (scheme && s.theme !== "dark") {
-    greys.forEach((v, i) => el.style.setProperty(v, scheme.page[i]));
-    el.style.setProperty("--page-bg", scheme.page[0]);
+  ].forEach((v, i) => el.style.setProperty(v, pref.page[i]));
+  el.style.setProperty("--page-bg", pref.page[0]);
+
+    // sidebar font colour (index.css applies it ONLY inside the sidebar / top toolbar; page text is never touched)
+  if (HEX_RE.test(s.sidebarFont || "")) {
+    el.style.setProperty("--sidebar-font", s.sidebarFont);
   } else {
-    greys.forEach((v) => el.style.removeProperty(v));
-    el.style.removeProperty("--page-bg");
+    el.style.removeProperty("--sidebar-font");
   }
+  // clean up the page-text overrides that the earlier "Font colour" version saved on <html>
+  ["--font-color", "--color-gray-500", "--color-gray-600", "--color-gray-700", "--color-gray-800", "--color-gray-900"].forEach(
+    (v) => el.style.removeProperty(v),
+  );
 }
+
 applyAppTheme(loadAppTheme(localStorage.getItem(APP_THEME_LAST_KEY))); // runs once when the app loads, before the first screen is drawn
 
 // Slide-in panel. Open it from anywhere with: window.dispatchEvent(new Event("app:appearance"))
@@ -4584,7 +4652,7 @@ function ThemePanel() {
     return () => window.removeEventListener("app:appearance", show);
   }, []);
 
-  // when the company becomes known / changes: load ITS saved theme (new companies start with the default)
+  // when the company becomes known / changes: load ITS saved colours (new companies start with the default)
   useEffect(() => {
     if (companyId == null) return;
     const t = loadAppTheme(companyId);
@@ -4611,6 +4679,8 @@ function ThemePanel() {
   if (!open) return null;
 
   const label = "text-xs font-semibold text-gray-500 uppercase mb-2";
+  const curPref =
+    APP_COLOR_PREFS.find((p) => p.id === s.pref) || APP_COLOR_PREFS[0];
   return (
     <div
       className="fixed inset-0 z-[60] flex justify-end bg-black/40"
@@ -4632,68 +4702,18 @@ function ThemePanel() {
         </div>
 
         <section>
-          <h3 className={label}>Theme</h3>
-          <div className="space-y-2">
-            {APP_THEMES.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() =>
-                  change({ theme: t.id, accent: t.accent, tint: null })
-                }
-                className={`w-full flex items-center gap-3 border rounded-lg px-3 py-2.5 text-left ${
-                  s.theme === t.id
-                    ? "border-blue-600 ring-1 ring-blue-600"
-                    : "border-gray-300 hover:bg-gray-50"
-                }`}
-              >
-                <span className="flex shrink-0">
-                  {t.swatch.map((c) => (
-                    <span
-                      key={c}
-                      className="w-6 h-6 border border-gray-300"
-                      style={{ background: c }}
-                    />
-                  ))}
-                </span>
-                <span className="flex-1 min-w-0">
-                  <span className="block text-sm font-medium">{t.name}</span>
-                  <span className="block text-xs text-gray-500">{t.note}</span>
-                </span>
-                {s.theme === t.id && <span className="text-blue-600">✓</span>}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section>
-          <h3 className={label}>Colour scheme</h3>
-          <div className="grid grid-cols-4 gap-2">
-            {APP_SCHEMES.map((x) => {
-              const on =
-                s.tint === x.id &&
-                s.theme === "quickbooks" &&
-                s.accent === x.accent &&
-                s.sidebar === x.sidebar;
-              const sidebarColor = APP_SIDEBARS.find(
-                (b) => b.id === x.sidebar,
-              )?.color;
-              const accentColor = APP_ACCENTS.find(
-                (a) => a.id === x.accent,
-              )?.color;
+          <h3 className={label}>Color preferences</h3>
+          <div className="grid grid-cols-3 gap-2">
+            {APP_COLOR_PREFS.map((x) => {
+              const on = s.pref === x.id;
               return (
                 <button
                   key={x.id}
                   type="button"
                   title={x.name}
-                  aria-label={`${x.name} colour scheme`}
+                  aria-label={`${x.name} colour preference`}
                   onClick={() =>
-                    change({
-                      theme: "quickbooks",
-                      accent: x.accent,
-                      sidebar: x.sidebar,
-                      tint: x.id,
-                    })
+                    change({ pref: x.id, accent: null, sidebar: "auto" })
                   }
                   className={`rounded-md border p-1 text-center ${
                     on
@@ -4705,18 +4725,16 @@ function ThemePanel() {
                     className="flex h-9 rounded overflow-hidden border border-gray-300"
                     style={{ background: x.page[0] }}
                   >
-                    <span
-                      className="w-3"
-                      style={{ background: sidebarColor }}
-                    />
+                    <span className="w-3" style={{ background: x.sidebar }} />
                     <span className="flex-1 flex items-end justify-end p-1">
                       <span
                         className="w-3 h-3 rounded-full"
-                        style={{ background: accentColor }}
+                        style={{ background: x.accent }}
                       />
                     </span>
                   </span>
                   <span className="block text-[11px] mt-1 text-gray-600">
+                    {on ? "✓ " : ""}
                     {x.name}
                   </span>
                 </button>
@@ -4728,6 +4746,18 @@ function ThemePanel() {
         <section>
           <h3 className={label}>Accent colour</h3>
           <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              title="Same as colour preference"
+              aria-label="Accent: same as colour preference"
+              onClick={() => change({ accent: null })}
+              className={`w-9 h-9 rounded-full flex items-center justify-center text-white text-sm ${
+                s.accent === null ? "ring-2 ring-offset-2 ring-gray-400" : ""
+              }`}
+              style={{ background: curPref.accent }}
+            >
+              {s.accent === null ? "✓" : "A"}
+            </button>
             {APP_ACCENTS.map((a) => (
               <button
                 key={a.id}
@@ -4766,6 +4796,54 @@ function ThemePanel() {
           </div>
         </section>
 
+                <section>
+          <h3 className={label}>Sidebar font colour</h3>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              title="Default"
+              aria-label="Default sidebar font colour"
+              onClick={() => change({ sidebarFont: null })}
+              className={`h-9 px-3 rounded-md border border-gray-300 text-xs text-gray-700 hover:bg-gray-50 ${
+                s.sidebarFont === null ? "ring-2 ring-offset-2 ring-gray-400" : ""
+              }`}
+            >
+              Default
+            </button>
+            {APP_SIDEBAR_FONTS.map((f) => (
+              <button
+                key={f.color}
+                type="button"
+                title={f.name}
+                aria-label={f.name}
+                onClick={() => change({ sidebarFont: f.color })}
+                className={`w-9 h-9 rounded-full border border-gray-300 flex items-center justify-center text-gray-800 text-sm ${
+                  s.sidebarFont === f.color
+                    ? "ring-2 ring-offset-2 ring-gray-400"
+                    : ""
+                }`}
+                style={{ background: f.color }}
+              >
+                {s.sidebarFont === f.color ? "✓" : ""}
+              </button>
+            ))}
+            <label
+              title="Pick any colour"
+              className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer"
+            >
+              <input
+                type="color"
+                value={s.sidebarFont || "#ffffff"}
+                onChange={(e) => change({ sidebarFont: e.target.value })}
+                className="w-9 h-9 p-0 border border-gray-300 rounded-md cursor-pointer bg-transparent"
+              />
+              Custom
+            </label>
+          </div>
+          <p className="text-xs text-gray-400 mt-2">
+            {s.sidebarFont ? s.sidebarFont.toUpperCase() : "Default"} · changes the sidebar text only
+          </p>
+        </section>
         <section>
           <h3 className={label}>Sidebar colour</h3>
           <div className="flex flex-wrap gap-3">
@@ -4779,11 +4857,7 @@ function ThemePanel() {
                 className={`w-9 h-9 rounded-md border border-gray-300 flex items-center justify-center text-white text-sm ${
                   s.sidebar === x.id ? "ring-2 ring-offset-2 ring-gray-400" : ""
                 }`}
-                style={{
-                  background:
-                    x.color ||
-                    "linear-gradient(135deg, #1f2640 50%, #0f3a5f 50%)", // "Theme default" swatch
-                }}
+                style={{ background: x.color || curPref.sidebar }}
               >
                 {s.sidebar === x.id ? "✓" : x.id === "accent" ? "A" : ""}
               </button>

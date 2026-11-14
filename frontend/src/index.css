@@ -180,64 +180,19 @@ html[data-accent="rose"] {
   --color-blue-800: #9f1239;
 }
 
-/* ---------- DARK theme ---------- */
-html[data-theme="dark"] {
-  color-scheme: dark;
-  --color-gray-50: #0f172a;
-  /* page background */
-  --color-gray-100: #162033;
-  --color-gray-200: #2a3649;
-  /* borders */
-  --color-gray-300: #3b4a61;
-  --color-gray-400: #7f8ea3;
-  --color-gray-500: #9aa8bb;
-  --color-gray-600: #b4c0d0;
-  --color-gray-700: #cbd5e1;
-  --color-gray-800: #e2e8f0;
-  --color-gray-900: #f1f5f9;
-  /* soft tints (alerts, badges) become dark tints */
-  --color-red-50: #3b1519;
-  --color-red-100: #4a1a1f;
-  --color-green-50: #10301f;
-  --color-green-100: #143d27;
-  --color-yellow-50: #3a2f0f;
-  --color-yellow-100: #47390f;
-  --color-amber-50: #3a2c0f;
-  --color-amber-100: #47350f;
-  --color-orange-50: #3d2210;
-  --color-orange-100: #4a2a12;
-  --color-blue-50: color-mix(in srgb, var(--color-blue-500) 16%, #0f172a);
-  --color-blue-100: color-mix(in srgb, var(--color-blue-500) 24%, #0f172a);
-}
 
-html[data-theme="dark"] body {
-  background: #0f172a;
-  color: #e2e8f0;
-}
-
-html[data-theme="dark"] .bg-white {
-  background-color: #1e293b;
-}
-
-
-
-/* ---------- QUICKBOOKS theme: blue-grey page, navy sidebar ---------- */
-html[data-theme="quickbooks"] {
-  --color-gray-50: #dfe7ef;
-  /* page background */
-  --color-gray-100: #e8eef5;
-  --color-gray-200: #c9d4e0;
-  /* borders */
-  --color-gray-300: #b3c1d1;
-}
-
-html[data-theme="quickbooks"] body {
-  background: #dfe7ef;
-}
 
 /* page tint chosen from "Colour scheme" (applyAppTheme sets --page-bg) */
 html[style*="--page-bg"] body {
   background: var(--page-bg);
+}
+
+/* sidebar font colour (Appearance → Sidebar font colour): sidebar / drawer / top toolbar only, never page text */
+html[style*="--sidebar-font"] [class*="bg-[#1f2640]"],
+html[style*="--sidebar-font"] [class*="bg-[#1f2640]"] .text-white:not(.bg-blue-500),
+html[style*="--sidebar-font"] [class*="bg-[#1f2640]"] .text-gray-300,
+html[style*="--sidebar-font"] [class*="bg-[#1f2640]"] .text-gray-400 {
+  color: var(--sidebar-font);
 }
 
 
@@ -252,17 +207,10 @@ html {
   --color-gray-400: #2e2e30;
 }
 
-html[data-theme="dark"] {
-  --sidebar-bg: #0b1220;
-}
-
-html[data-theme="quickbooks"] {
-  --sidebar-bg: #0f3a5f;
-}
-
 /* matches only the sidebar / mobile top bar / drawer (not the text-[#1f2640] logo in auth.jsx) */
 html [class*="bg-[#1f2640]"] {
-  background-color: var(--sidebar-bg);
+  background-color: var(--sidebar-bg-end, var(--sidebar-bg));
+  background-image: linear-gradient(180deg, var(--sidebar-bg) 0, var(--sidebar-bg-end, var(--sidebar-bg)) 3.5rem);
 }
 
 /* ---------- the navy sidebar keeps light text + white logo tiles in every theme ---------- */
