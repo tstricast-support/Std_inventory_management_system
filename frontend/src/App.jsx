@@ -4398,43 +4398,49 @@ const APP_COLOR_PREFS = [
     id: "blue-gray",
     name: "Blue Gray",
     title: ["#496283", "#405877"],
+    accent: "#0284c7",
     page: ["#ebeff5", "#f3f6f9", "#d4dae2", "#bbc3ce"],
   },
   {
     id: "blue-green",
     name: "Blue Green",
     title: ["#147e8a", "#106f7a"],
+    accent: "#0891b2",
     page: ["#e4f9fb", "#effbfd", "#cbe8eb", "#aed6da"],
   },
   {
     id: "blue-medium",
     name: "Blue Medium",
     title: ["#275ea5", "#215497"],
+    accent: "#2563eb",
     page: ["#e6eef9", "#f0f5fc", "#ced9e9", "#b2c2d7"],
   },
   {
     id: "brown",
     name: "Brown",
     title: ["#784726", "#6a3d20"],
+    accent: "#a16207",
     page: ["#f8eee7", "#fbf5f1", "#e7d9d0", "#d4c1b4"],
   },
   {
     id: "green-forest",
     name: "Green Forest",
     title: ["#668d62", "#42663d"],
-    accent: "#52754d",
+    accent: "#059669",
     page: ["#eef3ea", "#f5f8f2", "#d5e0cf", "#bccdb4"],
   },
   {
     id: "green-lime",
     name: "Green Lime",
     title: ["#578217", "#4c7213"],
+    accent: "#16a34a",
     page: ["#f2fbe5", "#f7fcf0", "#deebcc", "#c9d9b0"],
   },
   {
     id: "green-medium",
     name: "Green Medium",
     title: ["#257e37", "#1f702f"],
+    accent: "#059669",
     page: ["#e7f8ea", "#f1fbf3", "#cfe8d4", "#b3d5ba"],
   },
   {
@@ -4448,40 +4454,45 @@ const APP_COLOR_PREFS = [
     id: "pink",
     name: "Pink",
     title: ["#a12b5e", "#932554"],
+    accent: "#e11d48",
     page: ["#f9e6ee", "#fbf1f5", "#e8ceda", "#d6b3c2"],
   },
   {
     id: "purple-blue",
     name: "Purple Blue",
     title: ["#49409c", "#40388f"],
+    accent: "#9333ea",
     page: ["#eae9f7", "#f3f2fa", "#d3d1e5", "#bab7d2"],
   },
   {
     id: "purple-red",
     name: "Purple Red",
     title: ["#82357b", "#762e6e"],
+    accent: "#9333ea",
     page: ["#f7e9f5", "#faf2f9", "#e5d1e3", "#d2b7cf"],
   },
   {
     id: "red",
     name: "Red",
     title: ["#9e1e1a", "#8e1915"],
+    accent: "#dc2626",
     page: ["#fbe5e5", "#fdf0f0", "#ebcdcc", "#dab0af"],
   },
   {
     id: "yellow",
     name: "Yellow",
     title: ["#92770c", "#816909"],
+    accent: "#d97706",
     page: ["#fdf7e3", "#fefbef", "#ede6c9", "#ddd3ac"],
   },
   {
     id: "dark-gray",
     name: "Dark Gray",
     title: ["#4a4a4a", "#413e3e"],
+    accent: "#475569",
     page: ["#e0e0e0", "#ebebeb", "#cccccc", "#b2b2b2"],
   },
 ];
-
 
 // Optional accent override (the "Accent colour" row). null = use the colour preference's own accent.
 const APP_ACCENTS = [
