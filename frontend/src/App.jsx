@@ -1015,6 +1015,10 @@ const getPurchaseBills = () =>
   purchaseBillRequest("", "GET", null, "Failed to fetch bills");
 const createPurchaseBill = (payload) =>
   purchaseBillRequest("", "POST", payload, "Failed to save bill");
+
+const updatePurchaseBill = (id, payload) =>
+  purchaseBillRequest(String(id), "PUT", payload, "Failed to update bill");
+
 const voidPurchaseBill = (id) =>
   purchaseBillRequest(`${id}/void`, "PUT", null, "Failed to void bill");
 const deletePurchaseBill = (id) =>
@@ -15695,12 +15699,14 @@ function InvoicesPage({ isAdmin, go }) {
                       {inv.status !== "void" && (
                         <div className="flex flex-wrap gap-2">
                           {inv.amount_paid <= 0.004 && (
-                            <button
-                              onClick={() => setEditFor(inv)}
-                              className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
-                            >
-                              <Pencil size={14} /> Edit invoice
-                            </button>
+                            <Gate area="invoices" level="full">
+                              <button
+                                onClick={() => setEditFor(inv)}
+                                className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
+                              >
+                                <Pencil size={14} /> Edit invoice
+                              </button>
+                            </Gate>
                           )}
                           {inv.balance_due > 0.004 && (
                             <button
@@ -18513,6 +18519,7 @@ function PurchaseBillsPage({ isAdmin, go }) {
   useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
   const [payFor, setPayFor] = useState(null); // the bill whose "Record payment" button was pressed
+  const [editFor, setEditFor] = useState(null); // the bill whose "Edit bill" button was pressed
 
   const load = async () => {
     try {
@@ -18544,20 +18551,20 @@ function PurchaseBillsPage({ isAdmin, go }) {
     }
   };
 
-    const handleDelete = async (b) => {
-      if (
-        !window.confirm(
-          `Permanently delete ${b.bill_number}? This can't be undone.`,
-        )
+  const handleDelete = async (b) => {
+    if (
+      !window.confirm(
+        `Permanently delete ${b.bill_number}? This can't be undone.`,
       )
-        return;
-      try {
-        await deletePurchaseBill(b.id);
-        await load();
-      } catch (err) {
-        alert(err.message);
-      }
-    };
+    )
+      return;
+    try {
+      await deletePurchaseBill(b.id);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
 
   const q = search.trim().toLowerCase();
   const shown = bills.filter(
@@ -18693,6 +18700,16 @@ function PurchaseBillsPage({ isAdmin, go }) {
 
                       {b.status !== "void" && (
                         <div className="flex flex-wrap gap-2">
+                          {b.amount_paid <= 0.004 && (
+                            <Gate area="purchase_bills" level="full">
+                              <button
+                                onClick={() => setEditFor(b)}
+                                className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
+                              >
+                                <Pencil size={14} /> Edit bill
+                              </button>
+                            </Gate>
+                          )}
                           {b.balance_due > 0.004 && (
                             <button
                               onClick={() => setPayFor(b)}
@@ -18735,6 +18752,15 @@ function PurchaseBillsPage({ isAdmin, go }) {
 
       {formOpen && (
         <PurchaseBillForm onClose={() => setFormOpen(false)} onSaved={load} />
+      )}
+
+      {editFor && (
+        <PurchaseBillForm
+          key={editFor.id}
+          editBill={editFor}
+          onClose={() => setEditFor(null)}
+          onSaved={load}
+        />
       )}
 
       {payFor && (
@@ -19293,20 +19319,64 @@ const blankBillRows = (make, n = 4) => Array.from({ length: n }, make);
 const withTrailingBlank = (rows, isFilled, make) =>
   rows.length === 0 || isFilled(rows[rows.length - 1]) ? [...rows, make()] : rows;
 
+// turns a saved purchase bill back into the grid rows of the Enter Bill form (used by "Edit bill")
+const rowsFromBill = (bill) => {
+  const lines = bill?.items || [];
+  const itemRows = lines
+    .filter((l) => l.product_id)
+    .map((l) => ({
+      product_id: l.product_id,
+      description: l.description || "",
+      quantity: String(l.quantity),
+      rate: String(l.rate),
+    }));
+  const expRows = lines
+    .filter((l) => !l.product_id)
+    .map((l) => ({
+      account_id: l.account_id,
+      description: l.description || "",
+      amount: String(l.amount),
+    }));
+  return {
+    itemRows: [
+      ...itemRows,
+      ...blankBillRows(blankBillItemRow, itemRows.length ? 1 : 4),
+    ],
+    expRows: [
+      ...expRows,
+      ...blankBillRows(blankBillExpenseRow, expRows.length ? 1 : 4),
+    ],
+  };
+};
+
 // ---------- Enter Bill form (QuickBooks style): vendor header on top, Expenses / Items grids below ----------
-function PurchaseBillForm({ onClose, onSaved }) {
+function PurchaseBillForm({ onClose, onSaved, editBill = null }) {
   const [vendors, setVendors] = useState([]);
   const [items, setItems] = useState([]);
   const [accounts, setAccounts] = useState([]);
-  const [vendorId, setVendorId] = useState("");
-  const [date, setDate] = useState(toISODate(new Date()));
+  const [vendorId, setVendorId] = useState(editBill ? editBill.vendor_id : "");
+  const [date, setDate] = useState(
+    editBill ? editBill.bill_date : toISODate(new Date()),
+  );
   const [terms, setTerms] = useState("Due on Receipt");
-  const [dueDate, setDueDate] = useState(""); // empty = follow the payment terms
-  const [vendorRef, setVendorRef] = useState("");
-  const [notes, setNotes] = useState(""); // shown as "Memo"
-  const [tab, setTab] = useState("items"); // "items" | "expenses"
-  const [itemRows, setItemRows] = useState(() => blankBillRows(blankBillItemRow));
-  const [expRows, setExpRows] = useState(() => blankBillRows(blankBillExpenseRow));
+  const [dueDate, setDueDate] = useState(editBill ? editBill.due_date : ""); // empty = follow the payment terms
+  const [vendorRef, setVendorRef] = useState(editBill?.vendor_ref || "");
+  const [notes, setNotes] = useState(editBill?.notes || ""); // shown as "Memo"
+  const [tab, setTab] = useState(
+    editBill && !editBill.items.some((l) => l.product_id)
+      ? "expenses"
+      : "items",
+  ); // "items" | "expenses"
+  const [itemRows, setItemRows] = useState(() =>
+    editBill
+      ? rowsFromBill(editBill).itemRows
+      : blankBillRows(blankBillItemRow),
+  );
+  const [expRows, setExpRows] = useState(() =>
+    editBill
+      ? rowsFromBill(editBill).expRows
+      : blankBillRows(blankBillExpenseRow),
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [quickVendorName, setQuickVendorName] = useState(null); // typed name, or null = popup closed
@@ -19472,45 +19542,47 @@ function PurchaseBillForm({ onClose, onSaved }) {
     setError(null);
   };
 
-  const save = async (andNew) => {
-    if (!canSave || submitting) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      await createPurchaseBill({
-        vendor_id: vendorId,
-        bill_date: date,
-        due_date: effectiveDue,
-        vendor_ref: vendorRef.trim() || null,
-        notes: notes.trim() || null,
-        items: [
-          ...filledItems.map((r) => ({
-            product_id: r.product_id,
-            description: r.description.trim() || null,
-            quantity: Number(r.quantity),
-            rate: Number(r.rate) || 0,
-          })),
-          ...filledExp.map((r) => ({
-            account_id: r.account_id,
-            description: r.description.trim() || null,
-            quantity: 1,
-            rate: Number(r.amount) || 0,
-          })),
-        ],
-      });
-      await onSaved();
-      if (andNew) {
-        resetForm();
-        await loadLists().catch(() => {}); // stock counts changed
-      } else {
-        onClose();
+    const save = async (andNew) => {
+      if (!canSave || submitting) return;
+      setSubmitting(true);
+      setError(null);
+      try {
+        const body = {
+          vendor_id: vendorId,
+          bill_date: date,
+          due_date: effectiveDue,
+          vendor_ref: vendorRef.trim() || null,
+          notes: notes.trim() || null,
+          items: [
+            ...filledItems.map((r) => ({
+              product_id: r.product_id,
+              description: r.description.trim() || null,
+              quantity: Number(r.quantity),
+              rate: Number(r.rate) || 0,
+            })),
+            ...filledExp.map((r) => ({
+              account_id: r.account_id,
+              description: r.description.trim() || null,
+              quantity: 1,
+              rate: Number(r.amount) || 0,
+            })),
+          ],
+        };
+        if (editBill) await updatePurchaseBill(editBill.id, body);
+        else await createPurchaseBill(body);
+        await onSaved();
+        if (andNew && !editBill) {
+          resetForm();
+          await loadLists().catch(() => {}); // stock counts changed
+        } else {
+          onClose();
+        }
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setSubmitting(false);
       }
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    };
 
   // ---- grid drawing ----
   const colDefs = (kind, cols) =>
@@ -19527,7 +19599,9 @@ function PurchaseBillForm({ onClose, onSaved }) {
     style: wide ? { gridTemplateColumns: template(defs) } : undefined,
   });
   const deleteBtn = (show, onClick) => (
-    <div className={`flex ${wide ? "justify-center pt-1" : "col-span-2 justify-end"}`}>
+    <div
+      className={`flex ${wide ? "justify-center pt-1" : "col-span-2 justify-end"}`}
+    >
       {show && (
         <button
           type="button"
@@ -19593,7 +19667,11 @@ function PurchaseBillForm({ onClose, onSaved }) {
       ),
       sku: <div className={roCls}>{p?.sku || ""}</div>,
       type: <div className={roCls}>{p?.item_type || ""}</div>,
-      onhand: <div className={roCls + num}>{p ? (tracked ? p.quantity : "-") : ""}</div>,
+      onhand: (
+        <div className={roCls + num}>
+          {p ? (tracked ? p.quantity : "-") : ""}
+        </div>
+      ),
       qty: (
         <input
           type="number"
@@ -19654,7 +19732,11 @@ function PurchaseBillForm({ onClose, onSaved }) {
           wrap
         />
       ),
-      accttype: <div className={roCls}>{a ? ACCOUNT_TYPE_NAMES[a.account_type] : ""}</div>,
+      accttype: (
+        <div className={roCls}>
+          {a ? ACCOUNT_TYPE_NAMES[a.account_type] : ""}
+        </div>
+      ),
       memo: (
         <input
           placeholder="Memo"
@@ -19702,7 +19784,9 @@ function PurchaseBillForm({ onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-2 sm:p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-6xl p-4 sm:p-5 max-h-[96vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold">Enter Bill</h2>
+          <h2 className="text-lg font-semibold">
+            {editBill ? `Edit Bill ${editBill.bill_number}` : "Enter Bill"}
+          </h2>
           <button
             type="button"
             onClick={onClose}
@@ -19897,14 +19981,16 @@ function PurchaseBillForm({ onClose, onSaved }) {
           >
             Clear
           </button>
-          <button
-            type="button"
-            disabled={!canSave || submitting}
-            onClick={() => save(true)}
-            className="border border-blue-600 text-blue-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-50 disabled:opacity-50"
-          >
-            Save &amp; New
-          </button>
+          {!editBill && (
+            <button
+              type="button"
+              disabled={!canSave || submitting}
+              onClick={() => save(true)}
+              className="border border-blue-600 text-blue-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-50 disabled:opacity-50"
+            >
+              Save &amp; New
+            </button>
+          )}
           <button
             type="button"
             disabled={!canSave || submitting}
@@ -21359,12 +21445,14 @@ function BillPage({ go, autoCreateToken }) {
                           </div>
                         ))}
                       <div className="flex gap-2 pt-2">
-                        <button
-                          onClick={() => setEditBill(bill)}
-                          className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-white"
-                        >
-                          <Pencil size={14} /> Edit bill
-                        </button>
+                        <Gate area="stock_bills" level="full">
+                          <button
+                            onClick={() => setEditBill(bill)}
+                            className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-white"
+                          >
+                            <Pencil size={14} /> Edit bill
+                          </button>
+                        </Gate>
                         <Gate right="delete_records">
                           <button
                             onClick={() => handleDelete(bill)}
@@ -24186,4 +24274,3 @@ function NotFound() {
     </div>
   );
 }
-

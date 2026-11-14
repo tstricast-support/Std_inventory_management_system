@@ -199,6 +199,174 @@ def create_purchase_bill(payload: schemas.PurchaseBillCreate, db: Session = Depe
     return db.query(models.PurchaseBill).options(*_options()).filter(models.PurchaseBill.id == bill.id).one()
 
 
+@router.put("/{bill_id}", response_model=schemas.PurchaseBillOut)
+def update_purchase_bill(bill_id: int, payload: schemas.PurchaseBillCreate, db: Session = Depends(get_db)):
+    """Edits a bill in place (it keeps its number): the old stock and ledger entry are reversed, then the new ones are posted."""
+    bill = db.query(models.PurchaseBill).filter(models.PurchaseBill.id == bill_id).with_for_update().first()
+    if not bill:
+        raise HTTPException(404, "Bill not found")
+    if bill.status == "void":
+        raise HTTPException(400, "A void bill can't be edited")
+    if float(bill.amount_paid or 0) > 0:
+        raise HTTPException(400, "This bill has payments applied. Remove them first.")
+    if payload.vendor_id != bill.vendor_id:
+        raise HTTPException(400, "The vendor can't be changed. Void this bill and create a new one.")
+    if not payload.items:
+        raise HTTPException(400, "Add at least one line")
+
+    vendor = bill.vendor
+    number = bill.bill_number
+    due_date = payload.due_date or payload.bill_date
+    if due_date < payload.bill_date:
+        raise HTTPException(400, "Due date can't be before the bill date")
+
+    # what the bill added to stock before, per item
+    old_added: dict[int, int] = {}
+    for line in bill.items:
+        if line.product_id and line.product and line.product.item_type == STOCK_TRACKED_TYPE:
+            old_added[line.product_id] = old_added.get(line.product_id, 0) + line.quantity
+
+    # ---- check every new line ----
+    product_ids: set[int] = set()
+    account_ids: set[int] = set()
+    for line in payload.items:
+        if bool(line.product_id) == bool(line.account_id):
+            raise HTTPException(400, "Every line needs either an item or an expense account (not both, not neither)")
+        if line.quantity <= 0:
+            raise HTTPException(400, "Every quantity must be greater than 0")
+        if line.rate < 0:
+            raise HTTPException(400, "A rate can't be negative")
+        if line.product_id:
+            product_ids.add(line.product_id)
+        else:
+            account_ids.add(line.account_id)
+
+    lock_ids = product_ids | set(old_added)
+    products = {}
+    if lock_ids:
+        products = {
+            p.id: p
+            for p in db.query(models.Product).filter(models.Product.id.in_(lock_ids)).with_for_update().all()
+        }
+    missing = [pid for pid in product_ids if pid not in products]
+    if missing:
+        raise HTTPException(404, f"Item(s) not found: {missing}")
+    for pid in product_ids:
+        if products[pid].subitems:
+            raise HTTPException(400, f"{products[pid].name} is a parent item. Pick one of its subitems.")
+
+    accounts = {}
+    if account_ids:
+        accounts = {a.id: a for a in db.query(models.Account).filter(models.Account.id.in_(account_ids)).all()}
+        for aid in account_ids:
+            if aid not in accounts:
+                raise HTTPException(404, f"Account {aid} not found")
+            if accounts[aid].account_type not in EXPENSE_LINE_TYPES:
+                raise HTTPException(400, f"{accounts[aid].name} can't be used on a bill line. Pick an expense account.")
+
+    # ---- build the new lines and the new ledger entry ----
+    bill_lines = []
+    total = Decimal("0")
+    debits: dict[int, Decimal] = {}
+    bought: dict[int, list] = {}
+
+    for line in payload.items:
+        rate = _money(line.rate)
+        amount = (rate * line.quantity).quantize(CENT, ROUND_HALF_UP)
+        total += amount
+
+        if line.product_id:
+            product = products[line.product_id]
+            name = product.name
+            if product.item_type == STOCK_TRACKED_TYPE:
+                debit_id = product.asset_account_id or _get_or_create_account(db, "Inventory Asset", "asset").id
+                entry = bought.setdefault(product.id, [0, Decimal("0")])
+                entry[0] += line.quantity
+                entry[1] += amount
+            else:
+                debit_id = product.cogs_account_id or _get_or_create_account(db, "Cost of Goods Sold", "cogs").id
+        else:
+            product = None
+            name = accounts[line.account_id].name
+            debit_id = line.account_id
+
+        debits[debit_id] = debits.get(debit_id, Decimal("0")) + amount
+        bill_lines.append(models.PurchaseBillItem(
+            product_id=product.id if product else None,
+            account_id=line.account_id if not product else None,
+            item_name=name,
+            description=(line.description or "").strip() or None,
+            quantity=line.quantity,
+            rate=rate,
+            amount=amount,
+        ))
+
+    if total <= 0:
+        raise HTTPException(400, "The bill total must be greater than 0")
+
+    # stock must not go below zero after taking the old quantities off and adding the new ones
+    short = []
+    for pid, prod in products.items():
+        if prod.item_type != STOCK_TRACKED_TYPE:
+            continue
+        after = (prod.quantity or 0) - old_added.get(pid, 0) + (bought[pid][0] if pid in bought else 0)
+        if after < 0:
+            short.append(f"{prod.name} (this bill added {old_added.get(pid, 0)}, only {prod.quantity} in stock now)")
+    if short:
+        raise HTTPException(400, "Can't save: some of this stock is already gone. " + "; ".join(short))
+
+    # ---- one transaction: take the old stock off, remove the old ledger entry, post the new ones ----
+    for pid, qty in old_added.items():
+        if pid in products:
+            products[pid].quantity -= qty
+
+    db.query(models.StockMovement).filter(models.StockMovement.note == f"Purchase bill {number}").delete()
+    for journal in db.query(models.Journal).filter(
+        models.Journal.source_type == "purchase_bill", models.Journal.source_id == bill.id
+    ).all():
+        db.delete(journal)
+    db.flush()   # the old journal must be gone before the new one reuses its number
+
+    bill.items = bill_lines
+    bill.vendor_ref = (payload.vendor_ref or "").strip() or None
+    bill.bill_date = payload.bill_date
+    bill.due_date = due_date
+    bill.notes = (payload.notes or "").strip() or None
+    bill.total = total
+
+    for pid, (qty, cost) in bought.items():
+        product = products[pid]
+        old_qty, old_cost = product.quantity or 0, _money(product.cost)
+        if old_qty > 0 and old_cost > 0:
+            product.cost = ((old_cost * old_qty + cost) / (old_qty + qty)).quantize(CENT, ROUND_HALF_UP)
+        else:
+            product.cost = (cost / qty).quantize(CENT, ROUND_HALF_UP)
+        product.quantity = old_qty + qty
+        db.add(models.StockMovement(
+            product_id=pid, quantity=qty, movement_type="restock",
+            note=f"Purchase bill {number}",
+        ))
+
+    journal_lines = [
+        models.JournalLine(account_id=account_id, debit=amount, credit=0, description=f"Bill {number} - {vendor.name}")
+        for account_id, amount in debits.items() if amount > 0
+    ]
+    journal_lines.append(models.JournalLine(
+        account_id=_payable_account(db).id, debit=0, credit=total,
+        description=f"Bill {number} - {vendor.name}",
+    ))
+    db.add(models.Journal(
+        journal_number=number,
+        journal_date=payload.bill_date,
+        reference=vendor.name,
+        notes=f"Purchase bill {number}",
+        source_type="purchase_bill",
+        source_id=bill.id,
+        lines=journal_lines,
+    ))
+    db.commit()
+    return db.query(models.PurchaseBill).options(*_options()).filter(models.PurchaseBill.id == bill_id).one()
+
 @router.put("/{bill_id}/void", response_model=schemas.PurchaseBillOut)
 def void_purchase_bill(bill_id: int, db: Session = Depends(get_db)):
     """Cancels a bill: takes the stock back off the shelf and removes its ledger entry. The bill stays on record as Void."""
