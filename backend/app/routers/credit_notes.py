@@ -257,6 +257,152 @@ def void_credit_note(credit_id: int, db: Session = Depends(get_db)):
     db.commit()
     return _load(db, credit_id)
     
+@router.put("/{credit_id}", response_model=schemas.CreditNoteOut)
+def update_credit_note(credit_id: int, payload: schemas.CreditNoteCreate, db: Session = Depends(get_db)):
+    """Edits a credit note in place (it keeps its number): the old returned stock and ledger entry are reversed, then the new ones are posted."""
+    credit = _load(db, credit_id)
+    if not credit:
+        raise HTTPException(404, "Credit note not found")
+    if credit.status == "void":
+        raise HTTPException(400, "A void credit note can't be edited")
+    if credit.applications or float(credit.amount_applied or 0) > 0:
+        raise HTTPException(400, "This credit was used on invoices. Remove those first.")
+    if payload.customer_id != credit.customer_id:
+        raise HTTPException(400, "The customer can't be changed. Void this credit note and create a new one.")
+    customer = credit.customer
+    if not payload.items:
+        raise HTTPException(400, "Add at least one item")
+
+    invoice = None
+    sold_cost: dict[int, Decimal] = {}
+    if payload.invoice_id:
+        invoice = db.query(models.Invoice).options(joinedload(models.Invoice.items)).get(payload.invoice_id)
+        if not invoice:
+            raise HTTPException(404, "Invoice not found")
+        if invoice.customer_id != customer.id:
+            raise HTTPException(400, f"{invoice.invoice_number} belongs to a different customer")
+        if invoice.status == "void":
+            raise HTTPException(400, f"{invoice.invoice_number} is void")
+        for item in invoice.items:
+            if item.product_id and item.product_id not in sold_cost:
+                sold_cost[item.product_id] = _money(item.unit_cost)
+
+    for line in payload.items:
+        if line.quantity <= 0:
+            raise HTTPException(400, "Every quantity must be greater than 0")
+        if line.rate < 0:
+            raise HTTPException(400, "A rate can't be negative")
+
+    # what this credit note put back on the shelf before
+    old_back: dict[int, int] = {}
+    if credit.restock:
+        for item in credit.items:
+            if item.product and item.product.item_type == STOCK_TRACKED_TYPE:
+                old_back[item.product.id] = old_back.get(item.product.id, 0) + item.quantity
+
+    new_ids = {line.product_id for line in payload.items}
+    products = {
+        p.id: p
+        for p in db.query(models.Product).filter(models.Product.id.in_(new_ids | set(old_back))).with_for_update().all()
+    }
+    missing = [pid for pid in new_ids if pid not in products]
+    if missing:
+        raise HTTPException(404, f"Item(s) not found: {missing}")
+    for pid in new_ids:
+        if products[pid].subitems:
+            raise HTTPException(400, f"{products[pid].name} is a parent item. Pick one of its subitems.")
+
+    number = credit.credit_number
+    lines = []
+    total = Decimal("0")
+    income: dict[int, Decimal] = {}
+    cogs: dict[int, Decimal] = {}
+    stock: dict[int, Decimal] = {}
+    back_in_stock: dict[int, int] = {}
+
+    for line in payload.items:
+        product = products[line.product_id]
+        rate = _money(line.rate)
+        amount = (rate * line.quantity).quantize(CENT, ROUND_HALF_UP)
+        unit_cost = sold_cost.get(product.id, _money(product.cost))
+        total += amount
+
+        lines.append(models.CreditNoteItem(
+            product_id=product.id,
+            item_name=product.name,
+            description=(line.description or "").strip() or None,
+            quantity=line.quantity,
+            rate=rate,
+            unit_cost=unit_cost,
+            amount=amount,
+        ))
+
+        income_id = product.income_account_id or _get_or_create_account(db, "Sales", "income").id
+        income[income_id] = income.get(income_id, Decimal("0")) + amount
+
+        if payload.restock and product.item_type == STOCK_TRACKED_TYPE:
+            back_in_stock[product.id] = back_in_stock.get(product.id, 0) + line.quantity
+            if unit_cost > 0:
+                cost = (unit_cost * line.quantity).quantize(CENT, ROUND_HALF_UP)
+                cogs_id = product.cogs_account_id or _get_or_create_account(db, "Cost of Goods Sold", "cogs").id
+                asset_id = product.asset_account_id or _get_or_create_account(db, "Inventory Asset", "asset").id
+                cogs[cogs_id] = cogs.get(cogs_id, Decimal("0")) + cost
+                stock[asset_id] = stock.get(asset_id, Decimal("0")) + cost
+
+    if total <= 0:
+        raise HTTPException(400, "The credit note total must be greater than 0")
+
+    # stock must not go below zero after taking the old returned quantities off and adding the new ones
+    short = []
+    for pid, prod in products.items():
+        after = (prod.quantity or 0) - old_back.get(pid, 0) + back_in_stock.get(pid, 0)
+        if after < 0:
+            short.append(f"{prod.name} (this credit note returned {old_back.get(pid, 0)}, only {prod.quantity} in stock now)")
+    if short:
+        raise HTTPException(400, "Can't save: some of the returned stock is already gone. " + "; ".join(short))
+
+    # ---- one transaction: take the old stock back out, remove the old ledger entry, post the new ones ----
+    for pid, qty in old_back.items():
+        products[pid].quantity -= qty
+    for journal in db.query(models.Journal).filter(
+        models.Journal.source_type == "credit_note", models.Journal.source_id == credit.id
+    ).all():
+        db.delete(journal)
+    credit.items.clear()
+    db.flush()   # old lines and the old journal (same number) must be gone first
+
+    credit.invoice_id = invoice.id if invoice else None
+    credit.credit_date = payload.credit_date
+    credit.reason = (payload.reason or "").strip() or None
+    credit.restock = payload.restock
+    credit.total = total
+    credit.items.extend(lines)
+
+    for pid, qty in back_in_stock.items():
+        products[pid].quantity += qty
+
+    journal_lines = [models.JournalLine(
+        account_id=_receivable_account(db).id, debit=0, credit=total,
+        description=f"Credit note {number} - {customer.display_name}",
+    )]
+    for account_id, amount in income.items():
+        journal_lines.append(models.JournalLine(account_id=account_id, debit=amount, credit=0, description=f"Sales return {number}"))
+    for account_id, amount in stock.items():
+        journal_lines.append(models.JournalLine(account_id=account_id, debit=amount, credit=0, description=f"Stock returned {number}"))
+    for account_id, amount in cogs.items():
+        journal_lines.append(models.JournalLine(account_id=account_id, debit=0, credit=amount, description=f"Cost reversed {number}"))
+
+    db.add(models.Journal(
+        journal_number=number,
+        journal_date=payload.credit_date,
+        reference=customer.display_name,
+        notes=f"Credit note {number}",
+        source_type="credit_note",
+        source_id=credit.id,
+        lines=journal_lines,
+    ))
+    db.commit()
+    return _load(db, credit_id)
 
 
 @router.delete("/{credit_id}")

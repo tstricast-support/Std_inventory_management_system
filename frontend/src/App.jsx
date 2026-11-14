@@ -381,6 +381,7 @@ function salesDocStatus(doc) {
 }
 
 function SalesDocumentsPage({ isAdmin, go, docType }) {
+  const { can, hasRight } = useAuth();
   const info = SALES_DOC_INFO[docType];
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -480,8 +481,11 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
               const canConvert =
                 doc.doc_type === "quote" &&
                 ["draft", "sent", "accepted"].includes(doc.status);
-              const canDelete = true;
-              const canEdit = !["invoiced", "converted"].includes(doc.status);
+              const canDelete =
+                can("sales_documents", "full") && hasRight("delete_records");
+              const canEdit =
+                !["invoiced", "converted"].includes(doc.status) &&
+                can("sales_documents", "full");
               return (
                 <div
                   key={doc.id}
@@ -684,53 +688,246 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
   );
 }
 
-function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
-  const fromDoc = editDoc;
-  const info = SALES_DOC_INFO[docType];
-  const [customers, setCustomers] = useState([]);
-  const [items, setItems] = useState([]);
-  const [customerId, setCustomerId] = useState(
-    fromDoc ? fromDoc.customer_id : "",
-  );
-  const [date, setDate] = useState(fromDoc?.doc_date || toISODate(new Date()));
-  const [endDate, setEndDate] = useState(fromDoc?.expiry_date || "");
-  const [reference, setReference] = useState(fromDoc?.reference || "");
-  const [notes, setNotes] = useState(fromDoc?.notes || "");
-  const [lines, setLines] = useState(
-    fromDoc && fromDoc.items.some((l) => l.product_id)
-      ? fromDoc.items
-          .filter((l) => l.product_id)
-          .map((l) => ({
-            product_id: l.product_id,
-            description: l.description || "",
-            quantity: String(l.quantity),
-            rate: String(l.rate),
-          }))
-      : [blankInvoiceLine()],
-  );
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-  const cls =
-    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+// =====================================================================================================
+// Shared pieces for the QuickBooks-style document windows (Quote, Sales Order, Credit Note)
+//   - FormWindow     : the draggable + resizable window (same behaviour as the invoice window)
+//   - DocLinesGrid   : the Item / Description / Qty / Rate / Amount grid (same look as "Enter Bill")
+// =====================================================================================================
 
-  useEffect(() => {
-    Promise.all([getCustomers(), getProducts()])
-      .then(([c, p]) => {
-        setCustomers(
-          c.filter((x) => x.is_active || x.id === fromDoc?.customer_id),
+// which columns the grid can show (the user picks them with "Customize Columns")
+const DOC_COL_DEFS = [
+  { key: "item", label: "Item", fr: 2.4, locked: true, show: true, full: true },
+  { key: "description", label: "Description", fr: 2, show: true, full: true },
+  { key: "sku", label: "SKU", fr: 1, show: false },
+  { key: "type", label: "Item type", fr: 1.1, show: false },
+  { key: "onhand", label: "In stock", fr: 0.8, right: true, show: false },
+  { key: "qty", label: "Qty", fr: 0.7, right: true, show: true },
+  { key: "rate", label: "Rate", fr: 1, right: true, locked: true, show: true },
+  { key: "amount", label: "Amount", fr: 1.1, right: true, locked: true, show: true },
+  { key: "image", label: "Image", fr: 0.6, show: false },
+];
+const DOC_COLS_KEY = "doc_cols_v1";
+
+// chosen columns + their order, saved on this device per company (same idea as useBillColumns)
+function useDocColumns(name) {
+  const { company } = useCompany();
+  const storageKey = `${DOC_COLS_KEY}:${name}${company?.id ? `:${company.id}` : ""}`;
+  const defaults = DOC_COL_DEFS.map((c) => ({ key: c.key, visible: c.show }));
+
+  const read = (key) => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(key) || "null");
+      if (Array.isArray(saved)) {
+        const known = DOC_COL_DEFS.map((c) => c.key);
+        const savedCols = saved.filter((c) => known.includes(c.key));
+        const missing = defaults.filter(
+          (c) => !savedCols.some((s) => s.key === c.key),
         );
-        setItems(flattenParents(p).filter((x) => !(x.subitems?.length > 0)));
-      })
-      .catch((err) => setError(err.message));
+        return [...savedCols, ...missing].map((c) => ({
+          key: c.key,
+          visible:
+            Boolean(DOC_COL_DEFS.find((d) => d.key === c.key)?.locked) ||
+            Boolean(c.visible),
+        }));
+      }
+    } catch (e) {
+      /* ignore broken saved data */
+    }
+    return defaults;
+  };
+
+  const [cols, setCols] = useState(() => read(storageKey));
+  useEffect(() => {
+    setCols(read(storageKey));
+  }, [storageKey]);
+
+  const save = (next) => {
+    setCols(next);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(next));
+    } catch (e) {
+      /* storage blocked */
+    }
+  };
+  return [cols, save, defaults];
+}
+
+// drag by the title bar + resize from the bottom-right corner (same code as the invoice window)
+function useFormWindow() {
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [size, setSize] = useState({ w: null, h: null });
+  const panelRef = useRef(null);
+
+  const startDrag = (e) => {
+    if (e.target.closest("button")) return;
+    const el = panelRef.current;
+    if (!el) return;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const sx = e.clientX - pos.x;
+    const sy = e.clientY - pos.y;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const move = (ev) =>
+      setPos({
+        x: clamp(ev.clientX - sx, -(W / 2 + w / 2 - 100), W / 2 + w / 2 - 100),
+        y: clamp(ev.clientY - sy, h / 2 - H / 2, H / 2 + h / 2 - 40),
+      });
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  const startResize = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = panelRef.current;
+    if (!el) return;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const startW = el.offsetWidth;
+    const startH = el.offsetHeight;
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const startPos = { ...pos };
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const move = (ev) => {
+      const w = clamp(startW + (ev.clientX - sx), 480, W - 16);
+      const h = clamp(startH + (ev.clientY - sy), 320, H - 16);
+      setSize({ w, h });
+      // the window is centred, so shift it by half the change to keep the top-left corner still
+      setPos({
+        x: startPos.x + (w - startW) / 2,
+        y: startPos.y + (h - startH) / 2,
+      });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  return { panelRef, pos, size, startDrag, startResize };
+}
+
+// the window frame: dark backdrop, draggable title bar with a close button, resize handle
+function FormWindow({ title, onClose, children }) {
+  const { panelRef, pos, size, startDrag, startResize } = useFormWindow();
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-2 sm:p-4 z-50">
+      <div
+        ref={panelRef}
+        style={{
+          position: "relative",
+          left: pos.x,
+          top: pos.y,
+          ...(size.w && size.h
+            ? {
+                width: size.w,
+                height: size.h,
+                minWidth: 0,
+                maxWidth: "none",
+                maxHeight: "none",
+              }
+            : {}),
+        }}
+        className="bg-white rounded-xl shadow-xl w-full max-w-6xl p-4 sm:p-5 max-h-[96vh] overflow-y-auto"
+      >
+        <h2
+          onPointerDown={startDrag}
+          title="Drag to move"
+          className="-mx-4 sm:-mx-5 -mt-4 sm:-mt-5 mb-3 px-4 sm:px-5 pt-4 sm:pt-5 pb-2 rounded-t-xl text-lg font-semibold cursor-move select-none touch-none flex items-center justify-between"
+        >
+          <span>{title}</span>
+          <button
+            type="button"
+            onClick={onClose}
+            title="Close"
+            aria-label="Close"
+            className="p-1 rounded-md text-gray-500 hover:bg-gray-100 cursor-pointer"
+          >
+            <X size={20} />
+          </button>
+        </h2>
+
+        {children}
+
+        {/* resize handle (bottom-right corner) */}
+        <div className="sticky bottom-0 h-0 -mr-4 sm:-mr-5">
+          <div
+            onPointerDown={startResize}
+            title="Drag to resize"
+            className="absolute right-0 bottom-0 w-5 h-5 cursor-nwse-resize touch-none select-none z-10"
+            style={{
+              background:
+                "linear-gradient(135deg, transparent 50%, #9ca3af 50%, #9ca3af 58%, transparent 58%, transparent 70%, #9ca3af 70%, #9ca3af 78%, transparent 78%)",
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- grid rows ----------
+const blankDocLine = () => ({
+  product_id: "",
+  description: "",
+  quantity: "1",
+  rate: "",
+});
+const docLineFilled = (l) => Boolean(l.product_id);
+// a new blank row appears when the last one gets filled (like QuickBooks)
+const withBlankDocLine = (rows) =>
+  rows.length === 0 || docLineFilled(rows[rows.length - 1])
+    ? [...rows, blankDocLine()]
+    : rows;
+// turns saved lines (or nothing) into grid rows: the lines + blank rows to type in
+const docLinesFrom = (savedItems) => {
+  const filled = (savedItems || [])
+    .filter((l) => l.product_id)
+    .map((l) => ({
+      product_id: l.product_id,
+      description: l.description || "",
+      quantity: String(l.quantity),
+      rate: String(l.rate),
+    }));
+  return [
+    ...filled,
+    ...Array.from({ length: filled.length ? 1 : 4 }, () => blankDocLine()),
+  ];
+};
+const docLineCents = (l) => (Number(l.quantity) || 0) * toCents(l.rate);
+
+// the Item / Description / Qty / Rate / Amount grid (looks like the "Enter Bill" Items tab)
+function DocLinesGrid({ storageName, lines, setLines, totalCents, onError }) {
+  const [items, setItems] = useState([]);
+  const [cols, saveCols, colsDefault] = useDocColumns(storageName);
+  const [colsOpen, setColsOpen] = useState(false);
+  const [confirmItem, setConfirmItem] = useState(null); // { name, lineIndex } or null = question closed
+  const [quickItem, setQuickItem] = useState(null); // { name, lineIndex } or null = item form closed
+  const wide = useIsWide();
+
+  const cellCls =
+    "w-full border border-gray-300 rounded px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const roCls = "px-2 py-1.5 text-sm text-gray-700 truncate";
+
+  const loadItems = async () => {
+    const tree = await getProducts();
+    // only real items: a parent that has subitems can't be sold itself
+    setItems(flattenParents(tree).filter((x) => !(x.subitems?.length > 0)));
+  };
+  useEffect(() => {
+    loadItems().catch((err) => onError?.(err.message));
   }, []);
 
   const itemById = Object.fromEntries(items.map((p) => [p.id, p]));
-  const customerOptions = customers.map((c) => ({
-    value: c.id,
-    label: c.display_name,
-    hint: c.payment_terms,
-    search: `${c.display_name} ${c.company_name || ""}`,
-  }));
   const itemOptions = items.map((p) => ({
     value: p.id,
     label: p.label,
@@ -741,22 +938,275 @@ function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
     search: `${p.label} ${p.sku || ""}`,
   }));
 
-  const setLine = (i, patch) =>
+  const setRow = (i, patch) =>
     setLines((prev) =>
-      prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
+      withBlankDocLine(
+        prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)),
+      ),
     );
+  const removeRow = (i) =>
+    setLines((prev) => withBlankDocLine(prev.filter((_, idx) => idx !== i)));
+  const fillFrom = (p) => ({
+    product_id: p.id,
+    description: p.description || "",
+    rate: String(p.price ?? 0),
+  });
   const pickItem = (i, productId) => {
     const p = itemById[productId];
-    setLine(i, {
-      product_id: productId,
-      description: p?.description || "",
-      rate: p ? String(p.price ?? 0) : "",
-    });
+    setRow(
+      i,
+      p ? fillFrom(p) : { product_id: productId, description: "", rate: "" },
+    );
   };
 
-  const filled = lines.filter((l) => l.product_id);
-  const lineCents = (l) => (Number(l.quantity) || 0) * toCents(l.rate);
-  const totalCents = filled.reduce((s, l) => s + lineCents(l), 0);
+  // new item: save from the full item form, reload the list and fill the row it was opened from
+  const handleQuickItem = async (values, imageFiles = []) => {
+    const created = await createProduct(values, imageFiles);
+    await loadItems();
+    setRow(quickItem.lineIndex, fillFrom(created));
+  };
+
+  const defs = cols
+    .filter((c) => c.visible)
+    .map((c) => DOC_COL_DEFS.find((d) => d.key === c.key))
+    .filter(Boolean);
+  const template = [...defs.map((d) => `minmax(0,${d.fr}fr)`), "2rem"].join(" ");
+  const rowProps = {
+    className: wide
+      ? "grid gap-1 items-start border-b border-gray-100 px-2 py-1.5"
+      : "grid grid-cols-2 gap-2 items-start border-b border-gray-200 px-2 py-2",
+    style: wide ? { gridTemplateColumns: template } : undefined,
+  };
+
+  const renderRow = (r, i) => {
+    const p = itemById[r.product_id];
+    const tracked = p?.item_type === STOCK_TRACKED_TYPE;
+    const num = " text-right";
+    const cells = {
+      item: (
+        <SearchSelect
+          value={r.product_id}
+          onChange={(v) => pickItem(i, v)}
+          options={itemOptions}
+          placeholder="Select an item..."
+          searchPlaceholder="Search items..."
+          emptyText="No items found. Type a name to create one."
+          onCreateNew={(name) => setConfirmItem({ name, lineIndex: i })}
+          createLabel="item"
+          wrap
+        />
+      ),
+      description: (
+        <input
+          placeholder="Description"
+          title={r.description}
+          value={r.description}
+          onChange={(e) => setRow(i, { description: e.target.value })}
+          className={cellCls}
+        />
+      ),
+      sku: <div className={roCls}>{p?.sku || ""}</div>,
+      type: <div className={roCls}>{p?.item_type || ""}</div>,
+      onhand: (
+        <div className={roCls + num}>{p ? (tracked ? p.quantity : "-") : ""}</div>
+      ),
+      qty: (
+        <input
+          type="number"
+          min="1"
+          step="1"
+          value={r.quantity}
+          onChange={(e) => setRow(i, { quantity: e.target.value })}
+          className={cellCls + num}
+        />
+      ),
+      rate: (
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={r.rate}
+          onChange={(e) => setRow(i, { rate: e.target.value })}
+          className={cellCls + num}
+        />
+      ),
+      amount: (
+        <div className={roCls + num + " font-medium text-gray-900"}>
+          {docLineFilled(r) ? formatRs(docLineCents(r) / 100) : ""}
+        </div>
+      ),
+      image: p ? <ItemThumb product={p} size={28} /> : null,
+    };
+    return (
+      <div key={i} {...rowProps}>
+        {defs.map((d) => (
+          <BillCell key={d.key} label={d.label} wide={wide} full={d.full}>
+            {cells[d.key]}
+          </BillCell>
+        ))}
+        <div
+          className={`flex ${wide ? "justify-center pt-1" : "col-span-2 justify-end"}`}
+        >
+          {docLineFilled(r) && (
+            <button
+              type="button"
+              title="Remove line"
+              onClick={() => removeRow(i)}
+              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <>
+      <div className="mt-4 flex items-end justify-between gap-2 flex-wrap">
+        <div className="flex gap-1">
+          <span className="px-4 py-1.5 text-sm border border-b-0 rounded-t-lg bg-white font-semibold text-gray-900 -mb-px">
+            Items{" "}
+            <span className="ml-1 text-xs">{formatRs(totalCents / 100)}</span>
+          </span>
+        </div>
+        <div className="flex items-center gap-3 pb-1">
+          <button
+            type="button"
+            onClick={() =>
+              setConfirmItem({
+                name: "",
+                lineIndex: Math.max(
+                  0,
+                  lines.findIndex((r) => !docLineFilled(r)),
+                ),
+              })
+            }
+            className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+          >
+            <Plus size={14} /> New item
+          </button>
+          <button
+            type="button"
+            onClick={() => setColsOpen(true)}
+            className="text-sm text-gray-600 hover:text-gray-900 inline-flex items-center gap-1"
+          >
+            <Settings size={14} /> Customize Columns
+          </button>
+        </div>
+      </div>
+
+      <div className="border border-gray-300 rounded-b-lg rounded-tr-lg bg-white">
+        {wide && (
+          <div
+            className="grid gap-1 px-2 py-1.5 bg-gray-100 border-b border-gray-300 text-[11px] font-semibold uppercase text-gray-600 select-none"
+            style={{ gridTemplateColumns: template }}
+            title="Right-click to customize columns"
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setColsOpen(true);
+            }}
+          >
+            {defs.map((d) => (
+              <span key={d.key} className={d.right ? "text-right" : ""}>
+                {d.label}
+              </span>
+            ))}
+            <span />
+          </div>
+        )}
+        {lines.map(renderRow)}
+      </div>
+
+      {confirmItem && (
+        <ConfirmCreateItemModal
+          name={confirmItem.name}
+          onNo={() => setConfirmItem(null)}
+          onYes={() => {
+            setQuickItem(confirmItem);
+            setConfirmItem(null);
+          }}
+        />
+      )}
+      {quickItem && (
+        <ProductForm
+          initialName={quickItem.name}
+          onSubmit={handleQuickItem}
+          onClose={() => setQuickItem(null)}
+        />
+      )}
+      {colsOpen && (
+        <BillColumnsDialog
+          title="Items"
+          defs={DOC_COL_DEFS}
+          defaults={colsDefault}
+          cols={cols}
+          onSave={(next) => {
+            saveCols(next);
+            setColsOpen(false);
+          }}
+          onClose={() => setColsOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
+  const info = SALES_DOC_INFO[docType];
+  const [customers, setCustomers] = useState([]);
+  const [customerId, setCustomerId] = useState(
+    editDoc ? editDoc.customer_id : "",
+  );
+  const [date, setDate] = useState(editDoc?.doc_date || toISODate(new Date()));
+  const [endDate, setEndDate] = useState(editDoc?.expiry_date || "");
+  const [reference, setReference] = useState(editDoc?.reference || "");
+  const [notes, setNotes] = useState(editDoc?.notes || ""); // shown as "Memo"
+  const [lines, setLines] = useState(() => docLinesFrom(editDoc?.items));
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const [quickCustomerName, setQuickCustomerName] = useState(null); // typed name, or null = popup closed
+  const cls =
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  useEffect(() => {
+    getCustomers()
+      .then((c) =>
+        setCustomers(
+          c.filter((x) => x.is_active || x.id === editDoc?.customer_id),
+        ),
+      )
+      .catch((err) => setError(err.message));
+  }, []);
+
+  const customer = customers.find((c) => c.id === customerId);
+  const customerInfo = customer
+    ? [
+        customer.contact_person,
+        customer.billing_address,
+        customer.phone,
+        customer.email,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "";
+  const customerOptions = customers.map((c) => ({
+    value: c.id,
+    label: c.display_name,
+    hint: c.payment_terms,
+    search: `${c.display_name} ${c.company_name || ""}`,
+  }));
+
+  // "+ New customer": save from the popup, add it to the dropdown and select it
+  const handleQuickCustomer = async (payload) => {
+    const created = await createCustomer(payload);
+    setCustomers((prev) => [...prev, created]);
+    setCustomerId(created.id);
+  };
+
+  const filled = lines.filter(docLineFilled);
+  const totalCents = filled.reduce((s, l) => s + docLineCents(l), 0);
   const canSave =
     Boolean(customerId) &&
     filled.length > 0 &&
@@ -769,8 +1219,18 @@ function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
     totalCents > 0 &&
     (!endDate || endDate >= date);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const resetForm = () => {
+    setCustomerId("");
+    setDate(toISODate(new Date()));
+    setEndDate("");
+    setReference("");
+    setNotes("");
+    setLines(docLinesFrom(null));
+    setError(null);
+  };
+
+  const save = async (andNew) => {
+    if (!canSave || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -790,7 +1250,8 @@ function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
       if (editDoc) await updateSalesDoc(editDoc.id, payload);
       else await createSalesDoc({ doc_type: docType, ...payload });
       await onSaved();
-      onClose();
+      if (andNew && !editDoc) resetForm();
+      else onClose();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -799,183 +1260,163 @@ function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">
-          {editDoc ? `Edit ${editDoc.doc_number}` : `New ${info.title}`}
-        </h2>
-        {error && (
-          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
-            {error}
-          </div>
-        )}
-        <form onSubmit={handleSubmit} className="space-y-4">
+    <FormWindow
+      title={editDoc ? `Edit ${editDoc.doc_number}` : `New ${info.title}`}
+      onClose={onClose}
+    >
+      {error && (
+        <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">
+          {error}
+        </div>
+      )}
+
+      {/* ---------- header: customer / address / memo | date / expiry / ref no / amount ---------- */}
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] gap-4 bg-blue-50/60 border border-blue-200 rounded-lg p-3 sm:p-4">
+        <div className="space-y-3 min-w-0">
           <div>
-            <FieldLabel>Customer</FieldLabel>
+            <FieldLabel
+              action={
+                <button
+                  type="button"
+                  onClick={() => setQuickCustomerName("")}
+                  className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+                >
+                  <Plus size={14} /> New customer
+                </button>
+              }
+            >
+              Customer
+            </FieldLabel>
             <SearchSelect
               value={customerId}
               onChange={setCustomerId}
               options={customerOptions}
               placeholder="Select a customer..."
               searchPlaceholder="Search customers..."
-              emptyText="No customers found"
+              emptyText="No customers found. Type a name to create one."
+              onCreateNew={(name) => setQuickCustomerName(name)}
+              createLabel="customer"
             />
           </div>
+          <label className="block text-xs text-gray-500">
+            Address
+            <textarea
+              readOnly
+              rows={3}
+              value={customerInfo}
+              placeholder="Pick a customer to see the address"
+              className={cls + " mt-1 bg-gray-50 resize-none"}
+            />
+          </label>
+          <label className="block text-xs text-gray-500">
+            Memo
+            <input
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Notes for the customer"
+              className={cls + " mt-1"}
+            />
+          </label>
+        </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <label className="text-xs text-gray-500">
-              {info.dateLabel}
-              <input
-                required
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className={cls + " mt-1"}
-              />
-            </label>
-            <label className="text-xs text-gray-500">
-              {info.endLabel} (optional)
-              <input
-                type="date"
-                value={endDate}
-                min={date}
-                onChange={(e) => setEndDate(e.target.value)}
-                className={cls + " mt-1"}
-              />
-            </label>
-            <label className="text-xs text-gray-500">
-              Reference #
-              <input
-                value={reference}
-                onChange={(e) => setReference(e.target.value)}
-                className={cls + " mt-1"}
-              />
-            </label>
+        <div className="grid grid-cols-2 md:grid-cols-1 gap-3 content-start">
+          <label className="text-xs text-gray-500">
+            {info.dateLabel}
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className={cls + " mt-1"}
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            {info.endLabel} (optional)
+            <input
+              type="date"
+              value={endDate}
+              min={date}
+              onChange={(e) => setEndDate(e.target.value)}
+              className={cls + " mt-1"}
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Ref. No.
+            <input
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              className={cls + " mt-1"}
+            />
+          </label>
+          <div className="text-xs text-gray-500">
+            Amount
+            <p className="mt-1 px-3 py-2 text-base font-semibold text-gray-900 bg-white border border-gray-300 rounded-lg">
+              {formatRs(totalCents / 100)}
+            </p>
           </div>
-
-          <div className="space-y-3">
-            <FieldLabel>Items</FieldLabel>
-            {lines.map((l, i) => {
-              const p = itemById[l.product_id];
-              return (
-                <div
-                  key={i}
-                  className="border border-gray-200 rounded-lg p-3 space-y-2"
-                >
-                  <div className="flex items-start gap-3">
-                    <ItemThumb product={p} size={56} />
-                    <div className="flex-1 min-w-0 space-y-2">
-                      <SearchSelect
-                        value={l.product_id}
-                        onChange={(v) => pickItem(i, v)}
-                        options={itemOptions}
-                        placeholder="Select an item..."
-                        searchPlaceholder="Search items..."
-                        emptyText="No items found"
-                      />
-                      <input
-                        placeholder="Description (optional)"
-                        value={l.description}
-                        onChange={(e) =>
-                          setLine(i, { description: e.target.value })
-                        }
-                        className={cls}
-                      />
-                    </div>
-                    {lines.length > 1 && (
-                      <button
-                        type="button"
-                        title="Remove line"
-                        onClick={() =>
-                          setLines((prev) => prev.filter((_, idx) => idx !== i))
-                        }
-                        className="shrink-0 border border-gray-300 rounded-lg p-2 text-gray-500 hover:bg-gray-50"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    <label className="text-xs text-gray-500">
-                      Qty
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={l.quantity}
-                        onChange={(e) =>
-                          setLine(i, { quantity: e.target.value })
-                        }
-                        className={cls + " mt-1"}
-                      />
-                    </label>
-                    <label className="text-xs text-gray-500">
-                      Rate
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={l.rate}
-                        onChange={(e) => setLine(i, { rate: e.target.value })}
-                        className={cls + " mt-1"}
-                      />
-                    </label>
-                    <div className="text-xs text-gray-500">
-                      Amount
-                      <p className="mt-1 py-2 text-sm font-medium text-gray-900">
-                        {formatRs(lineCents(l) / 100)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() => setLines((prev) => [...prev, blankInvoiceLine()])}
-              className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
-            >
-              <Plus size={14} /> Add another line
-            </button>
-          </div>
-
-          <textarea
-            rows={2}
-            placeholder="Notes for the customer"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className={cls}
-          />
-
-          <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
-            <span>Total</span>
-            <span>{formatRs(totalCents / 100)}</span>
-          </div>
-
-          <div className="flex gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!canSave || submitting}
-              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-            >
-              {submitting
-                ? "Saving..."
-                : editDoc
-                  ? "Save changes"
-                  : `Save ${info.title}`}
-            </button>
-          </div>
-        </form>
+        </div>
       </div>
-    </div>
+
+      {/* ---------- items grid ---------- */}
+      <DocLinesGrid
+        storageName="salesdoc"
+        lines={lines}
+        setLines={setLines}
+        totalCents={totalCents}
+        onError={setError}
+      />
+
+      <div className="mt-3 flex justify-end">
+        <div className="bg-gray-50 rounded-lg px-4 py-2 text-sm flex gap-6 font-semibold">
+          <span>Total</span>
+          <span>{formatRs(totalCents / 100)}</span>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap justify-end gap-2 pt-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50"
+        >
+          Cancel
+        </button>
+        {!editDoc && (
+          <button
+            type="button"
+            onClick={resetForm}
+            className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50"
+          >
+            Clear
+          </button>
+        )}
+        {!editDoc && (
+          <button
+            type="button"
+            disabled={!canSave || submitting}
+            onClick={() => save(true)}
+            className="border border-blue-600 text-blue-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-50 disabled:opacity-50"
+          >
+            Save &amp; New
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={!canSave || submitting}
+          onClick={() => save(false)}
+          className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+        >
+          {submitting ? "Saving..." : "Save & Close"}
+        </button>
+      </div>
+
+      {quickCustomerName !== null && (
+        <QuickCustomerModal
+          initialName={quickCustomerName}
+          onSave={handleQuickCustomer}
+          onClose={() => setQuickCustomerName(null)}
+        />
+      )}
+    </FormWindow>
   );
 }
 
@@ -1207,6 +1648,20 @@ const voidCreditNote = (id) =>
   creditNoteRequest(`${id}/void`, "PUT", null, "Failed to void credit note");
 const deleteCreditNote = (id) =>
   creditNoteRequest(String(id), "DELETE", null, "Failed to delete credit note");
+
+const updatePayment = (id, payload) =>
+  paymentRequest(String(id), "PUT", payload, "Failed to update payment");
+const updateVendorPayment = (id, payload) =>
+  vendorPaymentRequest(
+    String(id),
+    "PUT",
+    payload,
+    "Failed to update vendor payment",
+  );
+const updateJournal = (id, payload) =>
+  journalRequest(String(id), "PUT", payload, "Failed to update journal");
+const updateCreditNote = (id, payload) =>
+  creditNoteRequest(String(id), "PUT", payload, "Failed to update credit note");
 
 // ---------- Accounts (chart of accounts) ----------
 async function getAccounts(accountType) {
@@ -7357,13 +7812,22 @@ function DepartmentHome({
   );
 }
 
-// ---------- Vendors (admin only) ----------
 function VendorsPage({ isAdmin, go }) {
+  const { can, hasRight } = useAuth();
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
-  useQuickNew(() => setFormOpen(true));
+  const [editing, setEditing] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  useQuickNew(() => {
+    setEditing(null);
+    setFormOpen(true);
+  });
+
+  // what this user is allowed to do (the server checks too - this just hides the buttons)
+  const canEdit = can("vendors", "full");
+  const canDelete = canEdit && hasRight("delete_records");
 
   const load = async () => {
     try {
@@ -7380,12 +7844,13 @@ function VendorsPage({ isAdmin, go }) {
     load();
   }, []);
 
-  const handleDelete = async (id) => {
-    if (!confirm("Delete this vendor?")) return;
+  const handleDelete = async () => {
     try {
-      await deleteVendor(id);
-      load();
+      await deleteVendor(deleteTarget.id);
+      setDeleteTarget(null);
+      await load();
     } catch (err) {
+      setDeleteTarget(null);
       alert(err.message);
     }
   };
@@ -7402,12 +7867,17 @@ function VendorsPage({ isAdmin, go }) {
 
       <main className="p-4 sm:p-6 w-full max-w-3xl">
         <div className="mb-5 flex justify-end">
-          <button
-            onClick={() => setFormOpen(true)}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700"
-          >
-            + Add Vendor
-          </button>
+          <Gate area="vendors" level="create">
+            <button
+              onClick={() => {
+                setEditing(null);
+                setFormOpen(true);
+              }}
+              className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700"
+            >
+              + Add Vendor
+            </button>
+          </Gate>
         </div>
         {loading ? (
           <p className="text-gray-400 text-center py-16">Loading...</p>
@@ -7430,6 +7900,19 @@ function VendorsPage({ isAdmin, go }) {
                       .join(" · ") || "No contact details"}
                   </p>
                 </div>
+                {(canEdit || canDelete) && (
+                  <ItemActionsMenu
+                    onEdit={
+                      canEdit
+                        ? () => {
+                            setEditing(v);
+                            setFormOpen(true);
+                          }
+                        : undefined
+                    }
+                    onDelete={canDelete ? () => setDeleteTarget(v) : undefined}
+                  />
+                )}
               </div>
             ))}
           </div>
@@ -7438,11 +7921,24 @@ function VendorsPage({ isAdmin, go }) {
 
       {formOpen && (
         <VendorForm
-          onClose={() => setFormOpen(false)}
-          onSubmit={async (payload) => {
-            await createVendor(payload);
+          initialData={editing}
+          onClose={() => {
+            setFormOpen(false);
+            setEditing(null);
+          }}
+          onSubmit={async (a, b) => {
+            if (editing) await updateVendor(a, b);
+            else await createVendor(a);
             await load();
           }}
+        />
+      )}
+
+      {deleteTarget && (
+        <TypedDeleteConfirm
+          label={deleteTarget.name}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
         />
       )}
     </div>
@@ -7554,6 +8050,9 @@ const formatRate = (r) =>
   `${Number(r || 0).toLocaleString(undefined, { maximumFractionDigits: 3 })}%`;
 
 function TaxesPage({ isAdmin, go }) {
+  const { can, hasRight } = useAuth();
+  const canEdit = can("taxes", "full");
+  const canDelete = canEdit && hasRight("delete_records");
   const [taxes, setTaxes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -7605,15 +8104,17 @@ function TaxesPage({ isAdmin, go }) {
             Tax rates you can add to invoice and bill lines. The default one is
             pre-selected on new lines.
           </p>
-          <button
-            onClick={() => {
-              setEditing(null);
-              setFormOpen(true);
-            }}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
-          >
-            + New Tax
-          </button>
+          <Gate area="taxes" level="create">
+            <button
+              onClick={() => {
+                setEditing(null);
+                setFormOpen(true);
+              }}
+              className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
+            >
+              + New Tax
+            </button>
+          </Gate>
         </div>
 
         {loading ? (
@@ -7649,13 +8150,19 @@ function TaxesPage({ isAdmin, go }) {
                 <p className="font-semibold text-gray-900 shrink-0">
                   {formatRate(t.rate)}
                 </p>
-                <ItemActionsMenu
-                  onEdit={() => {
-                    setEditing(t);
-                    setFormOpen(true);
-                  }}
-                  onDelete={() => setDeleteTarget(t)}
-                />
+                {(canEdit || canDelete) && (
+                  <ItemActionsMenu
+                    onEdit={
+                      canEdit
+                        ? () => {
+                            setEditing(t);
+                            setFormOpen(true);
+                          }
+                        : undefined
+                    }
+                    onDelete={canDelete ? () => setDeleteTarget(t) : undefined}
+                  />
+                )}
               </div>
             ))}
           </div>
@@ -13187,6 +13694,9 @@ function TopSoldItemsPanel() {
 }
 
 function CustomersPage({ isAdmin, go }) {
+  const { can, hasRight } = useAuth();
+  const canEdit = can("customers", "full");
+  const canDelete = canEdit && hasRight("delete_records");
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -13253,15 +13763,17 @@ function CustomersPage({ isAdmin, go }) {
                 placeholder="Search customers..."
               />
             </div>
-            <button
-              onClick={() => {
-                setEditing(null);
-                setFormOpen(true);
-              }}
-              className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
-            >
-              + New Customer
-            </button>
+            <Gate area="customers" level="create">
+              <button
+                onClick={() => {
+                  setEditing(null);
+                  setFormOpen(true);
+                }}
+                className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap"
+              >
+                + New Customer
+              </button>
+            </Gate>
           </div>
 
           {loading ? (
@@ -13292,13 +13804,21 @@ function CustomersPage({ isAdmin, go }) {
                     <p>{c.payment_terms}</p>
                     <p>Opening: {formatRs(c.opening_balance)}</p>
                   </div>
-                  <ItemActionsMenu
-                    onEdit={() => {
-                      setEditing(c);
-                      setFormOpen(true);
-                    }}
-                    onDelete={() => setDeleteTarget(c)}
-                  />
+                  {(canEdit || canDelete) && (
+                    <ItemActionsMenu
+                      onEdit={
+                        canEdit
+                          ? () => {
+                              setEditing(c);
+                              setFormOpen(true);
+                            }
+                          : undefined
+                      }
+                      onDelete={
+                        canDelete ? () => setDeleteTarget(c) : undefined
+                      }
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -15050,6 +15570,7 @@ function JournalsPage({ isAdmin, go }) {
   useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [editFor, setEditFor] = useState(null); // the journal whose "Edit" button was pressed
 
   const load = async () => {
     try {
@@ -15200,14 +15721,28 @@ function JournalsPage({ isAdmin, go }) {
                           ))}
                         </tbody>
                       </table>
-                      <Gate right="delete_records">
-                        <button
-                          onClick={() => setDeleteTarget(j)}
-                          className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                      <div className="flex flex-wrap gap-2">
+                        <Gate area="journals" level="full">
+                          <button
+                            onClick={() => setEditFor(j)}
+                            className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
+                          >
+                            <Pencil size={14} /> Edit journal
+                          </button>
+                        </Gate>
+                        <Gate
+                          area="journals"
+                          level="full"
+                          right="delete_records"
                         >
-                          <Trash2 size={14} /> Delete journal
-                        </button>
-                      </Gate>
+                          <button
+                            onClick={() => setDeleteTarget(j)}
+                            className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                          >
+                            <Trash2 size={14} /> Delete journal
+                          </button>
+                        </Gate>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -15266,6 +15801,14 @@ function JournalsPage({ isAdmin, go }) {
       {formOpen && (
         <JournalForm onClose={() => setFormOpen(false)} onSaved={load} />
       )}
+      {editFor && (
+        <JournalForm
+          key={editFor.id}
+          editJournal={editFor}
+          onClose={() => setEditFor(null)}
+          onSaved={load}
+        />
+      )}
 
       {deleteTarget && (
         <TypedDeleteConfirm
@@ -15286,12 +15829,23 @@ const blankJournalLine = () => ({
 });
 const toCents = (v) => Math.round((Number(v) || 0) * 100);
 
-function JournalForm({ onClose, onSaved }) {
+function JournalForm({ editJournal = null, onClose, onSaved }) {
   const [accounts, setAccounts] = useState([]);
-  const [date, setDate] = useState(toISODate(new Date()));
-  const [reference, setReference] = useState("");
-  const [notes, setNotes] = useState("");
-  const [lines, setLines] = useState([blankJournalLine(), blankJournalLine()]);
+  const [date, setDate] = useState(
+    editJournal ? editJournal.journal_date : toISODate(new Date()),
+  );
+  const [reference, setReference] = useState(editJournal?.reference || "");
+  const [notes, setNotes] = useState(editJournal?.notes || "");
+  const [lines, setLines] = useState(() =>
+    editJournal
+      ? editJournal.lines.map((l) => ({
+          account_id: String(l.account_id),
+          debit: l.debit > 0 ? String(l.debit) : "",
+          credit: l.credit > 0 ? String(l.credit) : "",
+          description: l.description || "",
+        }))
+      : [blankJournalLine(), blankJournalLine()],
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const cls =
@@ -15325,7 +15879,7 @@ function JournalForm({ onClose, onSaved }) {
     setSubmitting(true);
     setError(null);
     try {
-      await createJournal({
+      const body = {
         journal_date: date,
         reference: reference.trim() || null,
         notes: notes.trim() || null,
@@ -15335,7 +15889,9 @@ function JournalForm({ onClose, onSaved }) {
           credit: Number(l.credit) || 0,
           description: l.description.trim() || null,
         })),
-      });
+      };
+      if (editJournal) await updateJournal(editJournal.id, body);
+      else await createJournal(body);
       await onSaved();
       onClose();
     } catch (err) {
@@ -15348,7 +15904,11 @@ function JournalForm({ onClose, onSaved }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 max-h-[92vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">New Manual Journal</h2>
+        <h2 className="text-lg font-semibold mb-4">
+          {editJournal
+            ? `Edit Journal ${editJournal.journal_number}`
+            : "New Manual Journal"}
+        </h2>
         {error && (
           <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
             {error}
@@ -15501,7 +16061,11 @@ function JournalForm({ onClose, onSaved }) {
               disabled={!canSave || submitting}
               className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
-              {submitting ? "Saving..." : "Save Journal"}
+              {submitting
+                ? "Saving..."
+                : editJournal
+                  ? "Save Changes"
+                  : "Save Journal"}
             </button>
           </div>
         </form>
@@ -17457,6 +18021,7 @@ function CreditNotesPage({ isAdmin, go }) {
   useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
   const [applyFor, setApplyFor] = useState(null); // the credit note whose "Apply to invoice" button was pressed
+  const [editFor, setEditFor] = useState(null); // the credit note whose "Edit" button was pressed
 
   const load = async () => {
     try {
@@ -17691,6 +18256,16 @@ function CreditNotesPage({ isAdmin, go }) {
 
                       {cn.status !== "void" && (
                         <div className="flex flex-wrap gap-2">
+                          {cn.amount_applied <= 0.004 && (
+                            <Gate area="credit_notes" level="full">
+                              <button
+                                onClick={() => setEditFor(cn)}
+                                className={`${btn} border border-gray-300 text-gray-700 hover:bg-gray-50`}
+                              >
+                                <Pencil size={14} /> Edit credit note
+                              </button>
+                            </Gate>
+                          )}
                           {cn.balance > 0.004 && (
                             <button
                               onClick={() => setApplyFor(cn)}
@@ -17733,6 +18308,14 @@ function CreditNotesPage({ isAdmin, go }) {
       {formOpen && (
         <CreditNoteForm onClose={() => setFormOpen(false)} onSaved={load} />
       )}
+      {editFor && (
+        <CreditNoteForm
+          key={editFor.id}
+          editNote={editFor}
+          onClose={() => setEditFor(null)}
+          onSaved={load}
+        />
+      )}
       {applyFor && (
         <ApplyCreditModal
           credit={applyFor}
@@ -17744,77 +18327,60 @@ function CreditNotesPage({ isAdmin, go }) {
   );
 }
 
+
 // fromInvoice: used by the "Credit note" button on an invoice (pre-fills the customer and the lines)
-function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
+// editNote:    used by "Edit credit note" (loads the saved credit note)
+function CreditNoteForm({ fromInvoice = null, editNote = null, onClose, onSaved }) {
+  const seed = editNote || fromInvoice; // where the customer and the lines start from
   const [customers, setCustomers] = useState([]);
-  const [items, setItems] = useState([]);
-  const [customerId, setCustomerId] = useState(
-    fromInvoice ? fromInvoice.customer_id : "",
+  const [customerId, setCustomerId] = useState(seed ? seed.customer_id : "");
+  const [date, setDate] = useState(
+    editNote ? editNote.credit_date : toISODate(new Date()),
   );
-  const [date, setDate] = useState(toISODate(new Date()));
-  const [reason, setReason] = useState("");
-  const [restock, setRestock] = useState(true);
-  const [lines, setLines] = useState(
-    fromInvoice && fromInvoice.items.some((l) => l.product_id)
-      ? fromInvoice.items
-          .filter((l) => l.product_id)
-          .map((l) => ({
-            product_id: l.product_id,
-            description: l.description || "",
-            quantity: String(l.quantity),
-            rate: String(l.rate),
-          }))
-      : [blankInvoiceLine()],
-  );
+  const [reason, setReason] = useState(editNote?.reason || ""); // shown as "Memo"
+  const [restock, setRestock] = useState(editNote ? editNote.restock : true);
+  const [lines, setLines] = useState(() => docLinesFrom(seed?.items));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [quickCustomerName, setQuickCustomerName] = useState(null); // typed name, or null = popup closed
   const cls =
-    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+    "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const invoiceNumber = editNote?.invoice_number || fromInvoice?.invoice_number;
 
   useEffect(() => {
-    Promise.all([getCustomers(), getProducts()])
-      .then(([c, p]) => {
-        setCustomers(
-          c.filter((x) => x.is_active || x.id === fromInvoice?.customer_id),
-        );
-        setItems(flattenParents(p).filter((x) => !(x.subitems?.length > 0)));
-      })
+    getCustomers()
+      .then((c) =>
+        setCustomers(c.filter((x) => x.is_active || x.id === seed?.customer_id)),
+      )
       .catch((err) => setError(err.message));
   }, []);
 
-  const itemById = Object.fromEntries(items.map((p) => [p.id, p]));
+  const customer = customers.find((c) => c.id === customerId);
+  const customerInfo = customer
+    ? [
+        customer.contact_person,
+        customer.billing_address,
+        customer.phone,
+        customer.email,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "";
   const customerOptions = customers.map((c) => ({
     value: c.id,
     label: c.display_name,
     hint: c.payment_terms,
     search: `${c.display_name} ${c.company_name || ""}`,
   }));
-  const itemOptions = items.map((p) => ({
-    value: p.id,
-    label: p.label,
-    hint:
-      p.item_type === STOCK_TRACKED_TYPE
-        ? `${p.quantity} in stock`
-        : p.item_type,
-    search: `${p.label} ${p.sku || ""}`,
-  }));
 
-  const setLine = (i, patch) =>
-    setLines((prev) =>
-      prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
-    );
-  const pickItem = (i, productId) => {
-    const p = itemById[productId];
-    setLine(i, {
-      product_id: productId,
-      description: p?.description || "",
-      rate: p ? String(p.price ?? 0) : "",
-    });
+  const handleQuickCustomer = async (payload) => {
+    const created = await createCustomer(payload);
+    setCustomers((prev) => [...prev, created]);
+    setCustomerId(created.id);
   };
 
-  const filled = lines.filter((l) => l.product_id);
-  const lineCents = (l) => (Number(l.quantity) || 0) * toCents(l.rate);
-  const totalCents = filled.reduce((s, l) => s + lineCents(l), 0);
+  const filled = lines.filter(docLineFilled);
+  const totalCents = filled.reduce((s, l) => s + docLineCents(l), 0);
   const canSave =
     Boolean(customerId) &&
     filled.length > 0 &&
@@ -17826,14 +18392,27 @@ function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
     ) &&
     totalCents > 0;
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const resetForm = () => {
+    setCustomerId(fromInvoice ? fromInvoice.customer_id : "");
+    setDate(toISODate(new Date()));
+    setReason("");
+    setRestock(true);
+    setLines(docLinesFrom(fromInvoice?.items));
+    setError(null);
+  };
+
+  const save = async (andNew) => {
+    if (!canSave || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
-      await createCreditNote({
+      const body = {
         customer_id: customerId,
-        invoice_id: fromInvoice ? fromInvoice.id : null,
+        invoice_id: editNote
+          ? editNote.invoice_id
+          : fromInvoice
+            ? fromInvoice.id
+            : null,
         credit_date: date,
         reason: reason.trim() || null,
         restock,
@@ -17843,9 +18422,12 @@ function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
           quantity: Number(l.quantity),
           rate: Number(l.rate) || 0,
         })),
-      });
+      };
+      if (editNote) await updateCreditNote(editNote.id, body);
+      else await createCreditNote(body);
       await onSaved();
-      onClose();
+      if (andNew && !editNote && !fromInvoice) resetForm();
+      else onClose();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -17854,176 +18436,175 @@ function CreditNoteForm({ fromInvoice = null, onClose, onSaved }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">
-          New Credit Note
-          {fromInvoice ? ` for ${fromInvoice.invoice_number}` : ""}
-        </h2>
-        {error && (
-          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
-            {error}
-          </div>
-        )}
-        <form onSubmit={handleSubmit} className="space-y-4">
+    <FormWindow
+      title={
+        editNote
+          ? `Edit Credit Note ${editNote.credit_number}`
+          : `New Credit Note${fromInvoice ? ` for ${fromInvoice.invoice_number}` : ""}`
+      }
+      onClose={onClose}
+    >
+      {error && (
+        <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">
+          {error}
+        </div>
+      )}
+
+      {/* ---------- header: customer / address / memo | date / invoice / amount ---------- */}
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] gap-4 bg-blue-50/60 border border-blue-200 rounded-lg p-3 sm:p-4">
+        <div className="space-y-3 min-w-0">
           <div>
-            <FieldLabel>Customer</FieldLabel>
+            <FieldLabel
+              action={
+                !editNote && (
+                  <button
+                    type="button"
+                    onClick={() => setQuickCustomerName("")}
+                    className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
+                  >
+                    <Plus size={14} /> New customer
+                  </button>
+                )
+              }
+            >
+              Customer
+            </FieldLabel>
             <SearchSelect
               value={customerId}
               onChange={setCustomerId}
+              disabled={Boolean(editNote)}
               options={customerOptions}
               placeholder="Select a customer..."
               searchPlaceholder="Search customers..."
               emptyText="No customers found"
+              onCreateNew={
+                editNote ? null : (name) => setQuickCustomerName(name)
+              }
+              createLabel="customer"
             />
           </div>
+          <label className="block text-xs text-gray-500">
+            Address
+            <textarea
+              readOnly
+              rows={3}
+              value={customerInfo}
+              placeholder="Pick a customer to see the address"
+              className={cls + " mt-1 bg-gray-50 resize-none"}
+            />
+          </label>
+          <label className="block text-xs text-gray-500">
+            Memo (reason)
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Reason (optional)"
+              className={cls + " mt-1"}
+            />
+          </label>
+        </div>
 
-          <label className="text-xs text-gray-500 block">
+        <div className="grid grid-cols-2 md:grid-cols-1 gap-3 content-start">
+          <label className="text-xs text-gray-500">
             Credit note date
             <input
-              required
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className={cls + " mt-1 sm:w-56"}
+              className={cls + " mt-1"}
             />
           </label>
-
-          <div className="space-y-3">
-            <FieldLabel>Items being credited</FieldLabel>
-            {lines.map((l, i) => {
-              const p = itemById[l.product_id];
-              return (
-                <div
-                  key={i}
-                  className="border border-gray-200 rounded-lg p-3 space-y-2"
-                >
-                  <div className="flex items-start gap-3">
-                    <ItemThumb product={p} size={56} />
-                    <div className="flex-1 min-w-0 space-y-2">
-                      <SearchSelect
-                        value={l.product_id}
-                        onChange={(v) => pickItem(i, v)}
-                        options={itemOptions}
-                        placeholder="Select an item..."
-                        searchPlaceholder="Search items..."
-                        emptyText="No items found"
-                      />
-                      <input
-                        placeholder="Description (optional)"
-                        value={l.description}
-                        onChange={(e) =>
-                          setLine(i, { description: e.target.value })
-                        }
-                        className={cls}
-                      />
-                    </div>
-                    {lines.length > 1 && (
-                      <button
-                        type="button"
-                        title="Remove line"
-                        onClick={() =>
-                          setLines((prev) => prev.filter((_, idx) => idx !== i))
-                        }
-                        className="shrink-0 border border-gray-300 rounded-lg p-2 text-gray-500 hover:bg-gray-50"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    <label className="text-xs text-gray-500">
-                      Qty
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={l.quantity}
-                        onChange={(e) =>
-                          setLine(i, { quantity: e.target.value })
-                        }
-                        className={cls + " mt-1"}
-                      />
-                    </label>
-                    <label className="text-xs text-gray-500">
-                      Rate
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={l.rate}
-                        onChange={(e) => setLine(i, { rate: e.target.value })}
-                        className={cls + " mt-1"}
-                      />
-                    </label>
-                    <div className="text-xs text-gray-500">
-                      Amount
-                      <p className="mt-1 py-2 text-sm font-medium text-gray-900">
-                        {formatRs(lineCents(l) / 100)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() => setLines((prev) => [...prev, blankInvoiceLine()])}
-              className="text-sm text-blue-600 font-medium inline-flex items-center gap-1"
-            >
-              <Plus size={14} /> Add another line
-            </button>
+          <div className="text-xs text-gray-500">
+            Invoice
+            <p className="mt-1 px-3 py-2 text-sm text-gray-700 bg-gray-50 border border-gray-300 rounded-lg">
+              {invoiceNumber || "None"}
+            </p>
           </div>
-
-          <label className="flex items-start gap-2 text-sm text-gray-700">
-            <input
-              type="checkbox"
-              checked={restock}
-              onChange={(e) => setRestock(e.target.checked)}
-              className="mt-1"
-            />
-            <span>
-              The goods came back, so put them back in stock
-              <span className="block text-xs text-gray-400">
-                Untick this for a price adjustment or a discount where nothing
-                was returned.
-              </span>
-            </span>
-          </label>
-
-          <textarea
-            rows={2}
-            placeholder="Reason (optional)"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            className={cls}
-          />
-
-          <div className="bg-gray-50 rounded-lg p-3 text-sm flex justify-between font-semibold">
-            <span>Credit total</span>
-            <span>{formatRs(totalCents / 100)}</span>
+          <div className="text-xs text-gray-500 col-span-2 md:col-span-1">
+            Credit Total
+            <p className="mt-1 px-3 py-2 text-base font-semibold text-gray-900 bg-white border border-gray-300 rounded-lg">
+              {formatRs(totalCents / 100)}
+            </p>
           </div>
-
-          <div className="flex gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!canSave || submitting}
-              className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-            >
-              {submitting ? "Saving..." : "Save Credit Note"}
-            </button>
-          </div>
-        </form>
+        </div>
       </div>
-    </div>
+
+      {/* ---------- items grid ---------- */}
+      <DocLinesGrid
+        storageName="credit"
+        lines={lines}
+        setLines={setLines}
+        totalCents={totalCents}
+        onError={setError}
+      />
+
+      <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
+        <label className="flex items-start gap-2 text-sm text-gray-700 max-w-md">
+          <input
+            type="checkbox"
+            checked={restock}
+            onChange={(e) => setRestock(e.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            The goods came back, so put them back in stock
+            <span className="block text-xs text-gray-400">
+              Untick this for a price adjustment or a discount where nothing was
+              returned.
+            </span>
+          </span>
+        </label>
+        <div className="bg-gray-50 rounded-lg px-4 py-2 text-sm flex gap-6 font-semibold">
+          <span>Credit total</span>
+          <span>{formatRs(totalCents / 100)}</span>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap justify-end gap-2 pt-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50"
+        >
+          Cancel
+        </button>
+        {!editNote && (
+          <button
+            type="button"
+            onClick={resetForm}
+            className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50"
+          >
+            Clear
+          </button>
+        )}
+        {!editNote && !fromInvoice && (
+          <button
+            type="button"
+            disabled={!canSave || submitting}
+            onClick={() => save(true)}
+            className="border border-blue-600 text-blue-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-50 disabled:opacity-50"
+          >
+            Save &amp; New
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={!canSave || submitting}
+          onClick={() => save(false)}
+          className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+        >
+          {submitting ? "Saving..." : "Save & Close"}
+        </button>
+      </div>
+
+      {quickCustomerName !== null && (
+        <QuickCustomerModal
+          initialName={quickCustomerName}
+          onSave={handleQuickCustomer}
+          onClose={() => setQuickCustomerName(null)}
+        />
+      )}
+    </FormWindow>
   );
 }
 
@@ -18174,6 +18755,7 @@ function PaymentsPage({ isAdmin, go }) {
   const [formOpen, setFormOpen] = useState(false);
   useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
+  const [editFor, setEditFor] = useState(null); // the payment whose "Edit" button was pressed
 
   const load = async () => {
     try {
@@ -18306,14 +18888,28 @@ function PaymentsPage({ isAdmin, go }) {
                           </div>
                         ))}
                       </div>
-                      <Gate right="delete_records">
-                        <button
-                          onClick={() => handleDelete(p)}
-                          className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                      <div className="flex flex-wrap gap-2">
+                        <Gate area="payments_in" level="full">
+                          <button
+                            onClick={() => setEditFor(p)}
+                            className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
+                          >
+                            <Pencil size={14} /> Edit payment
+                          </button>
+                        </Gate>
+                        <Gate
+                          area="payments_in"
+                          level="full"
+                          right="delete_records"
                         >
-                          <Trash2 size={14} /> Delete payment
-                        </button>
-                      </Gate>
+                          <button
+                            onClick={() => handleDelete(p)}
+                            className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                          >
+                            <Trash2 size={14} /> Delete payment
+                          </button>
+                        </Gate>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -18326,6 +18922,14 @@ function PaymentsPage({ isAdmin, go }) {
       {formOpen && (
         <PaymentForm onClose={() => setFormOpen(false)} onSaved={load} />
       )}
+      {editFor && (
+        <PaymentForm
+          key={editFor.id}
+          editPayment={editFor}
+          onClose={() => setEditFor(null)}
+          onSaved={load}
+        />
+      )}
     </div>
   );
 }
@@ -18334,18 +18938,27 @@ function PaymentsPage({ isAdmin, go }) {
 function PaymentForm({
   initialCustomerId = "",
   initialInvoiceId = null,
+  editPayment = null,
   onClose,
   onSaved,
 }) {
   const [customers, setCustomers] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [accounts, setAccounts] = useState([]);
-  const [customerId, setCustomerId] = useState(initialCustomerId);
-  const [date, setDate] = useState(toISODate(new Date()));
-  const [mode, setMode] = useState("Cash");
-  const [depositId, setDepositId] = useState("");
-  const [reference, setReference] = useState("");
-  const [notes, setNotes] = useState("");
+  const [customerId, setCustomerId] = useState(
+    editPayment ? editPayment.customer_id : initialCustomerId,
+  );
+  const [date, setDate] = useState(
+    editPayment ? editPayment.payment_date : toISODate(new Date()),
+  );
+  const [mode, setMode] = useState(
+    editPayment ? editPayment.payment_mode : "Cash",
+  );
+  const [depositId, setDepositId] = useState(
+    editPayment ? editPayment.deposit_account_id : "",
+  );
+  const [reference, setReference] = useState(editPayment?.reference || "");
+  const [notes, setNotes] = useState(editPayment?.notes || "");
   const [applied, setApplied] = useState({}); // invoice id -> amount typed
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -18363,19 +18976,37 @@ function PaymentForm({
         setAccounts(deposits);
         const preferred =
           deposits.find((a) => a.name === "Undeposited Funds") || deposits[0];
-        if (preferred) setDepositId(preferred.id);
-        const start = inv.find((i) => i.id === initialInvoiceId);
-        if (start) setApplied({ [start.id]: String(start.balance_due) });
+        if (editPayment) {
+          // start from what this payment already paid
+          const first = {};
+          editPayment.allocations.forEach((a) => {
+            first[a.invoice_id] = String(
+              (Number(first[a.invoice_id]) || 0) + a.amount,
+            );
+          });
+          setApplied(first);
+        } else {
+          if (preferred) setDepositId(preferred.id);
+          const start = inv.find((i) => i.id === initialInvoiceId);
+          if (start) setApplied({ [start.id]: String(start.balance_due) });
+        }
       })
       .catch((err) => setError(err.message));
   }, []);
 
+  // when editing, the amounts this payment already paid count as owed again
+  const oldAlloc = {};
+  (editPayment?.allocations || []).forEach((a) => {
+    oldAlloc[a.invoice_id] = (oldAlloc[a.invoice_id] || 0) + a.amount;
+  });
+  const availOf = (i) =>
+    Math.round((Number(i.balance_due) + (oldAlloc[i.id] || 0)) * 100) / 100;
   const owed = invoices
     .filter(
       (i) =>
         i.customer_id === customerId &&
         i.status === "open" &&
-        i.balance_due > 0.004,
+        availOf(i) > 0.004,
     )
     .sort((a, b) => (a.due_date < b.due_date ? -1 : 1));
   const customerOptions = customers.map((c) => ({
@@ -18393,7 +19024,7 @@ function PaymentForm({
 
   const rows = owed.filter((i) => toCents(applied[i.id]) > 0);
   const totalCents = rows.reduce((s, i) => s + toCents(applied[i.id]), 0);
-  const tooMuch = (i) => toCents(applied[i.id]) > toCents(i.balance_due);
+  const tooMuch = (i) => toCents(applied[i.id]) > toCents(availOf(i));
   const canSave =
     Boolean(customerId) &&
     Boolean(depositId) &&
@@ -18405,7 +19036,7 @@ function PaymentForm({
     setSubmitting(true);
     setError(null);
     try {
-      await createPayment({
+      const body = {
         customer_id: customerId,
         payment_date: date,
         payment_mode: mode,
@@ -18416,7 +19047,9 @@ function PaymentForm({
           invoice_id: i.id,
           amount: Number(applied[i.id]),
         })),
-      });
+      };
+      if (editPayment) await updatePayment(editPayment.id, body);
+      else await createPayment(body);
       await onSaved();
       onClose();
     } catch (err) {
@@ -18429,7 +19062,11 @@ function PaymentForm({
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 max-h-[92vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">Record Payment</h2>
+        <h2 className="text-lg font-semibold mb-4">
+          {editPayment
+            ? `Edit Payment ${editPayment.payment_number}`
+            : "Record Payment"}
+        </h2>
         {error && (
           <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
             {error}
@@ -18441,6 +19078,7 @@ function PaymentForm({
             <SearchSelect
               value={customerId}
               onChange={pickCustomer}
+              disabled={Boolean(editPayment)}
               options={customerOptions}
               placeholder="Select a customer..."
               searchPlaceholder="Search customers..."
@@ -18511,7 +19149,7 @@ function PaymentForm({
                     </p>
                     <p className="text-xs text-gray-400">
                       Due {formatJournalDate(i.due_date)} · Owes{" "}
-                      {formatRs(i.balance_due)}
+                      {formatRs(availOf(i))}
                     </p>
                     {tooMuch(i) && (
                       <p className="text-xs text-red-600">More than is owed.</p>
@@ -18528,7 +19166,7 @@ function PaymentForm({
                   />
                   <button
                     type="button"
-                    onClick={() => setAmount(i.id, String(i.balance_due))}
+                    onClick={() => setAmount(i.id, String(availOf(i)))}
                     className="text-xs text-blue-600 font-medium whitespace-nowrap"
                   >
                     Pay in full
@@ -18571,7 +19209,11 @@ function PaymentForm({
               disabled={!canSave || submitting}
               className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
-              {submitting ? "Saving..." : "Save Payment"}
+              {submitting
+                ? "Saving..."
+                : editPayment
+                  ? "Save Changes"
+                  : "Save Payment"}
             </button>
           </div>
         </form>
@@ -20138,6 +20780,7 @@ function VendorPaymentsPage({ isAdmin, go }) {
   const [formOpen, setFormOpen] = useState(false);
   useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
+  const [editFor, setEditFor] = useState(null); // the payment whose "Edit" button was pressed
 
   const load = async () => {
     try {
@@ -20272,14 +20915,28 @@ function VendorPaymentsPage({ isAdmin, go }) {
                           </div>
                         ))}
                       </div>
-                      <Gate right="delete_records">
-                        <button
-                          onClick={() => handleDelete(p)}
-                          className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                      <div className="flex flex-wrap gap-2">
+                        <Gate area="payments_out" level="full">
+                          <button
+                            onClick={() => setEditFor(p)}
+                            className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
+                          >
+                            <Pencil size={14} /> Edit payment
+                          </button>
+                        </Gate>
+                        <Gate
+                          area="payments_out"
+                          level="full"
+                          right="delete_records"
                         >
-                          <Trash2 size={14} /> Delete payment
-                        </button>
-                      </Gate>
+                          <button
+                            onClick={() => handleDelete(p)}
+                            className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
+                          >
+                            <Trash2 size={14} /> Delete payment
+                          </button>
+                        </Gate>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -20292,6 +20949,14 @@ function VendorPaymentsPage({ isAdmin, go }) {
       {formOpen && (
         <VendorPaymentForm onClose={() => setFormOpen(false)} onSaved={load} />
       )}
+      {editFor && (
+        <VendorPaymentForm
+          key={editFor.id}
+          editPayment={editFor}
+          onClose={() => setEditFor(null)}
+          onSaved={load}
+        />
+      )}
     </div>
   );
 }
@@ -20300,18 +20965,27 @@ function VendorPaymentsPage({ isAdmin, go }) {
 function VendorPaymentForm({
   initialVendorId = "",
   initialBillId = null,
+  editPayment = null,
   onClose,
   onSaved,
 }) {
   const [vendors, setVendors] = useState([]);
   const [bills, setBills] = useState([]);
   const [accounts, setAccounts] = useState([]);
-  const [vendorId, setVendorId] = useState(initialVendorId);
-  const [date, setDate] = useState(toISODate(new Date()));
-  const [mode, setMode] = useState("Cash");
-  const [paidFromId, setPaidFromId] = useState("");
-  const [reference, setReference] = useState("");
-  const [notes, setNotes] = useState("");
+  const [vendorId, setVendorId] = useState(
+    editPayment ? editPayment.vendor_id : initialVendorId,
+  );
+  const [date, setDate] = useState(
+    editPayment ? editPayment.payment_date : toISODate(new Date()),
+  );
+  const [mode, setMode] = useState(
+    editPayment ? editPayment.payment_mode : "Cash",
+  );
+  const [paidFromId, setPaidFromId] = useState(
+    editPayment ? editPayment.paid_from_account_id : "",
+  );
+  const [reference, setReference] = useState(editPayment?.reference || "");
+  const [notes, setNotes] = useState(editPayment?.notes || "");
   const [applied, setApplied] = useState({}); // bill id -> amount typed
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -20331,19 +21005,35 @@ function VendorPaymentForm({
           sources.find(
             (a) => a.account_type === "cash" || a.account_type === "bank",
           ) || sources[0];
-        if (preferred) setPaidFromId(preferred.id);
-        const start = b.find((x) => x.id === initialBillId);
-        if (start) setApplied({ [start.id]: String(start.balance_due) });
+        if (editPayment) {
+          // start from what this payment already paid
+          const first = {};
+          editPayment.allocations.forEach((a) => {
+            first[a.bill_id] = String(
+              (Number(first[a.bill_id]) || 0) + a.amount,
+            );
+          });
+          setApplied(first);
+        } else {
+          if (preferred) setPaidFromId(preferred.id);
+          const start = b.find((x) => x.id === initialBillId);
+          if (start) setApplied({ [start.id]: String(start.balance_due) });
+        }
       })
       .catch((err) => setError(err.message));
   }, []);
 
+  // when editing, the amounts this payment already paid count as owed again
+  const oldAlloc = {};
+  (editPayment?.allocations || []).forEach((a) => {
+    oldAlloc[a.bill_id] = (oldAlloc[a.bill_id] || 0) + a.amount;
+  });
+  const availOf = (b) =>
+    Math.round((Number(b.balance_due) + (oldAlloc[b.id] || 0)) * 100) / 100;
   const owed = bills
     .filter(
       (b) =>
-        b.vendor_id === vendorId &&
-        b.status === "open" &&
-        b.balance_due > 0.004,
+        b.vendor_id === vendorId && b.status === "open" && availOf(b) > 0.004,
     )
     .sort((a, b) => (a.due_date < b.due_date ? -1 : 1));
   const vendorOptions = vendors.map((v) => ({ value: v.id, label: v.name }));
@@ -20357,7 +21047,7 @@ function VendorPaymentForm({
 
   const rows = owed.filter((b) => toCents(applied[b.id]) > 0);
   const totalCents = rows.reduce((s, b) => s + toCents(applied[b.id]), 0);
-  const tooMuch = (b) => toCents(applied[b.id]) > toCents(b.balance_due);
+  const tooMuch = (b) => toCents(applied[b.id]) > toCents(availOf(b));
   const canSave =
     Boolean(vendorId) &&
     Boolean(paidFromId) &&
@@ -20369,7 +21059,7 @@ function VendorPaymentForm({
     setSubmitting(true);
     setError(null);
     try {
-      await createVendorPayment({
+      const body = {
         vendor_id: vendorId,
         payment_date: date,
         payment_mode: mode,
@@ -20380,7 +21070,9 @@ function VendorPaymentForm({
           bill_id: b.id,
           amount: Number(applied[b.id]),
         })),
-      });
+      };
+      if (editPayment) await updateVendorPayment(editPayment.id, body);
+      else await createVendorPayment(body);
       await onSaved();
       onClose();
     } catch (err) {
@@ -20393,7 +21085,11 @@ function VendorPaymentForm({
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-xl p-6 max-h-[92vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">Pay Vendor</h2>
+        <h2 className="text-lg font-semibold mb-4">
+          {editPayment
+            ? `Edit Payment ${editPayment.payment_number}`
+            : "Pay Vendor"}
+        </h2>
         {error && (
           <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
             {error}
@@ -20405,6 +21101,7 @@ function VendorPaymentForm({
             <SearchSelect
               value={vendorId}
               onChange={pickVendor}
+              disabled={Boolean(editPayment)}
               options={vendorOptions}
               placeholder="Select a vendor..."
               searchPlaceholder="Search vendors..."
@@ -20481,7 +21178,7 @@ function VendorPaymentForm({
                     </p>
                     <p className="text-xs text-gray-400">
                       Due {formatJournalDate(b.due_date)} · Owed{" "}
-                      {formatRs(b.balance_due)}
+                      {formatRs(availOf(b))}
                     </p>
                     {tooMuch(b) && (
                       <p className="text-xs text-red-600">More than is owed.</p>
@@ -20498,7 +21195,7 @@ function VendorPaymentForm({
                   />
                   <button
                     type="button"
-                    onClick={() => setAmount(b.id, String(b.balance_due))}
+                    onClick={() => setAmount(b.id, String(availOf(b)))}
                     className="text-xs text-blue-600 font-medium whitespace-nowrap"
                   >
                     Pay in full
@@ -20541,7 +21238,11 @@ function VendorPaymentForm({
               disabled={!canSave || submitting}
               className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
-              {submitting ? "Saving..." : "Save Payment"}
+              {submitting
+                ? "Saving..."
+                : editPayment
+                  ? "Save Changes"
+                  : "Save Payment"}
             </button>
           </div>
         </form>

@@ -115,6 +115,102 @@ def create_vendor_payment(payload: schemas.VendorPaymentCreate, db: Session = De
     return db.query(models.VendorPayment).options(*_options()).filter(models.VendorPayment.id == payment.id).one()
 
 
+@router.put("/{payment_id}", response_model=schemas.VendorPaymentOut)
+def update_vendor_payment(payment_id: int, payload: schemas.VendorPaymentCreate, db: Session = Depends(get_db)):
+    """Edits a payment in place (it keeps its number): the old amounts are taken off the bills, then the new ones are applied."""
+    payment = db.query(models.VendorPayment).options(*_options()).filter(models.VendorPayment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(404, "Payment not found")
+    if payload.vendor_id != payment.vendor_id:
+        raise HTTPException(400, "The vendor can't be changed. Delete this payment and record a new one.")
+    vendor = payment.vendor
+    if payload.payment_mode not in PAYMENT_MODES:
+        raise HTTPException(400, f"payment_mode must be one of {sorted(PAYMENT_MODES)}")
+
+    paid_from = db.query(models.Account).get(payload.paid_from_account_id)
+    if not paid_from or paid_from.account_type not in PAID_FROM_TYPES:
+        raise HTTPException(400, "Pick a cash, bank, credit card or other current asset account to pay from")
+    if not payload.allocations:
+        raise HTTPException(400, "Apply the payment to at least one bill")
+
+    # a payment already ticked off in a bank reconciliation can't be changed
+    old_journals = db.query(models.Journal).filter(
+        models.Journal.source_type == "vendor_payment", models.Journal.source_id == payment.id
+    ).all()
+    for journal in old_journals:
+        block_if_reconciled(journal)
+
+    old_applied: dict[int, Decimal] = {}
+    for alloc in payment.allocations:
+        old_applied[alloc.bill_id] = old_applied.get(alloc.bill_id, Decimal("0")) + _money(alloc.amount)
+    applied: dict[int, Decimal] = {}
+    for a in payload.allocations:
+        amount = _money(a.amount)
+        if amount <= 0:
+            raise HTTPException(400, "Every amount must be greater than 0")
+        applied[a.bill_id] = applied.get(a.bill_id, Decimal("0")) + amount
+
+    bills = {
+        b.id: b
+        for b in db.query(models.PurchaseBill)
+        .filter(models.PurchaseBill.id.in_(set(applied) | set(old_applied)))
+        .with_for_update()
+        .all()
+    }
+    for bill_id, amount in applied.items():
+        bill = bills.get(bill_id)
+        if not bill:
+            raise HTTPException(404, f"Bill {bill_id} not found")
+        if bill.vendor_id != vendor.id:
+            raise HTTPException(400, f"{bill.bill_number} belongs to a different vendor")
+        if bill.status != "open":
+            raise HTTPException(400, f"{bill.bill_number} is {bill.status}")
+        paid_without_this = _money(bill.amount_paid) - old_applied.get(bill_id, Decimal("0"))
+        balance = _money(bill.total) - paid_without_this
+        if amount > balance:
+            raise HTTPException(400, f"{bill.bill_number}: only {balance} is still owed")
+
+    total = sum(applied.values(), Decimal("0"))
+    number = payment.payment_number
+
+    # ---- one transaction: take the old payment off, remove its ledger entry, apply the new one ----
+    for bill_id, amount in old_applied.items():
+        bill = bills.get(bill_id)
+        if bill:
+            bill.amount_paid = max(Decimal("0"), _money(bill.amount_paid) - amount)
+    for journal in old_journals:
+        db.delete(journal)
+    payment.allocations.clear()
+    db.flush()
+
+    payment.payment_date = payload.payment_date
+    payment.amount = total
+    payment.payment_mode = payload.payment_mode
+    payment.paid_from_account_id = paid_from.id
+    payment.reference = (payload.reference or "").strip() or None
+    payment.notes = (payload.notes or "").strip() or None
+    payment.allocations.extend(models.VendorPaymentAllocation(bill_id=bid, amount=amt) for bid, amt in applied.items())
+
+    for bill_id, amount in applied.items():
+        bills[bill_id].amount_paid = _money(bills[bill_id].amount_paid) + amount
+
+    db.add(models.Journal(
+        journal_number=number,
+        journal_date=payload.payment_date,
+        reference=vendor.name,
+        notes=f"Vendor payment {number}",
+        source_type="vendor_payment",
+        source_id=payment.id,
+        lines=[
+            models.JournalLine(account_id=_payable_account(db).id, debit=total, credit=0,
+                               description=f"Payment {number} - {vendor.name}"),
+            models.JournalLine(account_id=paid_from.id, debit=0, credit=total,
+                               description=f"Payment {number} - {vendor.name}"),
+        ],
+    ))
+    db.commit()
+    return db.query(models.VendorPayment).options(*_options()).filter(models.VendorPayment.id == payment_id).one()
+
 @router.delete("/{payment_id}")
 def delete_vendor_payment(payment_id: int, db: Session = Depends(get_db)):
     """Removes a payment: the bills are owed again and the ledger entry is removed."""

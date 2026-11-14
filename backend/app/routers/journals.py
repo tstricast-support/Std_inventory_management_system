@@ -67,7 +67,48 @@ def create_journal(payload: schemas.JournalCreate, db: Session = Depends(get_db)
     db.commit()
     db.refresh(journal)
     return journal
+    
+@router.put("/{journal_id}", response_model=schemas.JournalOut)
+def update_journal(journal_id: int, payload: schemas.JournalCreate, db: Session = Depends(get_db)):
+    """Edits a manual journal in place (it keeps its number)."""
+    journal = db.query(models.Journal).get(journal_id)
+    if not journal:
+        raise HTTPException(404, "Journal not found")
+    if journal.source_type:
+        raise HTTPException(400, "This entry was posted automatically by an invoice, bill or payment. Edit that document instead.")
+    block_if_reconciled(journal)
 
+    if len(payload.lines) < 2:
+        raise HTTPException(400, "A journal needs at least two lines")
+    ids = {line.account_id for line in payload.lines}
+    found = {a.id for a in db.query(models.Account).filter(models.Account.id.in_(ids)).all()}
+    if ids - found:
+        raise HTTPException(400, "One of the selected accounts no longer exists")
+
+    lines, total_debit, total_credit = [], Decimal("0"), Decimal("0")
+    for line in payload.lines:
+        debit, credit = _money(line.debit), _money(line.credit)
+        if debit < 0 or credit < 0:
+            raise HTTPException(400, "Amounts can't be negative")
+        if (debit > 0) == (credit > 0):
+            raise HTTPException(400, "Each line needs either a debit or a credit amount (not both, not neither)")
+        total_debit += debit
+        total_credit += credit
+        lines.append(models.JournalLine(
+            account_id=line.account_id, debit=debit, credit=credit, description=line.description,
+        ))
+    if total_debit != total_credit:
+        raise HTTPException(400, f"Debits ({total_debit}) and credits ({total_credit}) must be equal")
+
+    journal.lines.clear()
+    db.flush()
+    journal.journal_date = payload.journal_date
+    journal.reference = payload.reference
+    journal.notes = payload.notes
+    journal.lines.extend(lines)
+    db.commit()
+    db.refresh(journal)
+    return journal
 
 @router.delete("/{journal_id}")
 def delete_journal(journal_id: int, db: Session = Depends(get_db)):

@@ -114,6 +114,103 @@ def create_payment(payload: schemas.PaymentCreate, db: Session = Depends(get_db)
     db.commit()
     return db.query(models.Payment).options(*_options()).filter(models.Payment.id == payment.id).one()
 
+@router.put("/{payment_id}", response_model=schemas.PaymentOut)
+def update_payment(payment_id: int, payload: schemas.PaymentCreate, db: Session = Depends(get_db)):
+    """Edits a payment in place (it keeps its number): the old amounts are taken off the invoices, then the new ones are applied."""
+    payment = db.query(models.Payment).options(*_options()).filter(models.Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(404, "Payment not found")
+    if payload.customer_id != payment.customer_id:
+        raise HTTPException(400, "The customer can't be changed. Delete this payment and record a new one.")
+    customer = payment.customer
+    if payload.payment_mode not in PAYMENT_MODES:
+        raise HTTPException(400, f"payment_mode must be one of {sorted(PAYMENT_MODES)}")
+
+    deposit = db.query(models.Account).get(payload.deposit_account_id)
+    if not deposit or deposit.account_type not in DEPOSIT_TYPES:
+        raise HTTPException(400, "Pick a cash, bank or other current asset account to deposit into")
+    if not payload.allocations:
+        raise HTTPException(400, "Apply the payment to at least one invoice")
+
+    # a payment already ticked off in a bank reconciliation can't be changed
+    old_journals = db.query(models.Journal).filter(
+        models.Journal.source_type == "payment", models.Journal.source_id == payment.id
+    ).all()
+    for journal in old_journals:
+        block_if_reconciled(journal)
+
+    # what this payment paid before, and what it should pay now (per invoice)
+    old_applied: dict[int, Decimal] = {}
+    for alloc in payment.allocations:
+        old_applied[alloc.invoice_id] = old_applied.get(alloc.invoice_id, Decimal("0")) + _money(alloc.amount)
+    applied: dict[int, Decimal] = {}
+    for a in payload.allocations:
+        amount = _money(a.amount)
+        if amount <= 0:
+            raise HTTPException(400, "Every amount must be greater than 0")
+        applied[a.invoice_id] = applied.get(a.invoice_id, Decimal("0")) + amount
+
+    invoices = {
+        i.id: i
+        for i in db.query(models.Invoice)
+        .filter(models.Invoice.id.in_(set(applied) | set(old_applied)))
+        .with_for_update()
+        .all()
+    }
+    for invoice_id, amount in applied.items():
+        invoice = invoices.get(invoice_id)
+        if not invoice:
+            raise HTTPException(404, f"Invoice {invoice_id} not found")
+        if invoice.customer_id != customer.id:
+            raise HTTPException(400, f"{invoice.invoice_number} belongs to a different customer")
+        if invoice.status != "open":
+            raise HTTPException(400, f"{invoice.invoice_number} is {invoice.status}")
+        # the balance as it would be if this payment had never been made
+        paid_without_this = _money(invoice.amount_paid) - old_applied.get(invoice_id, Decimal("0"))
+        balance = _money(invoice.total) - paid_without_this
+        if amount > balance:
+            raise HTTPException(400, f"{invoice.invoice_number}: only {balance} is still owed")
+
+    total = sum(applied.values(), Decimal("0"))
+    number = payment.payment_number
+
+    # ---- one transaction: take the old payment off, remove its ledger entry, apply the new one ----
+    for invoice_id, amount in old_applied.items():
+        invoice = invoices.get(invoice_id)
+        if invoice:
+            invoice.amount_paid = max(Decimal("0"), _money(invoice.amount_paid) - amount)
+    for journal in old_journals:
+        db.delete(journal)
+    payment.allocations.clear()
+    db.flush()   # old allocations and the old journal (same number) must be gone first
+
+    payment.payment_date = payload.payment_date
+    payment.amount = total
+    payment.payment_mode = payload.payment_mode
+    payment.deposit_account_id = deposit.id
+    payment.reference = (payload.reference or "").strip() or None
+    payment.notes = (payload.notes or "").strip() or None
+    payment.allocations.extend(models.PaymentAllocation(invoice_id=iid, amount=amt) for iid, amt in applied.items())
+
+    for invoice_id, amount in applied.items():
+        invoices[invoice_id].amount_paid = _money(invoices[invoice_id].amount_paid) + amount
+
+    db.add(models.Journal(
+        journal_number=number,
+        journal_date=payload.payment_date,
+        reference=customer.display_name,
+        notes=f"Payment {number}",
+        source_type="payment",
+        source_id=payment.id,
+        lines=[
+            models.JournalLine(account_id=deposit.id, debit=total, credit=0,
+                               description=f"Payment {number} - {customer.display_name}"),
+            models.JournalLine(account_id=_receivable_account(db).id, debit=0, credit=total,
+                               description=f"Payment {number}"),
+        ],
+    ))
+    db.commit()
+    return db.query(models.Payment).options(*_options()).filter(models.Payment.id == payment_id).one()
 
 @router.delete("/{payment_id}")
 def delete_payment(payment_id: int, db: Session = Depends(get_db)):
