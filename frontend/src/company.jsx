@@ -108,8 +108,6 @@ function useCanManageCompanies() {
 // ---------------------------------------------------------------------------
 export function SidebarCompanyHeader() {
   const { company } = useCompany();
-  const canManage = useCanManageCompanies();
-  const [creating, setCreating] = useState(false);
   return (
     <div className="flex items-center gap-2 h-14 px-3 bg-black/20 text-white shrink-0">
       {company?.logo_url ? (
@@ -127,18 +125,6 @@ export function SidebarCompanyHeader() {
       >
         {company?.name || "\u00A0"}
       </span>
-      {canManage && (
-        <button
-          type="button"
-          onClick={() => setCreating(true)}
-          title="Create company"
-          aria-label="Create company"
-          className="p-1 rounded hover:bg-white/10 shrink-0"
-        >
-          <Plus size={18} />
-        </button>
-      )}
-      {creating && <CreateCompanyModal onClose={() => setCreating(false)} />}
     </div>
   );
 }
@@ -588,7 +574,7 @@ export function CompanyProfilePage() {
     <div className="p-4 sm:p-6 max-w-3xl">
       <div className="flex items-center gap-3 mb-4">
         <h1 className="text-xl font-semibold text-gray-900">Company profile</h1>
-        {canManage && (
+        {canManage && all.length >= 2 && (
           <button
             onClick={() => setCreating(true)}
             className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700"

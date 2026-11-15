@@ -153,6 +153,10 @@ def create_company(payload: CompanyIn, request: Request, db: Session = Depends(g
                    ctx=Depends(get_user_and_company)):
     user, _ = ctx
     _require_manage(user)
+    n_access = (db.query(UserCompanyAccess)
+                .filter(UserCompanyAccess.user_id == user.id).count())
+    if n_access < 2:
+        raise HTTPException(403, "You need access to at least two companies to create another.")
     company = Company(is_active=True)
     _apply(company, payload)
     if _name_taken(db, company.name):
