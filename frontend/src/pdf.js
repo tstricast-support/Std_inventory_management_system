@@ -153,24 +153,34 @@ export function renderPdf(spec, images = {}, COMPANY = cachedCompany || EMPTY_CO
   autoTable(doc, {
     startY: y,
     margin: { left: M, right: M, bottom: COMPANY.footer ? 24 : 12 },
-    head: [["#", "Item", "Qty", "Rate", "Amount"]],
-    body: spec.items.map((it, i) => [
-      String(i + 1),
-      it.description || it.item_name,
-      String(it.quantity),
-      money(it.rate),
-      money(it.amount),
-    ]),
+    head: [spec.simple ? ["#", spec.simple, "Amount"] : ["#", "Item", "Qty", "Rate", "Amount"]],
+    body: spec.items.map((it, i) =>
+      spec.simple
+        ? [String(i + 1), it.description || it.item_name, money(it.amount)]
+        : [
+            String(i + 1),
+            it.description || it.item_name,
+            String(it.quantity),
+            money(it.rate),
+            money(it.amount),
+          ],
+    ),
     theme: "plain",
     styles: { fontSize: 9, textColor: dark, cellPadding: 2.5, valign: "middle", lineColor: [229, 231, 235], lineWidth: { bottom: 0.2 } },
     headStyles: { fillColor: [243, 244, 246], textColor: grey, fontStyle: "bold", fontSize: 8 },
-    columnStyles: {
-      0: { cellWidth: 9 },
-      1: { cellWidth: "auto", ...(hasPics ? { cellPadding: { top: 2.5, bottom: 2.5, right: 2.5, left: THUMB + 5 } } : {}) },
-      2: { halign: "right", cellWidth: 16 },
-      3: { halign: "right", cellWidth: 30 },
-      4: { halign: "right", cellWidth: 32 },
-    },
+    columnStyles: spec.simple
+      ? {
+          0: { cellWidth: 9 },
+          1: { cellWidth: "auto" },
+          2: { halign: "right", cellWidth: 40 },
+        }
+      : {
+          0: { cellWidth: 9 },
+          1: { cellWidth: "auto", ...(hasPics ? { cellPadding: { top: 2.5, bottom: 2.5, right: 2.5, left: THUMB + 5 } } : {}) },
+          2: { halign: "right", cellWidth: 16 },
+          3: { halign: "right", cellWidth: 30 },
+          4: { halign: "right", cellWidth: 32 },
+        },
     didParseCell: (d) => {
       if (d.section === "head" && d.column.index >= 2) d.cell.styles.halign = "right";
       if (d.section === "body" && hasPics && d.column.index === 1) d.cell.styles.minCellHeight = THUMB + 4;
@@ -299,7 +309,7 @@ export async function downloadSalesDocPdf(d, customer, asFile = false) {
   doc.save(`${d.doc_number}.pdf`);
 }
 
-export async function downloadCreditNotePdf(cn, customer) {
+export async function downloadCreditNotePdf(cn, customer, asFile = false) {
   const doc = await makePdf({
     title: "CREDIT NOTE",
     number: cn.credit_number,
@@ -320,5 +330,78 @@ export async function downloadCreditNotePdf(cn, customer) {
     notes: cn.reason,
     notesTitle: "Reason",
   });
+  if (asFile) return new File([doc.output("blob")], `${cn.credit_number}.pdf`, { type: "application/pdf" });
   doc.save(`${cn.credit_number}.pdf`);
+}
+
+// Payment received (money in) - lists the invoices it paid
+export async function downloadPaymentPdf(p, customer, asFile = false) {
+  const doc = await makePdf({
+    title: "PAYMENT RECEIPT",
+    number: p.payment_number,
+    partyLabel: "RECEIVED FROM",
+    customer,
+    customerName: p.customer_name,
+    meta: [
+      ["Payment date", dateText(p.payment_date)],
+      ["Mode", p.payment_mode],
+      ["Deposited to", p.deposit_account_name],
+      ["Reference #", p.reference],
+    ],
+    simple: "Applied to invoice",
+    items: (p.allocations || []).map((a) => ({ description: a.invoice_number, amount: a.amount })),
+    totals: [["Amount received", money(p.amount), true]],
+    notes: p.notes,
+  });
+  if (asFile) return new File([doc.output("blob")], `${p.payment_number}.pdf`, { type: "application/pdf" });
+  doc.save(`${p.payment_number}.pdf`);
+}
+
+// Payment made to a vendor (money out) - lists the bills it paid
+export async function downloadVendorPaymentPdf(p, vendor, asFile = false) {
+  const doc = await makePdf({
+    title: "PAYMENT MADE",
+    number: p.payment_number,
+    partyLabel: "PAID TO",
+    customer: vendor ? { display_name: vendor.name, billing_address: vendor.address, phone: vendor.phone, email: vendor.email } : null,
+    customerName: p.vendor_name,
+    meta: [
+      ["Payment date", dateText(p.payment_date)],
+      ["Mode", p.payment_mode],
+      ["Paid from", p.paid_from_account_name],
+      ["Reference #", p.reference],
+    ],
+    simple: "Applied to bill",
+    items: (p.allocations || []).map((a) => ({ description: a.bill_number, amount: a.amount })),
+    totals: [["Amount paid", money(p.amount), true]],
+    notes: p.notes,
+  });
+  if (asFile) return new File([doc.output("blob")], `${p.payment_number}.pdf`, { type: "application/pdf" });
+  doc.save(`${p.payment_number}.pdf`);
+}
+
+// Purchase bill (from a vendor)
+export async function downloadPurchaseBillPdf(b, vendor, asFile = false) {
+  const doc = await makePdf({
+    title: "BILL",
+    number: b.bill_number,
+    status: b.status === "void" ? "Void" : b.balance_due <= 0.004 ? "Paid" : "",
+    partyLabel: "VENDOR",
+    customer: vendor ? { display_name: vendor.name, billing_address: vendor.address, phone: vendor.phone, email: vendor.email } : null,
+    customerName: b.vendor_name,
+    meta: [
+      ["Bill date", dateText(b.bill_date)],
+      ["Due date", dateText(b.due_date)],
+      ["Vendor ref #", b.vendor_ref],
+    ],
+    items: (b.items || []).map((l) => ({ ...l, imageUrl: null })),
+    totals: [
+      ["Total", money(b.total)],
+      ["Paid", money(b.amount_paid)],
+      ["Balance due", money(b.balance_due), true],
+    ],
+    notes: b.notes,
+  });
+  if (asFile) return new File([doc.output("blob")], `${b.bill_number}.pdf`, { type: "application/pdf" });
+  doc.save(`${b.bill_number}.pdf`);
 }

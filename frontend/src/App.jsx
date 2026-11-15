@@ -380,6 +380,7 @@ function salesDocStatus(doc) {
   return { label: "Draft", cls: "bg-gray-100 text-gray-500" };
 }
 
+
 function SalesDocumentsPage({ isAdmin, go, docType }) {
   const { can, hasRight } = useAuth();
   const info = SALES_DOC_INFO[docType];
@@ -392,6 +393,8 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
   const [expandedId, setExpandedId] = useState(null);
   const [invoiceFor, setInvoiceFor] = useState(null); // the quote / sales order being turned into an invoice
   const [editFor, setEditFor] = useState(null); // the quote / sales order being edited
+  const [deleteTarget, setDeleteTarget] = useState(null); // doc waiting for the typed DELETE
+  const [previewFor, setPreviewFor] = useState(null); // doc being previewed
 
   const load = async () => {
     try {
@@ -417,8 +420,9 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
     }
   };
 
-  const handleDelete = (doc) => {
-    if (!window.confirm(`Delete ${doc.doc_number}?`)) return;
+  const handleDelete = () => {
+    const doc = deleteTarget;
+    setDeleteTarget(null);
     run(() => deleteSalesDoc(doc.id));
   };
 
@@ -491,10 +495,11 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
                   key={doc.id}
                   className="bg-white border border-gray-200 rounded-xl overflow-hidden"
                 >
+                  <div className="flex items-center hover:bg-gray-50">
                   <button
                     type="button"
                     onClick={() => setExpandedId(open ? null : doc.id)}
-                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50"
+                    className="flex-1 min-w-0 flex items-center gap-3 p-3 text-left"
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 truncate">
@@ -526,6 +531,15 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
                       <ChevronRight size={16} className="text-gray-400" />
                     )}
                   </button>
+                  <div className="pr-2 shrink-0">
+                    <DocActionsMenu
+                      items={[
+                        canEdit && { label: "Edit", icon: Pencil, onClick: () => setEditFor(doc) },
+                        canDelete && { label: "Delete", icon: Trash2, danger: true, onClick: () => setDeleteTarget(doc) },
+                      ]}
+                    />
+                  </div>
+                  </div>
 
                   {open && (
                     <div className="border-t border-gray-100 p-3 space-y-3">
@@ -604,6 +618,17 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
                               </button>
                             </>
                           )}
+                        {doc.doc_type === "quote" &&
+                          ["accepted", "declined"].includes(doc.status) && (
+                            <button
+                              onClick={() =>
+                                run(() => setSalesDocStatus(doc.id, "sent"))
+                              }
+                              className={`${btn} border border-amber-300 text-amber-700 hover:bg-amber-50`}
+                            >
+                              Reopen quote
+                            </button>
+                          )}
                         {canConvert && (
                           <button
                             onClick={() => handleToSalesOrder(doc)}
@@ -620,14 +645,12 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
                             <FileText size={14} /> Convert to invoice
                           </button>
                         )}
-                        {canEdit && (
-                          <button
-                            onClick={() => setEditFor(doc)}
-                            className={`${btn} border border-gray-300 text-gray-700 hover:bg-gray-50`}
-                          >
-                            <Pencil size={14} /> Edit
-                          </button>
-                        )}
+                        <button
+                          onClick={() => setPreviewFor(doc)}
+                          className={`${btn} border border-blue-300 text-blue-700 hover:bg-blue-50`}
+                        >
+                          <FileText size={14} /> Preview
+                        </button>
                         <button
                           onClick={() => downloadPdf("salesdoc", doc)}
                           className={`${btn} border border-gray-300 text-gray-700 hover:bg-gray-50`}
@@ -642,14 +665,6 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
                           <MessageCircle size={14} /> WhatsApp
                         </button>
 
-                        {canDelete && (
-                          <button
-                            onClick={() => handleDelete(doc)}
-                            className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}
-                          >
-                            <Trash2 size={14} /> Delete
-                          </button>
-                        )}
                       </div>
                     </div>
                   )}
@@ -674,6 +689,22 @@ function SalesDocumentsPage({ isAdmin, go, docType }) {
           editDoc={editFor}
           onClose={() => setEditFor(null)}
           onSaved={load}
+        />
+      )}
+
+      {previewFor && (
+        <DocPreviewModal
+          kind="salesdoc"
+          record={previewFor}
+          onClose={() => setPreviewFor(null)}
+        />
+      )}
+
+      {deleteTarget && (
+        <TypedDeleteConfirm
+          label={deleteTarget.doc_number}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
         />
       )}
 
@@ -1556,7 +1587,10 @@ function whatsappNumber(phone) {
   return digits;
 }
 
+
 async function sendWhatsApp(kind, record) {
+  // vendor-side documents (bills, payments made) go to the vendor, everything else to the customer
+  const vendorSide = kind === "bill" || kind === "vendorpayment";
   // phones: the share sheet can attach the PDF directly
   const canShareFiles =
     typeof navigator.share === "function" &&
@@ -1567,23 +1601,36 @@ async function sendWhatsApp(kind, record) {
   // computers: open the tab now, before the slow PDF work, so the browser doesn't block it
   const tab = canShareFiles ? null : window.open("about:blank", "_blank");
   try {
-    const [pdf, customers] = await Promise.all([
+    const [pdf, people] = await Promise.all([
       import("./pdf.js"),
-      getCustomers().catch(() => []),
+      (vendorSide ? getVendors() : getCustomers()).catch(() => []),
     ]);
-    const customer = customers.find((c) => c.id === record.customer_id);
-    const file =
-      kind === "invoice"
-        ? await pdf.downloadInvoicePdf(record, customer, true)
-        : await pdf.downloadSalesDocPdf(record, customer, true);
-    const label =
-      kind === "invoice"
-        ? "invoice"
-        : record.doc_type === "quote"
-          ? "quote"
-          : "sales order";
-    const number = record.invoice_number || record.doc_number;
-    const text = `Hello ${record.customer_name}, please find your ${label} ${number}.`;
+    const customer = people.find(
+      (c) => c.id === (vendorSide ? record.vendor_id : record.customer_id),
+    ); // (for vendor-side documents this is the vendor; the PDF code reads name / address / phone / email from it)
+    const phone = customer?.phone;
+    let file;
+    if (kind === "invoice") file = await pdf.downloadInvoicePdf(record, customer, true);
+    else if (kind === "credit") file = await pdf.downloadCreditNotePdf(record, customer, true);
+    else if (kind === "payment") file = await pdf.downloadPaymentPdf(record, customer, true);
+    else if (kind === "vendorpayment") file = await pdf.downloadVendorPaymentPdf(record, customer, true);
+    else if (kind === "bill") file = await pdf.downloadPurchaseBillPdf(record, customer, true);
+    else file = await pdf.downloadSalesDocPdf(record, customer, true);
+
+    const who = record.customer_name || record.vendor_name;
+    const number =
+      record.invoice_number ||
+      record.doc_number ||
+      record.credit_number ||
+      record.payment_number ||
+      record.bill_number;
+    let text;
+    if (kind === "invoice") text = `Hello ${who}, please find your invoice ${number}.`;
+    else if (kind === "credit") text = `Hello ${who}, please find your credit note ${number}.`;
+    else if (kind === "payment") text = `Hello ${who}, thank you for your payment. Please find the receipt ${number}.`;
+    else if (kind === "vendorpayment") text = `Hello ${who}, we have made payment ${number}. Please find the details attached.`;
+    else if (kind === "bill") text = `Hello ${who}, please find our record of bill ${number}.`;
+    else text = `Hello ${who}, please find your ${record.doc_type === "quote" ? "quote" : "sales order"} ${number}.`;
 
     if (canShareFiles && navigator.canShare({ files: [file] })) {
       try {
@@ -1595,7 +1642,7 @@ async function sendWhatsApp(kind, record) {
       }
     }
 
-    // fallback: download the PDF, open the customer's WhatsApp chat
+    // fallback: download the PDF, open the person's WhatsApp chat
     const url = URL.createObjectURL(file);
     const a = document.createElement("a");
     a.href = url;
@@ -1603,14 +1650,14 @@ async function sendWhatsApp(kind, record) {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
 
-    const num = whatsappNumber(customer?.phone);
+    const num = whatsappNumber(phone);
     const link = `https://wa.me/${num}?text=${encodeURIComponent(text)}`;
     if (tab) tab.location.href = link;
     else window.open(link, "_blank");
     alert(
       num
         ? `${file.name} was downloaded. Attach it in the WhatsApp chat that just opened.`
-        : `${file.name} was downloaded. This customer has no phone number saved, so choose the contact in WhatsApp and attach the file.`,
+        : `${file.name} was downloaded. No phone number is saved for ${who}, so choose the contact in WhatsApp and attach the file.`,
     );
   } catch (err) {
     if (tab) tab.close();
@@ -14143,18 +14190,20 @@ const ACCOUNT_TYPE_NAMES = Object.fromEntries(
   ACCOUNT_TYPES.map((t) => [t.key, t.name]),
 );
 
-function TypedDeleteConfirm({ label, onConfirm, onCancel }) {
+
+
+function TypedDeleteConfirm({ label, onConfirm, onCancel, verb = "Delete", note }) {
   const [value, setValue] = useState("");
-  const expected = `DELETE ${label}`;
+  const expected = `${verb.toUpperCase()} ${label}`;
   const match = value.trim() === expected;
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-2">
-          Delete "{label}"?
+          {verb} "{label}"?
         </h2>
         <p className="text-sm text-gray-500 mb-4">
-          This can't be undone. Type{" "}
+          {note || "This can't be undone."} Type{" "}
           <span className="font-mono font-semibold text-gray-700">
             {expected}
           </span>{" "}
@@ -14179,13 +14228,161 @@ function TypedDeleteConfirm({ label, onConfirm, onCancel }) {
             disabled={!match}
             className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Delete
+            {verb}
           </button>
         </div>
       </div>
     </div>
   );
 }
+
+// Three-dot menu for one row. items: [{ label, icon, onClick, danger }] - false / null entries are skipped.
+// If nothing is left, nothing is drawn. The panel uses "fixed" so the card's overflow-hidden cannot cut it off.
+function DocActionsMenu({ items }) {
+  const [pos, setPos] = useState(null);
+  const list = (items || []).filter(Boolean);
+  useEffect(() => {
+    if (!pos) return;
+    const close = () => setPos(null);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [pos]);
+  if (list.length === 0) return null;
+  return (
+    <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        aria-label="More actions"
+        title="More actions"
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setPos(pos ? null : { top: r.bottom + 4, right: window.innerWidth - r.right });
+        }}
+        className="p-1.5 rounded-full text-gray-500 hover:bg-gray-100"
+      >
+        <MoreVertical size={18} />
+      </button>
+      {pos && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setPos(null)} />
+          <div
+            style={{ top: pos.top, right: pos.right }}
+            className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[150px]"
+          >
+            {list.map((it) => {
+              const Icon = it.icon;
+              return (
+                <button
+                  key={it.label}
+                  type="button"
+                  onClick={() => {
+                    setPos(null);
+                    it.onClick();
+                  }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left ${
+                    it.danger ? "text-red-600 hover:bg-red-50" : "text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  {Icon && <Icon size={14} />} {it.label}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Preview (PDF shown on screen) for any saved document.
+// kind: "invoice" | "salesdoc" | "credit" | "payment" | "vendorpayment" | "bill"
+function DocPreviewModal({ kind, record, onClose }) {
+  const [url, setUrl] = useState(null);
+  const [error, setError] = useState(null);
+  const number =
+    record.invoice_number ||
+    record.doc_number ||
+    record.credit_number ||
+    record.payment_number ||
+    record.bill_number;
+  const party = record.customer_name || record.vendor_name;
+
+  useEffect(() => {
+    let objectUrl = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const vendorSide = kind === "bill" || kind === "vendorpayment";
+        const [pdf, people] = await Promise.all([
+          import("./pdf.js"),
+          (vendorSide ? getVendors() : getCustomers()).catch(() => []),
+        ]);
+        const who = people.find(
+          (x) => x.id === (vendorSide ? record.vendor_id : record.customer_id),
+        );
+        let file;
+        if (kind === "invoice") file = await pdf.downloadInvoicePdf(record, who, true);
+        else if (kind === "credit") file = await pdf.downloadCreditNotePdf(record, who, true);
+        else if (kind === "payment") file = await pdf.downloadPaymentPdf(record, who, true);
+        else if (kind === "vendorpayment") file = await pdf.downloadVendorPaymentPdf(record, who, true);
+        else if (kind === "bill") file = await pdf.downloadPurchaseBillPdf(record, who, true);
+        else file = await pdf.downloadSalesDocPdf(record, who, true);
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(file);
+        setUrl(objectUrl);
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Could not create the preview");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, []);
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200">
+          <h3 className="font-semibold text-gray-900 truncate">
+            {number} · {party}
+          </h3>
+          <div className="flex items-center gap-2">
+            {url && (
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+              >
+                Open in new tab
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-sm font-medium hover:bg-blue-700"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+        {error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : !url ? (
+          <p className="text-gray-400 text-center py-16">Preparing preview...</p>
+        ) : (
+          <iframe src={url} title="Document preview" className="flex-1 w-full rounded-b-xl" />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AccountDetail({ accountId, go, fromParam }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -16126,7 +16323,9 @@ function invoiceStatus(inv) {
   return { label: "Open", cls: "bg-blue-100 text-blue-700" };
 }
 
+
 function InvoicesPage({ isAdmin, go }) {
+  const { can, hasRight } = useAuth();
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -16136,6 +16335,8 @@ function InvoicesPage({ isAdmin, go }) {
   const [expandedId, setExpandedId] = useState(null);
   const [findOpen, setFindOpen] = useState(false);
   const [previewFor, setPreviewFor] = useState(null); // the saved invoice being previewed
+  const [voidTarget, setVoidTarget] = useState(null); // invoice waiting for the typed VOID
+  const [deleteTarget, setDeleteTarget] = useState(null); // invoice waiting for the typed DELETE
 
   const load = async () => {
     try {
@@ -16160,32 +16361,24 @@ function InvoicesPage({ isAdmin, go }) {
     setEditFor(inv);
   };
 
-  const handleVoid = async (inv) => {
-    if (
-      !window.confirm(
-        `Void ${inv.invoice_number}? The stock goes back and its ledger entry is removed.`,
-      )
-    )
-      return;
+  const handleVoid = async () => {
     try {
-      await voidInvoice(inv.id);
+      await voidInvoice(voidTarget.id);
+      setVoidTarget(null);
       await load();
     } catch (err) {
+      setVoidTarget(null);
       alert(err.message);
     }
   };
 
-  const handleDelete = async (inv) => {
-    if (
-      !window.confirm(
-        `Permanently delete ${inv.invoice_number}? This can't be undone.`,
-      )
-    )
-      return;
+  const handleDelete = async () => {
     try {
-      await deleteInvoice(inv.id);
+      await deleteInvoice(deleteTarget.id);
+      setDeleteTarget(null);
       await load();
     } catch (err) {
+      setDeleteTarget(null);
       alert(err.message);
     }
   };
@@ -16247,10 +16440,11 @@ function InvoicesPage({ isAdmin, go }) {
                   id={`inv-${inv.id}`}
                   className="bg-white border border-gray-200 rounded-xl overflow-hidden"
                 >
+                  <div className="flex items-center hover:bg-gray-50">
                   <button
                     type="button"
                     onClick={() => setExpandedId(open ? null : inv.id)}
-                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50"
+                    className="flex-1 min-w-0 flex items-center gap-3 p-3 text-left"
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 truncate">
@@ -16281,6 +16475,16 @@ function InvoicesPage({ isAdmin, go }) {
                       <ChevronRight size={16} className="text-gray-400" />
                     )}
                   </button>
+                  <div className="pr-2 shrink-0">
+                    <DocActionsMenu
+                      items={[
+                        inv.status !== "void" && inv.amount_paid <= 0.004 && can("invoices", "full") && { label: "Edit invoice", icon: Pencil, onClick: () => setEditFor(inv) },
+                        inv.status !== "void" && hasRight("void_transactions") && { label: "Void invoice", icon: Trash2, danger: true, onClick: () => setVoidTarget(inv) },
+                        inv.status === "void" && hasRight("delete_records") && { label: "Delete invoice", icon: Trash2, danger: true, onClick: () => setDeleteTarget(inv) },
+                      ]}
+                    />
+                  </div>
+                  </div>
 
                   {open && (
                     <div className="border-t border-gray-100 p-3 space-y-3">
@@ -16347,16 +16551,6 @@ function InvoicesPage({ isAdmin, go }) {
 
                       {inv.status !== "void" && (
                         <div className="flex flex-wrap gap-2">
-                          {inv.amount_paid <= 0.004 && (
-                            <Gate area="invoices" level="full">
-                              <button
-                                onClick={() => setEditFor(inv)}
-                                className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
-                              >
-                                <Pencil size={14} /> Edit invoice
-                              </button>
-                            </Gate>
-                          )}
                           {inv.balance_due > 0.004 && (
                             <button
                               onClick={() => setPayFor(inv)}
@@ -16371,26 +16565,6 @@ function InvoicesPage({ isAdmin, go }) {
                           >
                             <RotateCcw size={14} /> Credit note
                           </button>
-                          <Gate right="void_transactions">
-                            <button
-                              onClick={() => handleVoid(inv)}
-                              className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
-                            >
-                              <Trash2 size={14} /> Void invoice
-                            </button>
-                          </Gate>
-                        </div>
-                      )}
-                      {inv.status === "void" && (
-                        <div className="flex flex-wrap gap-2">
-                          <Gate right="delete_records">
-                            <button
-                              onClick={() => handleDelete(inv)}
-                              className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
-                            >
-                              <Trash2 size={14} /> Delete invoice
-                            </button>
-                          </Gate>
                         </div>
                       )}
                     </div>
@@ -16461,6 +16635,24 @@ function InvoicesPage({ isAdmin, go }) {
         <InvoicePreviewModal
           invoice={previewFor}
           onClose={() => setPreviewFor(null)}
+        />
+      )}
+
+      {voidTarget && (
+        <TypedDeleteConfirm
+          verb="Void"
+          label={voidTarget.invoice_number}
+          note="The stock goes back and its ledger entry is removed."
+          onCancel={() => setVoidTarget(null)}
+          onConfirm={handleVoid}
+        />
+      )}
+
+      {deleteTarget && (
+        <TypedDeleteConfirm
+          label={deleteTarget.invoice_number}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
         />
       )}
     </div>
@@ -18012,7 +18204,10 @@ function creditNoteStatus(cn) {
   return { label: "Open", cls: "bg-blue-100 text-blue-700" };
 }
 
+
+
 function CreditNotesPage({ isAdmin, go }) {
+  const { can, hasRight } = useAuth();
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -18022,6 +18217,9 @@ function CreditNotesPage({ isAdmin, go }) {
   const [expandedId, setExpandedId] = useState(null);
   const [applyFor, setApplyFor] = useState(null); // the credit note whose "Apply to invoice" button was pressed
   const [editFor, setEditFor] = useState(null); // the credit note whose "Edit" button was pressed
+  const [voidTarget, setVoidTarget] = useState(null); // credit note waiting for the typed VOID
+  const [deleteTarget, setDeleteTarget] = useState(null); // credit note waiting for the typed DELETE
+  const [previewFor, setPreviewFor] = useState(null); // credit note being previewed
 
   const load = async () => {
     try {
@@ -18047,23 +18245,15 @@ function CreditNotesPage({ isAdmin, go }) {
     }
   };
 
-  const handleVoid = (cn) => {
-    if (
-      !window.confirm(
-        `Void ${cn.credit_number}? Returned stock is taken out again and its ledger entry is removed.`,
-      )
-    )
-      return;
+  const handleVoid = () => {
+    const cn = voidTarget;
+    setVoidTarget(null);
     run(() => voidCreditNote(cn.id));
   };
 
-  const handleDelete = (cn) => {
-    if (
-      !window.confirm(
-        `Permanently delete ${cn.credit_number}? This can't be undone.`,
-      )
-    )
-      return;
+  const handleDelete = () => {
+    const cn = deleteTarget;
+    setDeleteTarget(null);
     run(() => deleteCreditNote(cn.id));
   };
 
@@ -18132,10 +18322,11 @@ function CreditNotesPage({ isAdmin, go }) {
                   key={cn.id}
                   className="bg-white border border-gray-200 rounded-xl overflow-hidden"
                 >
+                  <div className="flex items-center hover:bg-gray-50">
                   <button
                     type="button"
                     onClick={() => setExpandedId(open ? null : cn.id)}
-                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50"
+                    className="flex-1 min-w-0 flex items-center gap-3 p-3 text-left"
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 truncate">
@@ -18168,6 +18359,16 @@ function CreditNotesPage({ isAdmin, go }) {
                       <ChevronRight size={16} className="text-gray-400" />
                     )}
                   </button>
+                  <div className="pr-2 shrink-0">
+                    <DocActionsMenu
+                      items={[
+                        cn.status !== "void" && cn.amount_applied <= 0.004 && can("credit_notes", "full") && { label: "Edit credit note", icon: Pencil, onClick: () => setEditFor(cn) },
+                        cn.status !== "void" && hasRight("void_transactions") && { label: "Void credit note", icon: Trash2, danger: true, onClick: () => setVoidTarget(cn) },
+                        cn.status === "void" && hasRight("delete_records") && { label: "Delete credit note", icon: Trash2, danger: true, onClick: () => setDeleteTarget(cn) },
+                      ]}
+                    />
+                  </div>
+                  </div>
 
                   {open && (
                     <div className="border-t border-gray-100 p-3 space-y-3">
@@ -18247,25 +18448,27 @@ function CreditNotesPage({ isAdmin, go }) {
 
                       <div className="flex flex-wrap gap-2">
                         <button
+                          onClick={() => setPreviewFor(cn)}
+                          className="inline-flex items-center gap-2 border border-blue-300 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-50"
+                        >
+                          <FileText size={14} /> Preview
+                        </button>
+                        <button
                           onClick={() => downloadPdf("credit", cn)}
                           className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
                         >
                           <Download size={14} /> Download PDF
                         </button>
+                        <button
+                          onClick={() => sendWhatsApp("credit", cn)}
+                          className="inline-flex items-center gap-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-green-700"
+                        >
+                          <MessageCircle size={14} /> Send WhatsApp
+                        </button>
                       </div>
 
                       {cn.status !== "void" && (
                         <div className="flex flex-wrap gap-2">
-                          {cn.amount_applied <= 0.004 && (
-                            <Gate area="credit_notes" level="full">
-                              <button
-                                onClick={() => setEditFor(cn)}
-                                className={`${btn} border border-gray-300 text-gray-700 hover:bg-gray-50`}
-                              >
-                                <Pencil size={14} /> Edit credit note
-                              </button>
-                            </Gate>
-                          )}
                           {cn.balance > 0.004 && (
                             <button
                               onClick={() => setApplyFor(cn)}
@@ -18274,26 +18477,6 @@ function CreditNotesPage({ isAdmin, go }) {
                               <FileText size={14} /> Apply to invoice
                             </button>
                           )}
-                          <Gate right="void_transactions">
-                            <button
-                              onClick={() => handleVoid(cn)}
-                              className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}
-                            >
-                              <Trash2 size={14} /> Void credit note
-                            </button>
-                          </Gate>
-                        </div>
-                      )}
-                      {cn.status === "void" && (
-                        <div className="flex flex-wrap gap-2">
-                          <Gate right="delete_records">
-                            <button
-                              onClick={() => handleDelete(cn)}
-                              className={`${btn} border border-red-200 text-red-600 hover:bg-red-50`}
-                            >
-                              <Trash2 size={14} /> Delete credit note
-                            </button>
-                          </Gate>
                         </div>
                       )}
                     </div>
@@ -18321,6 +18504,29 @@ function CreditNotesPage({ isAdmin, go }) {
           credit={applyFor}
           onClose={() => setApplyFor(null)}
           onSaved={load}
+        />
+      )}
+      {previewFor && (
+        <DocPreviewModal
+          kind="credit"
+          record={previewFor}
+          onClose={() => setPreviewFor(null)}
+        />
+      )}
+      {voidTarget && (
+        <TypedDeleteConfirm
+          verb="Void"
+          label={voidTarget.credit_number}
+          note="Returned stock is taken out again and its ledger entry is removed."
+          onCancel={() => setVoidTarget(null)}
+          onConfirm={handleVoid}
+        />
+      )}
+      {deleteTarget && (
+        <TypedDeleteConfirm
+          label={deleteTarget.credit_number}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
         />
       )}
     </div>
@@ -18747,7 +18953,9 @@ function ApplyCreditModal({ credit, onClose, onSaved }) {
 const PAYMENT_MODES = ["Cash", "Bank Transfer", "Cheque", "Card", "Other"];
 const DEPOSIT_ACCOUNT_TYPES = ["cash", "bank", "other_current_asset"]; // where the money can land
 
+
 function PaymentsPage({ isAdmin, go }) {
+  const { can, hasRight } = useAuth();
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -18756,6 +18964,8 @@ function PaymentsPage({ isAdmin, go }) {
   useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
   const [editFor, setEditFor] = useState(null); // the payment whose "Edit" button was pressed
+  const [deleteTarget, setDeleteTarget] = useState(null); // payment waiting for the typed DELETE
+  const [previewFor, setPreviewFor] = useState(null); // payment being previewed
 
   const load = async () => {
     try {
@@ -18772,17 +18982,13 @@ function PaymentsPage({ isAdmin, go }) {
     load();
   }, []);
 
-  const handleDelete = async (p) => {
-    if (
-      !window.confirm(
-        `Delete ${p.payment_number}? Its invoices will owe the money again and the ledger entry is removed.`,
-      )
-    )
-      return;
+  const handleDelete = async () => {
     try {
-      await deletePayment(p.id);
+      await deletePayment(deleteTarget.id);
+      setDeleteTarget(null);
       await load();
     } catch (err) {
+      setDeleteTarget(null);
       alert(err.message);
     }
   };
@@ -18836,10 +19042,11 @@ function PaymentsPage({ isAdmin, go }) {
                   key={p.id}
                   className="bg-white border border-gray-200 rounded-xl overflow-hidden"
                 >
+                  <div className="flex items-center hover:bg-gray-50">
                   <button
                     type="button"
                     onClick={() => setExpandedId(open ? null : p.id)}
-                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50"
+                    className="flex-1 min-w-0 flex items-center gap-3 p-3 text-left"
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 truncate">
@@ -18862,6 +19069,15 @@ function PaymentsPage({ isAdmin, go }) {
                       <ChevronRight size={16} className="text-gray-400" />
                     )}
                   </button>
+                  <div className="pr-2 shrink-0">
+                    <DocActionsMenu
+                      items={[
+                        can("payments_in", "full") && { label: "Edit payment", icon: Pencil, onClick: () => setEditFor(p) },
+                        can("payments_in", "full") && hasRight("delete_records") && { label: "Delete payment", icon: Trash2, danger: true, onClick: () => setDeleteTarget(p) },
+                      ]}
+                    />
+                  </div>
+                  </div>
 
                   {open && (
                     <div className="border-t border-gray-100 p-3 space-y-3">
@@ -18889,26 +19105,18 @@ function PaymentsPage({ isAdmin, go }) {
                         ))}
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <Gate area="payments_in" level="full">
-                          <button
-                            onClick={() => setEditFor(p)}
-                            className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
-                          >
-                            <Pencil size={14} /> Edit payment
-                          </button>
-                        </Gate>
-                        <Gate
-                          area="payments_in"
-                          level="full"
-                          right="delete_records"
+                        <button
+                          onClick={() => setPreviewFor(p)}
+                          className="inline-flex items-center gap-2 border border-blue-300 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-50"
                         >
-                          <button
-                            onClick={() => handleDelete(p)}
-                            className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
-                          >
-                            <Trash2 size={14} /> Delete payment
-                          </button>
-                        </Gate>
+                          <FileText size={14} /> Preview
+                        </button>
+                        <button
+                          onClick={() => sendWhatsApp("payment", p)}
+                          className="inline-flex items-center gap-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-green-700"
+                        >
+                          <MessageCircle size={14} /> Send WhatsApp
+                        </button>
                       </div>
                     </div>
                   )}
@@ -18928,6 +19136,21 @@ function PaymentsPage({ isAdmin, go }) {
           editPayment={editFor}
           onClose={() => setEditFor(null)}
           onSaved={load}
+        />
+      )}
+      {previewFor && (
+        <DocPreviewModal
+          kind="payment"
+          record={previewFor}
+          onClose={() => setPreviewFor(null)}
+        />
+      )}
+      {deleteTarget && (
+        <TypedDeleteConfirm
+          label={deleteTarget.payment_number}
+          note="Its invoices will owe the money again and the ledger entry is removed."
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
         />
       )}
     </div>
@@ -19237,7 +19460,10 @@ const PAID_FROM_ACCOUNT_TYPES = [
   "other_current_asset",
 ]; // where vendor payments can come from
 
+
+
 function PurchaseBillsPage({ isAdmin, go }) {
+  const { can, hasRight } = useAuth();
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -19247,6 +19473,9 @@ function PurchaseBillsPage({ isAdmin, go }) {
   const [expandedId, setExpandedId] = useState(null);
   const [payFor, setPayFor] = useState(null); // the bill whose "Record payment" button was pressed
   const [editFor, setEditFor] = useState(null); // the bill whose "Edit bill" button was pressed
+  const [voidTarget, setVoidTarget] = useState(null); // bill waiting for the typed VOID
+  const [deleteTarget, setDeleteTarget] = useState(null); // bill waiting for the typed DELETE
+  const [previewFor, setPreviewFor] = useState(null); // bill being previewed
 
   const load = async () => {
     try {
@@ -19263,32 +19492,24 @@ function PurchaseBillsPage({ isAdmin, go }) {
     load();
   }, []);
 
-  const handleVoid = async (b) => {
-    if (
-      !window.confirm(
-        `Void ${b.bill_number}? The stock it added is taken back and its ledger entry is removed.`,
-      )
-    )
-      return;
+  const handleVoid = async () => {
     try {
-      await voidPurchaseBill(b.id);
+      await voidPurchaseBill(voidTarget.id);
+      setVoidTarget(null);
       await load();
     } catch (err) {
+      setVoidTarget(null);
       alert(err.message);
     }
   };
 
-  const handleDelete = async (b) => {
-    if (
-      !window.confirm(
-        `Permanently delete ${b.bill_number}? This can't be undone.`,
-      )
-    )
-      return;
+  const handleDelete = async () => {
     try {
-      await deletePurchaseBill(b.id);
+      await deletePurchaseBill(deleteTarget.id);
+      setDeleteTarget(null);
       await load();
     } catch (err) {
+      setDeleteTarget(null);
       alert(err.message);
     }
   };
@@ -19343,10 +19564,11 @@ function PurchaseBillsPage({ isAdmin, go }) {
                   key={b.id}
                   className="bg-white border border-gray-200 rounded-xl overflow-hidden"
                 >
+                  <div className="flex items-center hover:bg-gray-50">
                   <button
                     type="button"
                     onClick={() => setExpandedId(open ? null : b.id)}
-                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50"
+                    className="flex-1 min-w-0 flex items-center gap-3 p-3 text-left"
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 truncate">
@@ -19377,6 +19599,16 @@ function PurchaseBillsPage({ isAdmin, go }) {
                       <ChevronRight size={16} className="text-gray-400" />
                     )}
                   </button>
+                  <div className="pr-2 shrink-0">
+                    <DocActionsMenu
+                      items={[
+                        b.status !== "void" && b.amount_paid <= 0.004 && can("purchase_bills", "full") && { label: "Edit bill", icon: Pencil, onClick: () => setEditFor(b) },
+                        b.status !== "void" && hasRight("void_transactions") && { label: "Void bill", icon: Trash2, danger: true, onClick: () => setVoidTarget(b) },
+                        b.status === "void" && hasRight("delete_records") && { label: "Delete bill", icon: Trash2, danger: true, onClick: () => setDeleteTarget(b) },
+                      ]}
+                    />
+                  </div>
+                  </div>
 
                   {open && (
                     <div className="border-t border-gray-100 p-3 space-y-3">
@@ -19425,18 +19657,23 @@ function PurchaseBillsPage({ isAdmin, go }) {
                         </div>
                       </div>
 
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => setPreviewFor(b)}
+                          className="inline-flex items-center gap-2 border border-blue-300 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-50"
+                        >
+                          <FileText size={14} /> Preview
+                        </button>
+                        <button
+                          onClick={() => sendWhatsApp("bill", b)}
+                          className="inline-flex items-center gap-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-green-700"
+                        >
+                          <MessageCircle size={14} /> Send WhatsApp
+                        </button>
+                      </div>
+
                       {b.status !== "void" && (
                         <div className="flex flex-wrap gap-2">
-                          {b.amount_paid <= 0.004 && (
-                            <Gate area="purchase_bills" level="full">
-                              <button
-                                onClick={() => setEditFor(b)}
-                                className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
-                              >
-                                <Pencil size={14} /> Edit bill
-                              </button>
-                            </Gate>
-                          )}
                           {b.balance_due > 0.004 && (
                             <button
                               onClick={() => setPayFor(b)}
@@ -19445,27 +19682,6 @@ function PurchaseBillsPage({ isAdmin, go }) {
                               <CreditCard size={14} /> Record payment
                             </button>
                           )}
-                          <Gate right="void_transactions">
-                            <button
-                              onClick={() => handleVoid(b)}
-                              className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
-                            >
-                              <Trash2 size={14} /> Void bill
-                            </button>
-                          </Gate>
-                        </div>
-                      )}
-
-                      {b.status === "void" && (
-                        <div className="flex flex-wrap gap-2">
-                          <Gate right="delete_records">
-                            <button
-                              onClick={() => handleDelete(b)}
-                              className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
-                            >
-                              <Trash2 size={14} /> Delete bill
-                            </button>
-                          </Gate>
                         </div>
                       )}
                     </div>
@@ -19496,6 +19712,29 @@ function PurchaseBillsPage({ isAdmin, go }) {
           initialBillId={payFor.id}
           onClose={() => setPayFor(null)}
           onSaved={load}
+        />
+      )}
+      {previewFor && (
+        <DocPreviewModal
+          kind="bill"
+          record={previewFor}
+          onClose={() => setPreviewFor(null)}
+        />
+      )}
+      {voidTarget && (
+        <TypedDeleteConfirm
+          verb="Void"
+          label={voidTarget.bill_number}
+          note="The stock it added is taken back and its ledger entry is removed."
+          onCancel={() => setVoidTarget(null)}
+          onConfirm={handleVoid}
+        />
+      )}
+      {deleteTarget && (
+        <TypedDeleteConfirm
+          label={deleteTarget.bill_number}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
         />
       )}
     </div>
@@ -20771,8 +21010,10 @@ function PurchaseBillForm({ onClose, onSaved, editBill = null }) {
   );
 }
 
-// ---------- Vendor payments (step 5: money out. Pays off bills + posts to the ledger, admin only) ----------
+
+
 function VendorPaymentsPage({ isAdmin, go }) {
+  const { can, hasRight } = useAuth();
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -20781,6 +21022,8 @@ function VendorPaymentsPage({ isAdmin, go }) {
   useQuickNew(() => setFormOpen(true));
   const [expandedId, setExpandedId] = useState(null);
   const [editFor, setEditFor] = useState(null); // the payment whose "Edit" button was pressed
+  const [deleteTarget, setDeleteTarget] = useState(null); // payment waiting for the typed DELETE
+  const [previewFor, setPreviewFor] = useState(null); // payment being previewed
 
   const load = async () => {
     try {
@@ -20797,17 +21040,13 @@ function VendorPaymentsPage({ isAdmin, go }) {
     load();
   }, []);
 
-  const handleDelete = async (p) => {
-    if (
-      !window.confirm(
-        `Delete ${p.payment_number}? Its bills will be owed again and the ledger entry is removed.`,
-      )
-    )
-      return;
+  const handleDelete = async () => {
     try {
-      await deleteVendorPayment(p.id);
+      await deleteVendorPayment(deleteTarget.id);
+      setDeleteTarget(null);
       await load();
     } catch (err) {
+      setDeleteTarget(null);
       alert(err.message);
     }
   };
@@ -20863,10 +21102,11 @@ function VendorPaymentsPage({ isAdmin, go }) {
                   key={p.id}
                   className="bg-white border border-gray-200 rounded-xl overflow-hidden"
                 >
+                  <div className="flex items-center hover:bg-gray-50">
                   <button
                     type="button"
                     onClick={() => setExpandedId(open ? null : p.id)}
-                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50"
+                    className="flex-1 min-w-0 flex items-center gap-3 p-3 text-left"
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 truncate">
@@ -20889,6 +21129,15 @@ function VendorPaymentsPage({ isAdmin, go }) {
                       <ChevronRight size={16} className="text-gray-400" />
                     )}
                   </button>
+                  <div className="pr-2 shrink-0">
+                    <DocActionsMenu
+                      items={[
+                        can("payments_out", "full") && { label: "Edit payment", icon: Pencil, onClick: () => setEditFor(p) },
+                        can("payments_out", "full") && hasRight("delete_records") && { label: "Delete payment", icon: Trash2, danger: true, onClick: () => setDeleteTarget(p) },
+                      ]}
+                    />
+                  </div>
+                  </div>
 
                   {open && (
                     <div className="border-t border-gray-100 p-3 space-y-3">
@@ -20916,26 +21165,18 @@ function VendorPaymentsPage({ isAdmin, go }) {
                         ))}
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <Gate area="payments_out" level="full">
-                          <button
-                            onClick={() => setEditFor(p)}
-                            className="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-50"
-                          >
-                            <Pencil size={14} /> Edit payment
-                          </button>
-                        </Gate>
-                        <Gate
-                          area="payments_out"
-                          level="full"
-                          right="delete_records"
+                        <button
+                          onClick={() => setPreviewFor(p)}
+                          className="inline-flex items-center gap-2 border border-blue-300 text-blue-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-50"
                         >
-                          <button
-                            onClick={() => handleDelete(p)}
-                            className="inline-flex items-center gap-2 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-50"
-                          >
-                            <Trash2 size={14} /> Delete payment
-                          </button>
-                        </Gate>
+                          <FileText size={14} /> Preview
+                        </button>
+                        <button
+                          onClick={() => sendWhatsApp("vendorpayment", p)}
+                          className="inline-flex items-center gap-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-green-700"
+                        >
+                          <MessageCircle size={14} /> Send WhatsApp
+                        </button>
                       </div>
                     </div>
                   )}
@@ -20955,6 +21196,21 @@ function VendorPaymentsPage({ isAdmin, go }) {
           editPayment={editFor}
           onClose={() => setEditFor(null)}
           onSaved={load}
+        />
+      )}
+      {previewFor && (
+        <DocPreviewModal
+          kind="vendorpayment"
+          record={previewFor}
+          onClose={() => setPreviewFor(null)}
+        />
+      )}
+      {deleteTarget && (
+        <TypedDeleteConfirm
+          label={deleteTarget.payment_number}
+          note="Its bills will be owed again and the ledger entry is removed."
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
         />
       )}
     </div>
