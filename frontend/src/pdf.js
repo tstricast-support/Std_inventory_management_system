@@ -80,7 +80,101 @@ async function loadImage(url, maxSize = 120) {
   }
 }
 
-// images: { url -> { data, w, h } }.  Kept separate from loading so it is easy to test.
+
+function drawPaidSeal(doc, cx, cy, size = 40, tiltDeg = -10) {
+  const green = [0, 145, 65];
+  const r = size / 2;
+  const t = (tiltDeg * Math.PI) / 180;
+  const rotPt = (x, y) => [
+    cx + x * Math.cos(t) - y * Math.sin(t),
+    cy + x * Math.sin(t) + y * Math.cos(t),
+  ];
+
+  doc.saveGraphicsState();
+  doc.setDrawColor(...green);
+  doc.setFillColor(...green);
+  doc.setTextColor(...green);
+
+  // ---- scalloped edge: a disc plus a ring of small circles ----
+  const scallops = 36;
+  const rho = r * 0.09;
+  doc.circle(cx, cy, r - rho, "F");
+  for (let i = 0; i < scallops; i++) {
+    const a = (2 * Math.PI * i) / scallops;
+    doc.circle(cx + Math.cos(a) * (r - rho), cy + Math.sin(a) * (r - rho), rho, "F");
+  }
+
+  // ---- white face + two thin rings ----
+  doc.setFillColor(255, 255, 255);
+  doc.circle(cx, cy, r - rho - r * 0.07, "F");
+  doc.setLineWidth(0.5);
+  doc.circle(cx, cy, r * 0.8, "S");
+  doc.setLineWidth(0.35);
+  doc.circle(cx, cy, r * 0.5, "S");
+
+  // ---- curved THANK YOU (top and bottom, both read left to right) ----
+  const fs = size * 0.24;
+  const capH = fs * 0.3528 * 0.72;
+  const mid = r * 0.65; // middle of the text ring
+
+  const arcText = (text, bottom) => {
+    doc.setFont("helvetica", "bold").setFontSize(fs).setTextColor(...green);
+    const R = bottom ? mid + capH / 2 : mid - capH / 2; // baseline radius
+    const chars = [...text];
+    const gap = 0.35;
+    const widths = chars.map((ch) => doc.getTextWidth(ch));
+    const total = widths.reduce((a, b) => a + b, 0) + gap * (chars.length - 1);
+    let pos = -total / 2;
+    chars.forEach((ch, i) => {
+      const w = widths[i];
+      const angDeg = ((pos + w / 2) / R) * (180 / Math.PI);
+      pos += w + gap;
+      if (ch === " ") return;
+
+      const thetaDeg = (bottom ? 90 - angDeg : -90 + angDeg) + tiltDeg; // position on circle
+      const phiDeg = (bottom ? -angDeg : angDeg) + tiltDeg;              // letter rotation (clockwise)
+      const th = (thetaDeg * Math.PI) / 180;
+      const ph = (phiDeg * Math.PI) / 180;
+
+      const px = cx + Math.cos(th) * R;
+      const py = cy + Math.sin(th) * R;
+      doc.text(ch, px - (Math.cos(ph) * w) / 2, py - (Math.sin(ph) * w) / 2, { angle: -phiDeg });
+    });
+  };
+  arcText("THANK YOU", false);
+  arcText("THANK YOU", true);
+
+  // ---- PAID ribbon band across the centre ----
+  const fs2 = size * 0.55;
+  doc.setFont("helvetica", "bold").setFontSize(fs2);
+  const capH2 = fs2 * 0.3528 * 0.72;
+  const hh = capH2 / 2 + r * 0.08;
+  const bw = r * 0.83;
+
+  const p0 = rotPt(-bw, -hh);
+  const p1 = rotPt(bw, -hh);
+  const p2 = rotPt(bw, hh);
+  const p3 = rotPt(-bw, hh);
+
+  doc.setFillColor(255, 255, 255);
+  doc.lines(
+    [[p1[0] - p0[0], p1[1] - p0[1]], [p2[0] - p1[0], p2[1] - p1[1]], [p3[0] - p2[0], p3[1] - p2[1]]],
+    p0[0], p0[1], [1, 1], "F", true
+  );
+  doc.setDrawColor(...green).setLineWidth(0.7);
+  doc.line(p0[0], p0[1], p1[0], p1[1]);
+  doc.line(p3[0], p3[1], p2[0], p2[1]);
+
+  doc.setTextColor(...green);
+  const w = doc.getTextWidth("PAID");
+  const [sx, sy] = rotPt(-w / 2, capH2 / 2);
+  doc.text("PAID", sx, sy, { angle: -tiltDeg });
+
+  doc.restoreGraphicsState();
+}
+
+
+
 export function renderPdf(spec, images = {}, COMPANY = cachedCompany || EMPTY_COMPANY) {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
@@ -203,6 +297,7 @@ export function renderPdf(spec, images = {}, COMPANY = cachedCompany || EMPTY_CO
     y = M + 4;
   }
   const totX = pageW - M - 80;
+  const totalsTop = y;
   spec.totals.forEach(([label, value, strong]) => {
     doc.setFont("helvetica", strong ? "bold" : "normal").setFontSize(strong ? 11 : 9.5).setTextColor(...dark);
     if (strong) {
@@ -212,6 +307,10 @@ export function renderPdf(spec, images = {}, COMPANY = cachedCompany || EMPTY_CO
     doc.text(value, pageW - M - 1, y, { align: "right" });
     y += 7;
   });
+
+  if (String(spec.status || "").toLowerCase() === "paid") {
+  drawPaidSeal(doc, M + 50, totalsTop + 15, 38); 
+}
 
   // ---- notes ----
   if (spec.notes) {
