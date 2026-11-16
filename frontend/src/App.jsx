@@ -5138,16 +5138,39 @@ function applyAppTheme(s) {
   ].forEach((v, i) => el.style.setProperty(v, pref.page[i]));
   el.style.setProperty("--page-bg", pref.page[0]);
 
-    // sidebar font colour (index.css applies it ONLY inside the sidebar / top toolbar; page text is never touched)
+  // sidebar font colour (index.css applies it ONLY inside the sidebar / top toolbar; page text is never touched)
   if (HEX_RE.test(s.sidebarFont || "")) {
     el.style.setProperty("--sidebar-font", s.sidebarFont);
   } else {
     el.style.removeProperty("--sidebar-font");
   }
   // clean up the page-text overrides that the earlier "Font colour" version saved on <html>
-  ["--font-color", "--color-gray-500", "--color-gray-600", "--color-gray-700", "--color-gray-800", "--color-gray-900"].forEach(
-    (v) => el.style.removeProperty(v),
-  );
+  [
+    "--font-color",
+    "--color-gray-500",
+    "--color-gray-600",
+    "--color-gray-700",
+    "--color-gray-800",
+    "--color-gray-900",
+  ].forEach((v) => el.style.removeProperty(v));
+
+  // top (window title) bar of the installed app: follows the sidebar colour,
+  // i.e. the manual sidebar choice, else the selected colour preference
+  let barColor = pref.title[0];
+  if (sb && sb.color) {
+    barColor = sb.color.startsWith("#")
+      ? sb.color
+      : ov
+        ? ov.color
+        : pref.accent || pref.title[0]; // "Match accent" option
+  }
+  let meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.setAttribute("name", "theme-color");
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute("content", barColor);
 }
 
 applyAppTheme(loadAppTheme(localStorage.getItem(APP_THEME_LAST_KEY))); // runs once when the app loads, before the first screen is drawn
