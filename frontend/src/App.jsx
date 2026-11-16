@@ -783,6 +783,140 @@ function useDocColumns(name) {
   return [cols, save, defaults];
 }
 
+// ---------- Draft saving: keeps what the user typed, so a closed window / tab can be restored ----------
+const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // drafts older than 7 days are dropped
+
+function useFormDraft({
+  name, // e.g. "invoice"
+  enabled = true, // false = no draft (editing an existing record)
+  snapshot, // object with everything the user typed
+  hasContent, // true when the user has typed something real
+  apply, // (savedSnapshot) => puts the values back into the form
+}) {
+  const { company } = useCompany();
+  const { user } = useAuth();
+  const key = `draft:${user?.id ?? "u"}:${company?.id ?? "c"}:${name}`;
+  const [pending, setPending] = useState(null); // an old draft waiting for Restore / Discard
+  const [ready, setReady] = useState(false); // saving starts only after the user decided
+  const json = JSON.stringify(snapshot);
+  const latest = useRef({});
+  latest.current = { key, snapshot, json, hasContent, apply, enabled };
+  const clearedJson = useRef(null);
+
+  const write = () => {
+    const c = latest.current;
+    if (!c.enabled || c.json === clearedJson.current) return;
+    try {
+      if (c.hasContent) {
+        localStorage.setItem(
+          c.key,
+          JSON.stringify({ at: Date.now(), data: c.snapshot }),
+        );
+      } else {
+        localStorage.removeItem(c.key);
+      }
+    } catch (e) {
+      /* storage full or blocked */
+    }
+  };
+
+  // when the form opens: is there an unfinished draft?
+  useEffect(() => {
+    setPending(null);
+    setReady(false);
+    if (!enabled) return;
+    try {
+      const raw = localStorage.getItem(key);
+      const d = raw ? JSON.parse(raw) : null;
+      if (d?.data && Date.now() - d.at < DRAFT_MAX_AGE_MS) {
+        setPending(d);
+        return;
+      }
+      if (d) localStorage.removeItem(key);
+    } catch (e) {
+      /* broken draft: ignore */
+    }
+    setReady(true);
+  }, [key, enabled]);
+
+  // save shortly after the user stops typing
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(write, 500);
+    return () => clearTimeout(t);
+  }, [json, ready]);
+
+  // save at once when the window / tab is closing
+  useEffect(() => {
+    if (!ready) return;
+    const onHide = () => write();
+    window.addEventListener("pagehide", onHide);
+    window.addEventListener("beforeunload", onHide);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("beforeunload", onHide);
+    };
+  }, [ready]);
+
+  return {
+    pending,
+    restore: () => {
+      try {
+        if (pending) latest.current.apply(pending.data);
+      } catch (e) {
+        /* ignore */
+      }
+      setPending(null);
+      setReady(true);
+    },
+    discard: () => {
+      try {
+        localStorage.removeItem(key);
+      } catch (e) {
+        /* ignore */
+      }
+      setPending(null);
+      setReady(true);
+    },
+    clear: () => {
+      // call after a successful save
+      clearedJson.current = latest.current.json;
+      try {
+        localStorage.removeItem(key);
+      } catch (e) {
+        /* ignore */
+      }
+    },
+  };
+}
+
+// the "You have an unsaved draft" bar shown at the top of a form
+function DraftBanner({ draft }) {
+  if (!draft?.pending) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-3 py-2 mb-3">
+      <span className="flex-1 min-w-0">
+        You have an unsaved draft from{" "}
+        {new Date(draft.pending.at).toLocaleString()}.
+      </span>
+      <button
+        type="button"
+        onClick={draft.restore}
+        className="px-3 py-1 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-700"
+      >
+        Restore
+      </button>
+      <button
+        type="button"
+        onClick={draft.discard}
+        className="px-3 py-1 rounded-md border border-amber-300 text-xs font-medium hover:bg-amber-100"
+      >
+        Discard
+      </button>
+    </div>
+  );
+}
+
 // drag by the title bar + resize from the bottom-right corner (same code as the invoice window)
 function useFormWindow() {
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -1198,6 +1332,24 @@ function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [quickCustomerName, setQuickCustomerName] = useState(null); // typed name, or null = popup closed
+    const draft = useFormDraft({
+      name: `sales-${docType}`,
+      enabled: !editDoc,
+      snapshot: { customerId, date, endDate, reference, notes, lines },
+      hasContent:
+        Boolean(customerId) ||
+        Boolean(reference.trim()) ||
+        Boolean(notes.trim()) ||
+        lines.some(docLineFilled),
+      apply: (d) => {
+        setCustomerId(d.customerId ?? "");
+        setDate(d.date || toISODate(new Date()));
+        setEndDate(d.endDate || "");
+        setReference(d.reference || "");
+        setNotes(d.notes || "");
+        setLines(d.lines?.length ? d.lines : docLinesFrom(null));
+      },
+    });
   const cls =
     "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
 
@@ -1280,6 +1432,7 @@ function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
       };
       if (editDoc) await updateSalesDoc(editDoc.id, payload);
       else await createSalesDoc({ doc_type: docType, ...payload });
+      draft.clear();
       await onSaved();
       if (andNew && !editDoc) resetForm();
       else onClose();
@@ -1295,6 +1448,7 @@ function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
       title={editDoc ? `Edit ${editDoc.doc_number}` : `New ${info.title}`}
       onClose={onClose}
     >
+      <DraftBanner draft={draft} />
       {error && (
         <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">
           {error}
@@ -3622,6 +3776,14 @@ function ProductFormBody({
   const [imageFiles, setImageFiles] = useState([]);
   const [images, setImages] = useState(initialData?.images || []);
   const [submitting, setSubmitting] = useState(false);
+  
+    const draft = useFormDraft({
+      name: `item-${kind}`,
+      enabled: !isEditMode && !isDuplicate && !initialName,
+      snapshot: { form },
+      hasContent: Boolean(form.name.trim()),
+      apply: (d) => setForm((prev) => ({ ...prev, ...d.form })),
+    });
   const [imageBusy, setImageBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -3753,6 +3915,7 @@ function ProductFormBody({
       } else {
         await onSubmit(values, imageFiles);
       }
+      draft.clear();
       onClose();
     } catch (err) {
       setError(err.message);
@@ -3786,6 +3949,7 @@ function ProductFormBody({
           </div>
         )}
 
+        <DraftBanner draft={draft} />
         <form onSubmit={handleSubmit}>
           <div className="flex flex-col md:flex-row gap-4">
             {/* ================= LEFT: all the sections ================= */}
@@ -8080,6 +8244,13 @@ function VendorForm({ initialData, onClose, onSubmit }) {
   const [error, setError] = useState(null);
   const handleChange = (field, value) =>
     setForm((prev) => ({ ...prev, [field]: value }));
+  const draft = useFormDraft({
+      name: "vendor",
+      enabled: !isEditMode,
+      snapshot: { form },
+      hasContent: Boolean(form.name.trim()),
+      apply: (d) => setForm((prev) => ({ ...prev, ...d.form })),
+    });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -8091,6 +8262,7 @@ function VendorForm({ initialData, onClose, onSubmit }) {
       } else {
         await onSubmit(form);
       }
+      draft.clear();
       onClose();
     } catch (err) {
       setError(err.message);
@@ -8111,6 +8283,7 @@ function VendorForm({ initialData, onClose, onSubmit }) {
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-3">
+          <DraftBanner draft={draft} />
           <input
             required
             placeholder="Vendor name"
@@ -13995,6 +14168,13 @@ function CustomerForm({ initialData, onClose, onSubmit }) {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+    const draft = useFormDraft({
+      name: "customer",
+      enabled: !isEditMode,
+      snapshot: { form },
+      hasContent: Boolean(form.display_name.trim()),
+      apply: (d) => setForm((prev) => ({ ...prev, ...d.form })),
+    });
   const set = (field, value) =>
     setForm((prev) => ({ ...prev, [field]: value }));
   const cls =
@@ -14009,6 +14189,12 @@ function CustomerForm({ initialData, onClose, onSubmit }) {
         ...form,
         opening_balance: Number(form.opening_balance) || 0,
       });
+            await onSubmit(isEditMode ? initialData.id : null, {
+              ...form,
+              opening_balance: Number(form.opening_balance) || 0,
+            });
+            draft.clear();
+            onClose();
       onClose();
     } catch (err) {
       setError(err.message);
@@ -14028,6 +14214,12 @@ function CustomerForm({ initialData, onClose, onSubmit }) {
             {error}
           </div>
         )}
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
+          </div>
+        )}
+        <DraftBanner draft={draft} />
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="flex gap-4 text-sm">
             {["Business", "Individual"].map((t) => (
@@ -17322,6 +17514,45 @@ function InvoiceForm({
   const [payMode, setPayMode] = useState("Cash");
   const [payDepositId, setPayDepositId] = useState("");
   const [payReference, setPayReference] = useState("");
+    const draft = useFormDraft({
+      name: "invoice",
+      enabled: !editInvoice && !fromDoc,
+      snapshot: {
+        customerId,
+        date,
+        dueDate,
+        orderNumber,
+        notes,
+        discountType,
+        discountValue,
+        lines,
+        payNow,
+        payAmount,
+        payMode,
+        payDepositId,
+        payReference,
+      },
+      hasContent:
+        Boolean(customerId) ||
+        Boolean(orderNumber.trim()) ||
+        Boolean(notes.trim()) ||
+        lines.some((l) => l.product_id || (l.description || "").trim()),
+      apply: (d) => {
+        setCustomerId(d.customerId ?? "");
+        setDate(d.date || toISODate(new Date()));
+        setDueDate(d.dueDate || "");
+        setOrderNumber(d.orderNumber || "");
+        setNotes(d.notes || "");
+        setDiscountType(d.discountType || "amount");
+        setDiscountValue(d.discountValue || "");
+        setLines(d.lines?.length ? d.lines : [blankInvoiceLine()]);
+        setPayNow(Boolean(d.payNow));
+        setPayAmount(d.payAmount || "");
+        setPayMode(d.payMode || "Cash");
+        if (d.payDepositId) setPayDepositId(d.payDepositId);
+        setPayReference(d.payReference || "");
+      },
+    });
 
   // only for a NEW invoice: load the deposit accounts (if this user can't read them, the button is simply hidden)
   useEffect(() => {
@@ -17723,6 +17954,7 @@ function InvoiceForm({
             });
           } catch (payErr) {
             // the invoice is already saved, so close the form and tell the user what is left to do
+            draft.clear();
             await onSaved();
             onClose();
             alert(
@@ -17732,6 +17964,7 @@ function InvoiceForm({
           }
         }
       }
+      draft.clear();
       await onSaved();
       onClose();
     } catch (err) {
@@ -17816,6 +18049,7 @@ function InvoiceForm({
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
+          <DraftBanner draft={draft} />
           {readOnly && (
             <div className="bg-amber-50 text-amber-700 text-sm rounded-lg px-3 py-2">
               {editInvoice.status === "void"
@@ -18624,6 +18858,22 @@ function CreditNoteForm({ fromInvoice = null, editNote = null, onClose, onSaved 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [quickCustomerName, setQuickCustomerName] = useState(null); // typed name, or null = popup closed
+    const draft = useFormDraft({
+      name: "credit-note",
+      enabled: !editNote && !fromInvoice,
+      snapshot: { customerId, date, reason, restock, lines },
+      hasContent:
+        Boolean(customerId) ||
+        Boolean(reason.trim()) ||
+        lines.some(docLineFilled),
+      apply: (d) => {
+        setCustomerId(d.customerId ?? "");
+        setDate(d.date || toISODate(new Date()));
+        setReason(d.reason || "");
+        setRestock(d.restock ?? true);
+        setLines(d.lines?.length ? d.lines : docLinesFrom(null));
+      },
+    });
   const cls =
     "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
   const invoiceNumber = editNote?.invoice_number || fromInvoice?.invoice_number;
@@ -18706,6 +18956,7 @@ function CreditNoteForm({ fromInvoice = null, editNote = null, onClose, onSaved 
       };
       if (editNote) await updateCreditNote(editNote.id, body);
       else await createCreditNote(body);
+      draft.clear();
       await onSaved();
       if (andNew && !editNote && !fromInvoice) resetForm();
       else onClose();
@@ -18725,6 +18976,7 @@ function CreditNoteForm({ fromInvoice = null, editNote = null, onClose, onSaved 
       }
       onClose={onClose}
     >
+      <DraftBanner draft={draft} />
       {error && (
         <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-3">
           {error}
@@ -19258,6 +19510,33 @@ function PaymentForm({
   const [reference, setReference] = useState(editPayment?.reference || "");
   const [notes, setNotes] = useState(editPayment?.notes || "");
   const [applied, setApplied] = useState({}); // invoice id -> amount typed
+    const draft = useFormDraft({
+      name: "payment-received",
+      enabled: !editPayment && !initialInvoiceId && !initialCustomerId,
+      snapshot: {
+        customerId,
+        date,
+        mode,
+        depositId,
+        reference,
+        notes,
+        applied,
+      },
+      hasContent:
+        Boolean(customerId) ||
+        Boolean(reference.trim()) ||
+        Boolean(notes.trim()) ||
+        Object.values(applied).some((v) => toCents(v) > 0),
+      apply: (d) => {
+        setCustomerId(d.customerId ?? "");
+        setDate(d.date || toISODate(new Date()));
+        setMode(d.mode || "Cash");
+        if (d.depositId) setDepositId(d.depositId);
+        setReference(d.reference || "");
+        setNotes(d.notes || "");
+        setApplied(d.applied || {});
+      },
+    });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const cls =
@@ -19348,6 +19627,7 @@ function PaymentForm({
       };
       if (editPayment) await updatePayment(editPayment.id, body);
       else await createPayment(body);
+      draft.clear();
       await onSaved();
       onClose();
     } catch (err) {
@@ -19371,6 +19651,7 @@ function PaymentForm({
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
+          <DraftBanner draft={draft} />
           <div>
             <FieldLabel>Customer</FieldLabel>
             <SearchSelect
@@ -20424,6 +20705,38 @@ function PurchaseBillForm({ onClose, onSaved, editBill = null }) {
   const [confirmItem, setConfirmItem] = useState(null); // { name, lineIndex } or null = question closed
   const [quickItem, setQuickItem] = useState(null); // { name, lineIndex } or null = item form closed
   const [colsOpen, setColsOpen] = useState(null); // null | "items" | "expenses" (Customize Columns)
+    const draft = useFormDraft({
+      name: "bill",
+      enabled: !editBill,
+      snapshot: {
+        vendorId,
+        date,
+        terms,
+        dueDate,
+        vendorRef,
+        notes,
+        tab,
+        itemRows,
+        expRows,
+      },
+      hasContent:
+        Boolean(vendorId) ||
+        Boolean(vendorRef.trim()) ||
+        Boolean(notes.trim()) ||
+        itemRows.some((r) => r.product_id) ||
+        expRows.some((r) => r.account_id || r.amount),
+      apply: (d) => {
+        setVendorId(d.vendorId ?? "");
+        setDate(d.date || toISODate(new Date()));
+        setTerms(d.terms || "Due on Receipt");
+        setDueDate(d.dueDate || "");
+        setVendorRef(d.vendorRef || "");
+        setNotes(d.notes || "");
+        if (d.tab) setTab(d.tab);
+        if (d.itemRows?.length) setItemRows(d.itemRows);
+        if (d.expRows?.length) setExpRows(d.expRows);
+      },
+    });
   const [itemCols, saveItemCols, itemColsDefault] = useBillColumns("items");
   const [expCols, saveExpCols, expColsDefault] = useBillColumns("expenses");
   const wide = useIsWide();
@@ -20611,6 +20924,7 @@ function PurchaseBillForm({ onClose, onSaved, editBill = null }) {
         };
         if (editBill) await updatePurchaseBill(editBill.id, body);
         else await createPurchaseBill(body);
+        draft.clear();
         await onSaved();
         if (andNew && !editBill) {
           resetForm();
@@ -20844,6 +21158,7 @@ function PurchaseBillForm({ onClose, onSaved, editBill = null }) {
         )}
 
         {/* ---------- bill header: vendor / address / terms / memo | date / ref no / amount due / bill due ---------- */}
+        <DraftBanner draft={draft} />
         <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] gap-4 bg-blue-50/60 border border-blue-200 rounded-lg p-3 sm:p-4">
           <div className="space-y-3 min-w-0">
             <div>
@@ -21318,6 +21633,27 @@ function VendorPaymentForm({
   const [reference, setReference] = useState(editPayment?.reference || "");
   const [notes, setNotes] = useState(editPayment?.notes || "");
   const [applied, setApplied] = useState({}); // bill id -> amount typed
+
+    const draft = useFormDraft({
+    name: "payment-made",
+    enabled: !editPayment && !initialBillId && !initialVendorId,
+    snapshot: { vendorId, date, mode, paidFromId, reference, notes, applied },
+    hasContent:
+      Boolean(vendorId) ||
+      Boolean(reference.trim()) ||
+      Boolean(notes.trim()) ||
+      Object.values(applied).some((v) => toCents(v) > 0),
+    apply: (d) => {
+      setVendorId(d.vendorId ?? "");
+      setDate(d.date || toISODate(new Date()));
+      setMode(d.mode || "Cash");
+      if (d.paidFromId) setPaidFromId(d.paidFromId);
+      setReference(d.reference || "");
+      setNotes(d.notes || "");
+      setApplied(d.applied || {});
+    },
+  });
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const cls =
@@ -21404,6 +21740,7 @@ function VendorPaymentForm({
       };
       if (editPayment) await updateVendorPayment(editPayment.id, body);
       else await createVendorPayment(body);
+      draft.clear();
       await onSaved();
       onClose();
     } catch (err) {
@@ -21427,6 +21764,7 @@ function VendorPaymentForm({
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
+          <DraftBanner draft={draft} />
           <div>
             <FieldLabel>Vendor</FieldLabel>
             <SearchSelect
