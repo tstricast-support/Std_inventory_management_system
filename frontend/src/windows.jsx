@@ -9,6 +9,8 @@ import {
   useCallback,
 } from "react";
 import { useSearchParams as useRouterSearchParams } from "react-router-dom";
+import { useCompany } from "./company.jsx";
+import { useAuth } from "./auth.jsx";
 import { Minus, Maximize2, Minimize2, X } from "lucide-react";
 
 export const MAX_WINDOWS = 8;
@@ -223,6 +225,87 @@ export function MultiWindow({ children, labelFor, toolbar }) {
   mainSearchRef.current = mainParams.toString();
   const nextId = useRef(1);
   const zTop = useRef(1);
+
+  // ---- remember the open windows, so they come back after the app is closed and reopened ----
+  const { company } = useCompany();
+  const { user } = useAuth();
+  const storeKey = company?.id
+    ? `windows:${user?.id ?? "u"}:${company.id}`
+    : null;
+  const [readyKey, setReadyKey] = useState(null);
+  const saveReady = storeKey !== null && readyKey === storeKey;
+
+  // 1) when the company is known: load what was open last time
+  useEffect(() => {
+    if (!storeKey) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(storeKey) || "null");
+      if (saved && Array.isArray(saved.wins)) {
+        const left = leftW();
+        const top = topH();
+        const list = saved.wins.slice(0, MAX_WINDOWS - 1).map((w) => ({
+          id: Number(w.id),
+          search: String(w.search || ""),
+          x: Math.max(left, Math.min(Number(w.x) || 0, vw() - 120)),
+          y: Math.max(top, Math.min(Number(w.y) || 0, vh() - TITLE_H)),
+          w: Math.min(Number(w.w) || 920, vw() - 16),
+          h: Math.min(Number(w.h) || 620, vh() - 16),
+          z: Number(w.z) || 1,
+          min: Boolean(w.min),
+          max: Boolean(w.max),
+        }));
+        if (list.length) {
+          nextId.current = Math.max(...list.map((w) => w.id)) + 1;
+          zTop.current = Math.max(...list.map((w) => w.z));
+          setWins(list);
+        }
+        setActiveId(
+          list.some((w) => w.id === saved.activeId) ? saved.activeId : 0,
+        );
+        // window 1 (the real browser page): only when the app was opened without a ?view=
+        if (
+          saved.main &&
+          !new URLSearchParams(window.location.search).get("view")
+        ) {
+          mainSetRef.current(new URLSearchParams(saved.main), {
+            replace: true,
+          });
+        }
+      }
+    } catch (e) {
+      /* broken saved data: start with no extra windows */
+    }
+    setReadyKey(storeKey);
+  }, [storeKey]);
+
+  // 2) save whenever the windows change (and right when the app is closing)
+  const mainSearch = mainParams.toString();
+  const persist = useRef(() => {});
+  persist.current = () => {
+    if (!saveReady) return;
+    try {
+      localStorage.setItem(
+        storeKey,
+        JSON.stringify({ wins, activeId, main: mainSearch, at: Date.now() }),
+      );
+    } catch (e) {
+      /* storage full or blocked */
+    }
+  };
+  useEffect(() => {
+    if (!saveReady) return;
+    const t = setTimeout(() => persist.current(), 300);
+    return () => clearTimeout(t);
+  }, [wins, activeId, mainSearch, saveReady]);
+  useEffect(() => {
+    const flush = () => persist.current();
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", flush);
+    };
+  }, []);
 
   const patch = useCallback((id, p) => {
     setWins((ws) => ws.map((w) => (w.id === id ? { ...w, ...p } : w)));
