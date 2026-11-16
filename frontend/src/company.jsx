@@ -99,6 +99,25 @@ export function CompanyProvider({ children }) {
     }
   }, [company?.logo_url]);
 
+  // installed-app icon: point the page at this company's manifest (the server puts the logo in it)
+  useEffect(() => {
+    if (!company?.id || !BASE_URL.startsWith("/")) return;
+    const link = document.querySelector('link[rel="manifest"]');
+    if (!link) return;
+    if (!link.dataset.app) {
+      link.dataset.app = (link.getAttribute("href") || "").includes("admin")
+        ? "admin"
+        : "employee";
+    }
+    const logo = company.logo_url || "";
+    let h = 7;
+    for (let i = 0; i < logo.length; i++) h = (h * 31 + logo.charCodeAt(i)) | 0;
+    link.setAttribute(
+      "href",
+      `${BASE_URL}/company/${company.id}/manifest.webmanifest?app=${link.dataset.app}&v=${(h >>> 0).toString(36)}`,
+    );
+  }, [company?.id, company?.logo_url]);
+
   const value = useMemo(
     () => ({ company, companies, reload, error }),
     [company, companies, reload, error],
