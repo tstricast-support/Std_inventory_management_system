@@ -75,6 +75,30 @@ export function CompanyProvider({ children }) {
     document.title = company?.name || baseTitle.current;
   }, [company?.name]);
 
+  // browser tab icon = company logo (goes back to the default icon when there is no logo)
+  useEffect(() => {
+    const setIcon = (rel, href) => {
+      let link = document.querySelector(`link[rel="${rel}"]`);
+      if (!link) {
+        link = document.createElement("link");
+        link.setAttribute("rel", rel);
+        document.head.appendChild(link);
+      }
+      link.removeAttribute("type"); // the logo may be jpg / webp / svg, not only png
+      link.setAttribute("href", href);
+    };
+    const url = company?.logo_url;
+    if (url) {
+      // the extra ?v= makes the browser load the new logo, not the old cached icon
+      const v = `${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`;
+      setIcon("icon", v);
+      setIcon("apple-touch-icon", v);
+    } else {
+      setIcon("icon", "/pwa-192x192.png");
+      setIcon("apple-touch-icon", "/pwa-192x192.png");
+    }
+  }, [company?.logo_url]);
+
   const value = useMemo(
     () => ({ company, companies, reload, error }),
     [company, companies, reload, error],
