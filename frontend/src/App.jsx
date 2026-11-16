@@ -2786,12 +2786,17 @@ function RequestsPanel({ requests, onApprove, onReject }) {
 }
 
 // ---------- ImageManager (edit mode: add / change main / delete images) ----------
-function ImageManager({ productId, images, onChange }) {
+function ImageManager({ productId, images, onChange, onBusyChange }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const sorted = [...images].sort(
     (a, b) => Number(b.is_primary) - Number(a.is_primary),
   );
+
+  // tell the form while an upload / change is running (so it can hide the Save button)
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy]);
 
   const run = async (action) => {
     setBusy(true);
@@ -2877,10 +2882,16 @@ function ImageManager({ productId, images, onChange }) {
       )}
 
       <label
-        className={`inline-flex items-center gap-1 text-xs font-medium text-blue-600 ${busy ? "opacity-50" : "cursor-pointer hover:underline"}`}
+        className={`inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 ${busy ? "opacity-70" : "cursor-pointer hover:underline"}`}
       >
-        <Plus size={13} />
-        {busy ? "Working..." : "Add images"}
+        {busy ? (
+          <span className="inline-block h-3.5 w-3.5 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin" />
+        ) : (
+          <Plus size={13} />
+        )}
+        <span className={busy ? "animate-pulse" : ""}>
+          {busy ? "Uploading..." : "Add images"}
+        </span>
         <input
           type="file"
           accept="image/*"
@@ -3611,6 +3622,7 @@ function ProductFormBody({
   const [imageFiles, setImageFiles] = useState([]);
   const [images, setImages] = useState(initialData?.images || []);
   const [submitting, setSubmitting] = useState(false);
+  const [imageBusy, setImageBusy] = useState(false);
   const [error, setError] = useState(null);
 
   // which items can be picked as the parent
@@ -3646,7 +3658,32 @@ function ProductFormBody({
 
   const handleChange = (field, value) =>
     setForm((prev) => ({ ...prev, [field]: value }));
-  const handleFileChange = (e) => setImageFiles(Array.from(e.target.files));
+    const handleFileChange = (e) => {
+      const input = e.target;
+      const files = Array.from(input.files);
+      setImageFiles(files);
+      if (!files.length) {
+        setImageBusy(false);
+        return;
+      }
+      setImageBusy(true); // OK stays hidden until every chosen image is read
+      Promise.all(
+        files.map(
+          (f) =>
+            new Promise((resolve, reject) => {
+              const r = new FileReader();
+              r.onload = () => resolve();
+              r.onerror = () => reject();
+              r.readAsArrayBuffer(f);
+            }),
+        ),
+      )
+        .catch(() => {
+          setImageFiles([]); // unreadable image: clear it so the user can pick again
+          input.value = "";
+        })
+        .finally(() => setImageBusy(false));
+    };
 
   const handleCreateVendor = async (name) => {
     const created = await createVendor({ name });
@@ -4004,6 +4041,7 @@ function ProductFormBody({
                     <ImageManager
                       productId={initialData.id}
                       images={images}
+                      onBusyChange={setImageBusy}
                       onChange={(imgs) => {
                         setImages(imgs);
                         onImagesChanged?.();
@@ -4025,13 +4063,27 @@ function ProductFormBody({
 
             {/* ================= RIGHT: OK / Cancel column (like QuickBooks) ================= */}
             <div className="md:w-32 flex flex-row md:flex-col gap-2 md:self-start">
-              <button
-                type="submit"
-                disabled={submitting}
-                className="flex-1 md:flex-none bg-blue-600 text-white rounded py-1.5 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-              >
-                {submitting ? "Saving..." : isEditMode ? "Save Changes" : "OK"}
-              </button>
+              {imageBusy ? (
+                <div className="flex-1 md:flex-none flex items-center justify-center gap-2 rounded border border-blue-200 bg-blue-50 py-1.5 px-2">
+                  <span className="inline-block h-4 w-4 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin" />
+                  <span className="text-xs font-medium text-blue-700 animate-pulse">
+                    Uploading image...
+                  </span>
+                </div>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="flex-1 md:flex-none bg-blue-600 text-white rounded py-1.5 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {submitting
+                    ? "Saving..."
+                    : isEditMode
+                      ? "Save Changes"
+                      : "OK"}
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={onClose}
