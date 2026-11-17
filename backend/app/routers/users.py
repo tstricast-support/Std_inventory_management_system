@@ -13,7 +13,7 @@ from ..auth import (
 )
 from ..database import get_db
 from ..models import Company, Role, RolePermission, RoleRight, User, UserCompanyAccess
-from ..permissions import AREAS, AREA_KEYS, LEVELS, RIGHTS, RIGHT_KEYS
+from ..permissions import ADMIN_ROLE, AREAS, AREA_KEYS, LEVELS, RIGHTS, RIGHT_KEYS, SUPER_ADMIN_ROLE
 from .auth import _revoke_all
 
 # Both routers are guarded by require_area("users") in main.py (and need the manage_users right).
@@ -35,6 +35,33 @@ def _is_admin_capable(user: User) -> bool:
         return False
     has_full = any(p.area == "users" and p.level == "full" for p in user.role.permissions)
     return has_full and any(r.right_name == "manage_users" for r in user.role.rights)
+
+
+def _is_super(user: User) -> bool:
+    return bool(user and user.role and user.role.name == SUPER_ADMIN_ROLE)
+
+
+def _guard_super_rules(actor: User, target_role: Role | None = None, target_user: User | None = None) -> None:
+    """Only a Super Admin may hand out the Super Admin role, or change a user who already has it."""
+    if _is_super(actor):
+        return
+    if target_role is not None and target_role.name == SUPER_ADMIN_ROLE:
+        raise HTTPException(403, "Only a Super Admin can give the Super Admin role.")
+    if target_user is not None and _is_super(target_user):
+        raise HTTPException(403, "Only a Super Admin can change a Super Admin user.")
+
+
+def _require_super_for_many_companies(db: Session, role: Role, company_ids) -> None:
+    """The rule: a user who can enter 2 or more (active) companies must be a Super Admin."""
+    ids = {int(i) for i in company_ids}
+    if len(ids) < 2 or role.name == SUPER_ADMIN_ROLE:
+        return
+    active = db.query(func.count(Company.id)).filter(Company.id.in_(ids), Company.is_active == True).scalar()  # noqa: E712
+    if active >= 2:
+        db.rollback()
+        raise HTTPException(
+            400, "A user who can enter 2 or more companies must have the Super Admin role. "
+                 "Choose the Super Admin role, or give this user only one company.")
 
 
 def _require_an_admin_left(db: Session, message: str) -> None:
@@ -145,6 +172,10 @@ class UserUpdate(BaseModel):
     company_ids: list[int] | None = None      # None = leave the companies alone
 
 
+class UsernameChange(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+
+
 class PasswordReset(BaseModel):
     temp_password: str | None = Field(default=None, max_length=128)
 
@@ -186,7 +217,9 @@ def create_user(payload: UserCreate, request: Request, db: Session = Depends(get
     if db.query(User).filter(User.username == username).first():
         raise HTTPException(400, "That username is already taken.")
     role = _get_role(db, payload.role_id)
+    _guard_super_rules(actor, target_role=role)
     wanted, scope = _validated_company_ids(db, actor, payload.company_ids)
+    _require_super_for_many_companies(db, role, wanted)
 
     generated = not payload.temp_password
     password = payload.temp_password or _generate_password()
@@ -214,12 +247,14 @@ def create_user(payload: UserCreate, request: Request, db: Session = Depends(get
 def update_user(user_id: int, payload: UserUpdate, request: Request, db: Session = Depends(get_db),
                 actor: User = Depends(get_current_user)):
     user = _get_user(db, user_id)
+    _guard_super_rules(actor, target_user=user)
     changes = []
     if payload.full_name is not None and payload.full_name.strip() != user.full_name:
         changes.append(f"name '{user.full_name}' -> '{payload.full_name.strip()}'")
         user.full_name = payload.full_name.strip()
     if payload.role_id is not None and payload.role_id != user.role_id:
         new_role = _get_role(db, payload.role_id)
+        _guard_super_rules(actor, target_role=new_role)
         changes.append(f"role {user.role.name} -> {new_role.name}")
         user.role_id = new_role.id
         db.flush()
@@ -246,9 +281,34 @@ def update_user(user_id: int, payload: UserUpdate, request: Request, db: Session
             changes.append("companies +" + ", ".join(scope[c] for c in sorted(added)))
         if removed:
             changes.append("companies -" + ", ".join(scope[c] for c in sorted(removed)))
+    # the 2+ companies rule is checked on the FINAL result (role and companies together)
+    final_role = _get_user(db, user_id).role
+    final_companies = [cid for (cid,) in db.query(UserCompanyAccess.company_id).filter(UserCompanyAccess.user_id == user.id)]
+    _require_super_for_many_companies(db, final_role, final_companies)
     if changes:
         log_audit(db, actor, "user_updated", "user", user.id, f"Updated '{user.username}': " + "; ".join(changes), request)
         db.commit()
+    return _row(db, _get_user(db, user_id))
+
+
+@router.put("/{user_id}/username")
+def change_username(user_id: int, payload: UsernameChange, request: Request, db: Session = Depends(get_db),
+                    actor: User = Depends(get_current_user)):
+    """Super Admin only. Sessions keep working: tokens are tied to the user id, not the username."""
+    if not _is_super(actor):
+        raise HTTPException(403, "Only a Super Admin can change a username.")
+    user = _get_user(db, user_id)
+    new_name = normalize_username(payload.username)
+    if not USERNAME_RE.match(new_name):
+        raise HTTPException(400, "Username must be 3-50 characters: letters, numbers, dot, dash or underscore.")
+    if new_name == user.username:
+        return _row(db, user)
+    if db.query(User).filter(User.username == new_name, User.id != user.id).first():
+        raise HTTPException(400, "That username is already taken.")
+    old_name = user.username
+    user.username = new_name
+    log_audit(db, actor, "username_changed", "user", user.id, f"Username '{old_name}' -> '{new_name}'", request)
+    db.commit()
     return _row(db, _get_user(db, user_id))
 
 
@@ -256,6 +316,7 @@ def update_user(user_id: int, payload: UserUpdate, request: Request, db: Session
 def reset_password(user_id: int, payload: PasswordReset, request: Request, db: Session = Depends(get_db),
                    actor: User = Depends(get_current_user)):
     user = _get_user(db, user_id)
+    _guard_super_rules(actor, target_user=user)
     generated = not payload.temp_password
     password = payload.temp_password or _generate_password()
     problem = validate_new_password(password, user.username)
@@ -277,6 +338,7 @@ def reset_password(user_id: int, payload: PasswordReset, request: Request, db: S
 def deactivate_user(user_id: int, request: Request, db: Session = Depends(get_db),
                     actor: User = Depends(get_current_user)):
     user = _get_user(db, user_id)
+    _guard_super_rules(actor, target_user=user)
     if user.id == actor.id:
         raise HTTPException(400, "You cannot deactivate your own account.")
     user.is_active = False
@@ -292,6 +354,7 @@ def deactivate_user(user_id: int, request: Request, db: Session = Depends(get_db
 def activate_user(user_id: int, request: Request, db: Session = Depends(get_db),
                   actor: User = Depends(get_current_user)):
     user = _get_user(db, user_id)
+    _guard_super_rules(actor, target_user=user)
     user.is_active = True
     log_audit(db, actor, "user_activated", "user", user.id, f"Activated '{user.username}'", request)
     db.commit()
@@ -302,6 +365,7 @@ def activate_user(user_id: int, request: Request, db: Session = Depends(get_db),
 def unlock_user(user_id: int, request: Request, db: Session = Depends(get_db),
                 actor: User = Depends(get_current_user)):
     user = _get_user(db, user_id)
+    _guard_super_rules(actor, target_user=user)
     user.locked_until = None
     user.failed_attempts = 0
     log_audit(db, actor, "user_unlocked", "user", user.id, f"Unlocked '{user.username}'", request)
@@ -315,6 +379,7 @@ def sign_out_all_devices(user_id: int, request: Request, db: Session = Depends(g
     """Revokes every refresh token. The person's current access token still works until it expires
     (max 30 minutes); to cut them off immediately, deactivate the user instead."""
     user = _get_user(db, user_id)
+    _guard_super_rules(actor, target_user=user)
     _revoke_all(db, user.id)
     log_audit(db, actor, "user_signed_out", "user", user.id, f"Signed '{user.username}' out of all devices", request)
     db.commit()
@@ -371,8 +436,8 @@ def create_role(payload: RoleIn, request: Request, db: Session = Depends(get_db)
 def update_role(role_id: int, payload: RoleIn, request: Request, db: Session = Depends(get_db),
                 actor: User = Depends(get_current_user)):
     role = _get_role(db, role_id)
-    if role.is_system and role.name == "Admin":
-        raise HTTPException(400, "The Admin role always has full access and cannot be changed.")
+    if role.is_system and role.name in (ADMIN_ROLE, SUPER_ADMIN_ROLE):
+        raise HTTPException(400, f"The {role.name} role always has full access and cannot be changed.")
     _validate_grid(payload.permissions, payload.rights)
 
     name = payload.name.strip()

@@ -10,7 +10,7 @@ from app.auth import (
 from app.audit import log_audit_company
 from app.database import public_session
 from app.models import Company, Role, RolePermission, RoleRight, User, UserCompanyAccess
-from app.permissions import AREA_KEYS, RIGHT_KEYS, SYSTEM_ROLES
+from app.permissions import ADMIN_ROLE, AREA_KEYS, RIGHT_KEYS, SUPER_ADMIN_ROLE, SYSTEM_ROLES
 
 
 def seed_system_roles():
@@ -30,7 +30,7 @@ def seed_system_roles():
                     db.add(RolePermission(role_id=role.id, area=area, level=preset["areas"].get(area, "none")))
                 for right in preset["rights"]:
                     db.add(RoleRight(role_id=role.id, right_name=right))
-            elif preset["name"] == "Admin":
+            elif preset["name"] in (ADMIN_ROLE, SUPER_ADMIN_ROLE):
                 have_areas = {p.area: p for p in role.permissions}
                 for area in AREA_KEYS:
                     if area not in have_areas:
@@ -81,9 +81,10 @@ def bootstrap_owner():
             print(banner)
             return
 
-        admin_role = db.query(Role).filter(Role.name == "Admin").first()
+        admin_role = (db.query(Role).filter(Role.name == SUPER_ADMIN_ROLE).first()
+                      or db.query(Role).filter(Role.name == ADMIN_ROLE).first())
         if admin_role is None:
-            raise RuntimeError("Admin role missing - seed_system_roles() must run before bootstrap_owner().")
+            raise RuntimeError("Super Admin role missing - seed_system_roles() must run before bootstrap_owner().")
 
         owner = User(
             username=username,
@@ -109,5 +110,36 @@ def bootstrap_owner():
                               "First Owner account created from environment variables")
         print(f"AUTH: first Owner '{username}' created (must change password at first login). "
               "You can now remove OWNER_PASSWORD from your environment.")
+    finally:
+        db.close()
+
+
+def promote_multi_company_admins():
+    """Runs on every start. Rule: a user who can enter 2 or more companies must be a Super Admin.
+    Existing users with the Admin role (the owners) are moved up to Super Admin automatically.
+    Users with any OTHER role are NOT promoted (that would silently hand out full access);
+    they are only reported in the log so the owner can decide."""
+    from sqlalchemy import func
+    db = public_session()
+    try:
+        sa = db.query(Role).filter(Role.name == SUPER_ADMIN_ROLE).first()
+        if sa is None:
+            return
+        rows = (db.query(UserCompanyAccess.user_id)
+                .join(Company, Company.id == UserCompanyAccess.company_id)
+                .filter(Company.is_active == True)  # noqa: E712
+                .group_by(UserCompanyAccess.user_id)
+                .having(func.count(UserCompanyAccess.company_id) >= 2).all())
+        for (uid,) in rows:
+            u = db.query(User).filter(User.id == uid).first()
+            if u is None or u.role_id == sa.id:
+                continue
+            if u.role and u.role.name == ADMIN_ROLE:
+                u.role_id = sa.id
+                print(f"AUTH: '{u.username}' has 2+ companies -> role changed from Admin to Super Admin.")
+            else:
+                print(f"AUTH WARNING: '{u.username}' can enter 2+ companies but is not a Super Admin "
+                      f"(role: {u.role.name if u.role else '?'}). Change the role or remove a company.")
+        db.commit()
     finally:
         db.close()

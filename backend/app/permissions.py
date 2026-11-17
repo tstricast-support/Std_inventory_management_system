@@ -60,6 +60,10 @@ def _grid(**kw) -> dict:
     return kw
 
 
+SUPER_ADMIN_ROLE = "Super Admin"   # owner of several companies; the only role that may rename users
+ADMIN_ROLE = "Admin"
+
+
 def _build_presets() -> list:
     # Admin / Owner: full on everything, every right
     admin = {k: "full" for k in AREA_KEYS}
@@ -93,6 +97,13 @@ def _build_presets() -> list:
     view_only = {k: "view" for k in AREA_KEYS if k != "users"}
 
     return [
+        {
+            "name": SUPER_ADMIN_ROLE,
+            "description": "Owner of several companies. Everything an Admin can do, plus changing usernames. "
+                           "Required for any user who can enter 2 or more companies.",
+            "areas": dict(admin),
+            "rights": list(RIGHT_KEYS),
+        },
         {
             "name": "Admin",
             "description": "Owner / administrator. Full access to everything, including users and the audit log.",

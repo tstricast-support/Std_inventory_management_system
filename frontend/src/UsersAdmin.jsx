@@ -13,6 +13,8 @@ const btnGhost =
 const linkBtn = "text-xs text-blue-600 hover:underline disabled:opacity-50";
 const dangerLink = "text-xs text-red-600 hover:underline disabled:opacity-50";
 
+const SUPER_ADMIN_ROLE = "Super Admin";
+
 const LEVEL_TEXT = {
   none: "None",
   view: "View",
@@ -396,9 +398,21 @@ function UsersTab() {
 function UserFormModal({ user, roles, companies, onClose, onSaved }) {
   const isNew = !user;
   const { user: me } = useAuth();
-  const [username, setUsername] = useState("");
+  const isSuper = me?.role?.name === SUPER_ADMIN_ROLE;
+  const superRole = roles.find((r) => r.name === SUPER_ADMIN_ROLE);
+  // only a Super Admin may see / give the Super Admin role
+  const roleChoices = roles.filter(
+    (r) => isSuper || r.name !== SUPER_ADMIN_ROLE || r.id === user?.role?.id,
+  );
+  // new user: type the username; edit: only a Super Admin may change it
+  const [username, setUsername] = useState(user?.username || "");
   const [fullName, setFullName] = useState(user?.full_name || "");
-  const [roleId, setRoleId] = useState(user?.role?.id || roles[0]?.id || "");
+  const [roleId, setRoleId] = useState(
+    user?.role?.id ||
+      roleChoices.find((r) => r.name !== SUPER_ADMIN_ROLE)?.id ||
+      roleChoices[0]?.id ||
+      "",
+  );
   const [tempPassword, setTempPassword] = useState("");
   // new user: start with the company I am working in; edit: the companies the user has now
   const [companyIds, setCompanyIds] = useState(() =>
@@ -411,6 +425,12 @@ function UserFormModal({ user, roles, companies, onClose, onSaved }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // rule: 2 or more companies => the role must be Super Admin
+  const manyCompanies = companyIds.length >= 2;
+  useEffect(() => {
+    if (manyCompanies && superRole && isSuper) setRoleId(superRole.id);
+  }, [manyCompanies, superRole, isSuper]);
+
   const toggleCompany = (id) =>
     setCompanyIds((ids) =>
       ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id],
@@ -421,6 +441,10 @@ function UserFormModal({ user, roles, companies, onClose, onSaved }) {
     setError("");
     if (companyIds.length === 0)
       return setError("Choose at least one company for this user.");
+    if (manyCompanies && !isSuper)
+      return setError(
+        "Only a Super Admin can give a user access to 2 or more companies.",
+      );
     setBusy(true);
     try {
       if (isNew) {
@@ -436,7 +460,7 @@ function UserFormModal({ user, roles, companies, onClose, onSaved }) {
         });
         await onSaved(created, true);
       } else {
-        const updated = await call(`/users/${user.id}`, {
+        let updated = await call(`/users/${user.id}`, {
           method: "PUT",
           body: {
             full_name: fullName,
@@ -444,6 +468,13 @@ function UserFormModal({ user, roles, companies, onClose, onSaved }) {
             company_ids: companyIds,
           },
         });
+        // Super Admin only: change the username
+        if (isSuper && username.trim().toLowerCase() !== user.username) {
+          updated = await call(`/users/${user.id}/username`, {
+            method: "PUT",
+            body: { username },
+          });
+        }
         await onSaved(updated, false);
       }
     } catch (err) {
@@ -458,7 +489,7 @@ function UserFormModal({ user, roles, companies, onClose, onSaved }) {
       onClose={onClose}
     >
       <form onSubmit={submit} className="space-y-3">
-        {isNew && (
+        {(isNew || isSuper) && (
           <div>
             <label className={labelCls}>Username</label>
             <input
@@ -482,7 +513,7 @@ function UserFormModal({ user, roles, companies, onClose, onSaved }) {
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
             required
-            autoFocus={!isNew}
+            autoFocus={!isNew && !isSuper}
           />
         </div>
         <div>
@@ -492,15 +523,17 @@ function UserFormModal({ user, roles, companies, onClose, onSaved }) {
             value={roleId}
             onChange={(e) => setRoleId(e.target.value)}
             required
+            disabled={manyCompanies && isSuper}
           >
-            {roles.map((r) => (
+            {roleChoices.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.name}
               </option>
             ))}
           </select>
           <p className="text-xs text-gray-400 mt-1">
-            One role applies in every company this user can enter.
+            One role applies in every company this user can enter. A user with 2
+            or more companies must be a Super Admin.
           </p>
         </div>
         <div>

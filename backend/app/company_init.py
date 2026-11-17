@@ -148,7 +148,7 @@ def _ensure_default_company(conn) -> None:
 
 def run_startup() -> None:
     """Everything main.py used to do at import time, now per company."""
-    from app.auth_setup import bootstrap_owner, seed_system_roles
+    from app.auth_setup import bootstrap_owner, promote_multi_company_admins, seed_system_roles
     from app.database import public_session
     from app.models import Company
 
@@ -165,6 +165,7 @@ def run_startup() -> None:
                 init_company_schema(schema_for(cid))
             seed_system_roles()
             bootstrap_owner()
+            promote_multi_company_admins()   # 2+ companies => Super Admin
         finally:
             lock_conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _STARTUP_LOCK_ID})
             lock_conn.commit()
