@@ -1631,6 +1631,7 @@ const createPayment = (payload) =>
   paymentRequest("", "POST", payload, "Failed to save payment");
 const deletePayment = (id) =>
   paymentRequest(String(id), "DELETE", null, "Failed to delete payment");
+
 // ---------- Purchase bills (what you owe vendors) ----------
 async function purchaseBillRequest(path, method, payload, failMsg) {
   const res = await apiFetch(`${BASE_URL}/purchase-bills/${path}`, {
@@ -1644,8 +1645,18 @@ async function purchaseBillRequest(path, method, payload, failMsg) {
   }
   return res.json();
 }
+
 const getPurchaseBills = () =>
   purchaseBillRequest("", "GET", null, "Failed to fetch bills");
+
+const getNextBillNumber = () =>
+  purchaseBillRequest(
+    "next-number",
+    "GET",
+    null,
+    "Failed to get the next bill number",
+  );
+
 const createPurchaseBill = (payload) =>
   purchaseBillRequest("", "POST", payload, "Failed to save bill");
 
@@ -1654,6 +1665,7 @@ const updatePurchaseBill = (id, payload) =>
 
 const voidPurchaseBill = (id) =>
   purchaseBillRequest(`${id}/void`, "PUT", null, "Failed to void bill");
+
 const deletePurchaseBill = (id) =>
   purchaseBillRequest(String(id), "DELETE", null, "Failed to delete bill");
 
@@ -18462,6 +18474,7 @@ function InvoiceForm({
   const [quickItem, setQuickItem] = useState(null); // { name, lineIndex } or null = popup closed
   const [confirmItem, setConfirmItem] = useState(null); // { name, lineIndex } or null = question closed
   const [invoiceNo, setInvoiceNo] = useState(editInvoice?.invoice_number || "");
+  const [suggestedNo, setSuggestedNo] = useState(""); // the auto number shown when the form opened
   const [pos, setPos] = useState({ x: 0, y: 0 }); // how far the window has been dragged
   const [size, setSize] = useState({ w: null, h: null }); // null = default size until the user resizes
   const [preview, setPreview] = useState(null); // { url } while the preview window is open
@@ -18546,7 +18559,10 @@ function InvoiceForm({
   useEffect(() => {
     if (editInvoice) return;
     getNextInvoiceNumber()
-      .then((r) => setInvoiceNo(r.invoice_number))
+      .then((r) => {
+        setInvoiceNo(r.invoice_number);
+        setSuggestedNo(r.invoice_number);
+      })
       .catch(() => {});
   }, []);
 
@@ -18884,6 +18900,11 @@ function InvoiceForm({
       const invoicePayload = {
         customer_id: customerId,
         sales_document_id: fromDoc ? fromDoc.id : null,
+        // a typed number wins; the untouched suggestion means "give me the next free one at save time"
+        invoice_number:
+          invoiceNo.trim() && invoiceNo.trim() !== suggestedNo
+            ? invoiceNo.trim()
+            : null,
         invoice_date: date,
         due_date: effectiveDue,
         order_number: orderNumber.trim() || null,
@@ -19042,10 +19063,12 @@ function InvoiceForm({
               <label className="text-xs text-gray-500">
                 Invoice no.
                 <input
-                  readOnly
-                  value={invoiceNo || "Auto"}
-                  title="Assigned automatically when you save"
-                  className={cls + " mt-1 bg-gray-50 text-gray-700 font-medium"}
+                  value={invoiceNo}
+                  onChange={(e) => setInvoiceNo(e.target.value)}
+                  maxLength={30}
+                  placeholder="Auto"
+                  title="Type your own number, or keep the suggested one"
+                  className={cls + " mt-1 text-gray-900 font-medium"}
                 />
               </label>
               <label className="text-xs text-gray-500">
@@ -21643,6 +21666,19 @@ function PurchaseBillForm({ onClose, onSaved, editBill = null }) {
   const [terms, setTerms] = useState("Due on Receipt");
   const [dueDate, setDueDate] = useState(editBill ? editBill.due_date : ""); // empty = follow the payment terms
   const [vendorRef, setVendorRef] = useState(editBill?.vendor_ref || "");
+  // our own bill number: new bill = the suggested next number (editable), edit = the saved number (editable)
+  const [billNo, setBillNo] = useState(editBill?.bill_number || "");
+  const [suggestedBillNo, setSuggestedBillNo] = useState("");
+  const loadNextBillNo = () =>
+    getNextBillNumber()
+      .then((r) => {
+        setBillNo(r.bill_number);
+        setSuggestedBillNo(r.bill_number);
+      })
+      .catch(() => {});
+  useEffect(() => {
+    if (!editBill) loadNextBillNo();
+  }, []);
   const [notes, setNotes] = useState(editBill?.notes || ""); // shown as "Memo"
   const [tab, setTab] = useState(
     editBill && !editBill.items.some((l) => l.product_id)
@@ -21665,38 +21701,38 @@ function PurchaseBillForm({ onClose, onSaved, editBill = null }) {
   const [confirmItem, setConfirmItem] = useState(null); // { name, lineIndex } or null = question closed
   const [quickItem, setQuickItem] = useState(null); // { name, lineIndex } or null = item form closed
   const [colsOpen, setColsOpen] = useState(null); // null | "items" | "expenses" (Customize Columns)
-    const draft = useFormDraft({
-      name: "bill",
-      enabled: !editBill,
-      snapshot: {
-        vendorId,
-        date,
-        terms,
-        dueDate,
-        vendorRef,
-        notes,
-        tab,
-        itemRows,
-        expRows,
-      },
-      hasContent:
-        Boolean(vendorId) ||
-        Boolean(vendorRef.trim()) ||
-        Boolean(notes.trim()) ||
-        itemRows.some((r) => r.product_id) ||
-        expRows.some((r) => r.account_id || r.amount),
-      apply: (d) => {
-        setVendorId(d.vendorId ?? "");
-        setDate(d.date || toISODate(new Date()));
-        setTerms(d.terms || "Due on Receipt");
-        setDueDate(d.dueDate || "");
-        setVendorRef(d.vendorRef || "");
-        setNotes(d.notes || "");
-        if (d.tab) setTab(d.tab);
-        if (d.itemRows?.length) setItemRows(d.itemRows);
-        if (d.expRows?.length) setExpRows(d.expRows);
-      },
-    });
+  const draft = useFormDraft({
+    name: "bill",
+    enabled: !editBill,
+    snapshot: {
+      vendorId,
+      date,
+      terms,
+      dueDate,
+      vendorRef,
+      notes,
+      tab,
+      itemRows,
+      expRows,
+    },
+    hasContent:
+      Boolean(vendorId) ||
+      Boolean(vendorRef.trim()) ||
+      Boolean(notes.trim()) ||
+      itemRows.some((r) => r.product_id) ||
+      expRows.some((r) => r.account_id || r.amount),
+    apply: (d) => {
+      setVendorId(d.vendorId ?? "");
+      setDate(d.date || toISODate(new Date()));
+      setTerms(d.terms || "Due on Receipt");
+      setDueDate(d.dueDate || "");
+      setVendorRef(d.vendorRef || "");
+      setNotes(d.notes || "");
+      if (d.tab) setTab(d.tab);
+      if (d.itemRows?.length) setItemRows(d.itemRows);
+      if (d.expRows?.length) setExpRows(d.expRows);
+    },
+  });
   const [itemCols, saveItemCols, itemColsDefault] = useBillColumns("items");
   const [expCols, saveExpCols, expColsDefault] = useBillColumns("expenses");
   const wide = useIsWide();
@@ -21794,7 +21830,7 @@ function PurchaseBillForm({ onClose, onSaved, editBill = null }) {
     });
   };
 
-  // \"+ New vendor\": save from the popup, add it to the dropdown and select it
+  // "+ New vendor": save from the popup, add it to the dropdown and select it
   const handleQuickVendor = async (payload) => {
     const created = await createVendor(payload);
     setVendors((prev) => [...prev, created]);
@@ -21854,50 +21890,54 @@ function PurchaseBillForm({ onClose, onSaved, editBill = null }) {
     setItemRows(blankBillRows(blankBillItemRow));
     setExpRows(blankBillRows(blankBillExpenseRow));
     setError(null);
+    if (!editBill) loadNextBillNo(); // a fresh suggested bill number for the next bill
   };
 
-    const save = async (andNew) => {
-      if (!canSave || submitting) return;
-      setSubmitting(true);
-      setError(null);
-      try {
-        const body = {
-          vendor_id: vendorId,
-          bill_date: date,
-          due_date: effectiveDue,
-          vendor_ref: vendorRef.trim() || null,
-          notes: notes.trim() || null,
-          items: [
-            ...filledItems.map((r) => ({
-              product_id: r.product_id,
-              description: r.description.trim() || null,
-              quantity: Number(r.quantity),
-              rate: Number(r.rate) || 0,
-            })),
-            ...filledExp.map((r) => ({
-              account_id: r.account_id,
-              description: r.description.trim() || null,
-              quantity: 1,
-              rate: Number(r.amount) || 0,
-            })),
-          ],
-        };
-        if (editBill) await updatePurchaseBill(editBill.id, body);
-        else await createPurchaseBill(body);
-        draft.clear();
-        await onSaved();
-        if (andNew && !editBill) {
-          resetForm();
-          await loadLists().catch(() => {}); // stock counts changed
-        } else {
-          onClose();
-        }
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setSubmitting(false);
+  const save = async (andNew) => {
+    if (!canSave || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const typedNo = billNo.trim();
+      const body = {
+        vendor_id: vendorId,
+        // a typed number wins; the untouched suggestion means "give me the next free one at save time"
+        bill_number: typedNo && typedNo !== suggestedBillNo ? typedNo : null,
+        bill_date: date,
+        due_date: effectiveDue,
+        vendor_ref: vendorRef.trim() || null,
+        notes: notes.trim() || null,
+        items: [
+          ...filledItems.map((r) => ({
+            product_id: r.product_id,
+            description: r.description.trim() || null,
+            quantity: Number(r.quantity),
+            rate: Number(r.rate) || 0,
+          })),
+          ...filledExp.map((r) => ({
+            account_id: r.account_id,
+            description: r.description.trim() || null,
+            quantity: 1,
+            rate: Number(r.amount) || 0,
+          })),
+        ],
+      };
+      if (editBill) await updatePurchaseBill(editBill.id, body);
+      else await createPurchaseBill(body);
+      draft.clear();
+      await onSaved();
+      if (andNew && !editBill) {
+        resetForm();
+        await loadLists().catch(() => {}); // stock counts changed
+      } else {
+        onClose();
       }
-    };
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   // ---- grid drawing ----
   const colDefs = (kind, cols) =>
@@ -22117,7 +22157,7 @@ function PurchaseBillForm({ onClose, onSaved, editBill = null }) {
           </div>
         )}
 
-        {/* ---------- bill header: vendor / address / terms / memo | date / ref no / amount due / bill due ---------- */}
+        {/* ---------- bill header: vendor / address / terms / memo | bill no / date / ref no / amount due / bill due ---------- */}
         <DraftBanner draft={draft} />
         <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] gap-4 bg-blue-50/60 border border-blue-200 rounded-lg p-3 sm:p-4">
           <div className="space-y-3 min-w-0">
@@ -22186,6 +22226,17 @@ function PurchaseBillForm({ onClose, onSaved, editBill = null }) {
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-1 gap-3 content-start">
+            <label className="text-xs text-gray-500">
+              Bill no.
+              <input
+                value={billNo}
+                onChange={(e) => setBillNo(e.target.value)}
+                maxLength={30}
+                placeholder="Auto"
+                title="Type your own number, or keep the suggested one"
+                className={cls + " mt-1 font-medium"}
+              />
+            </label>
             <label className="text-xs text-gray-500">
               Date
               <input

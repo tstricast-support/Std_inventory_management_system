@@ -338,6 +338,7 @@ class InvoiceCreate(BaseModel):
     discount_type: str = "amount"        # "amount" (Rs) or "percent"
     discount_value: float = 0
     sales_document_id: Optional[int] = None   # set when this invoice is made from a quote / sales order
+    invoice_number: Optional[str] = None      # typed by the user; empty -> next free number
 
 class InvoiceProductOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -474,6 +475,7 @@ class PurchaseBillItemCreate(BaseModel):
 
 class PurchaseBillCreate(BaseModel):
     vendor_id: int
+    bill_number: Optional[str] = None         # typed by the user; empty -> next free number
     bill_date: date
     due_date: Optional[date] = None      # left empty -> due on the bill date
     vendor_ref: Optional[str] = None

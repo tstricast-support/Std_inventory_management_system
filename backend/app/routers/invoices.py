@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from .. import models, schemas
 from ..database import get_db
+from ..numbering import next_number, resolve_number
 
 router = APIRouter(prefix="/api/invoices", tags=["invoices"])
 
@@ -60,8 +61,7 @@ def _options():
 
 
 def _next_number(db: Session) -> str:
-    last = db.query(models.Invoice).order_by(models.Invoice.id.desc()).first()
-    return f"INV-{(last.id if last else 0) + 1:04d}"
+    return next_number(db, models.Invoice.invoice_number, "INV")
 
 
 def _get_or_create_account(db: Session, name: str, account_type: str) -> models.Account:
@@ -153,7 +153,10 @@ def create_invoice(payload: schemas.InvoiceCreate, db: Session = Depends(get_db)
 
     
     # ---- build the invoice lines and work out what to post to the ledger ----
-    number = _next_number(db)
+    number = resolve_number(
+        db, payload.invoice_number, model=models.Invoice,
+        column=models.Invoice.invoice_number, prefix="INV", journal_source="invoice",
+    )
     invoice_lines = []
     total = Decimal("0")
     income: dict[int, Decimal] = {}      # income account -> sales amount
@@ -300,6 +303,12 @@ def update_invoice(invoice_id: int, payload: schemas.InvoiceCreate, db: Session 
     
     # ---- build the new lines and the new ledger entry ----
     number = invoice.invoice_number
+    requested = (payload.invoice_number or "").strip()
+    if requested and requested != number:   # the user changed the number
+        number = resolve_number(
+            db, requested, model=models.Invoice, column=models.Invoice.invoice_number,
+            prefix="INV", journal_source="invoice", self_id=invoice.id,
+        )
     invoice_lines = []
     total = Decimal("0")
     income: dict[int, Decimal] = {}
@@ -354,6 +363,7 @@ def update_invoice(invoice_id: int, payload: schemas.InvoiceCreate, db: Session 
         db.delete(journal)
     db.flush()   # the old journal must be gone before the new one reuses its number
 
+    invoice.invoice_number = number
     invoice.items = invoice_lines
     invoice.invoice_date = payload.invoice_date
     invoice.due_date = due_date

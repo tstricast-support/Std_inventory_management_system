@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, joinedload
 from .. import models, schemas
 from ..database import get_db
 from .invoices import _get_or_create_account, STOCK_TRACKED_TYPE
+from ..numbering import next_number, resolve_number
 
 router = APIRouter(prefix="/api/purchase-bills", tags=["purchase-bills"])
 
@@ -26,8 +27,7 @@ def _options():
 
 
 def _next_number(db: Session) -> str:
-    last = db.query(models.PurchaseBill).order_by(models.PurchaseBill.id.desc()).first()
-    return f"PB-{(last.id if last else 0) + 1:04d}"
+    return next_number(db, models.PurchaseBill.bill_number, "PB")
 
 
 def _payable_account(db: Session) -> models.Account:
@@ -47,6 +47,9 @@ def list_purchase_bills(vendor_id: int | None = None, db: Session = Depends(get_
         query = query.filter(models.PurchaseBill.vendor_id == vendor_id)
     return query.order_by(models.PurchaseBill.bill_date.desc(), models.PurchaseBill.id.desc()).all()
 
+@router.get("/next-number")
+def next_bill_number(db: Session = Depends(get_db)):
+    return {"bill_number": _next_number(db)}
 
 @router.get("/{bill_id}", response_model=schemas.PurchaseBillOut)
 def get_purchase_bill(bill_id: int, db: Session = Depends(get_db)):
@@ -106,7 +109,10 @@ def create_purchase_bill(payload: schemas.PurchaseBillCreate, db: Session = Depe
                 raise HTTPException(400, f"{accounts[aid].name} can't be used on a bill line. Pick an expense account.")
 
     # ---- build the bill lines and work out what to post to the ledger ----
-    number = _next_number(db)
+    number = resolve_number(
+        db, payload.bill_number, model=models.PurchaseBill,
+        column=models.PurchaseBill.bill_number, prefix="PB", journal_source="purchase_bill",
+    )
     bill_lines = []
     total = Decimal("0")
     debits: dict[int, Decimal] = {}          # account -> amount to debit (stock asset, COGS or expense)
@@ -215,8 +221,15 @@ def update_purchase_bill(bill_id: int, payload: schemas.PurchaseBillCreate, db: 
         raise HTTPException(400, "Add at least one line")
 
     vendor = bill.vendor
-    number = bill.bill_number
-    due_date = payload.due_date or payload.bill_date
+    old_number = bill.bill_number
+    number = old_number
+    requested = (payload.bill_number or "").strip()
+    if requested and requested != old_number:   # the user changed the number
+        number = resolve_number(
+            db, requested, model=models.PurchaseBill, column=models.PurchaseBill.bill_number,
+            prefix="PB", journal_source="purchase_bill", self_id=bill.id,
+        )
+        due_date = payload.due_date or payload.bill_date
     if due_date < payload.bill_date:
         raise HTTPException(400, "Due date can't be before the bill date")
 
@@ -320,13 +333,14 @@ def update_purchase_bill(bill_id: int, payload: schemas.PurchaseBillCreate, db: 
         if pid in products:
             products[pid].quantity -= qty
 
-    db.query(models.StockMovement).filter(models.StockMovement.note == f"Purchase bill {number}").delete()
+    db.query(models.StockMovement).filter(models.StockMovement.note == f"Purchase bill {old_number}").delete()
     for journal in db.query(models.Journal).filter(
         models.Journal.source_type == "purchase_bill", models.Journal.source_id == bill.id
     ).all():
         db.delete(journal)
     db.flush()   # the old journal must be gone before the new one reuses its number
-
+    
+    bill.bill_number = number
     bill.items = bill_lines
     bill.vendor_ref = (payload.vendor_ref or "").strip() or None
     bill.bill_date = payload.bill_date
