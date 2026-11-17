@@ -18,6 +18,7 @@ import {
 } from "./api.js";
 import {
   loginWithPasskey as passkeyLogin,
+  passkeyEnrolledHere,
   passkeysSupported,
 } from "./passkeys.jsx";
 
@@ -121,7 +122,7 @@ export function AuthProvider({ children }) {
   }, [loadProfile]);
 
   const login = useCallback(
-    async (username, password) => {
+    async (username, password, beforeEnter) => {
       const res = await fetch(`${BASE_URL}/auth/login`, {
         method: "POST",
         credentials: "same-origin",
@@ -133,6 +134,13 @@ export function AuthProvider({ children }) {
       setAccessToken(session.access_token);
       // decided BEFORE the app is shown, so there is no flash of the wrong company
       setNeedsPick((session.companies || []).length > 1);
+      // The password was accepted and the login form is still on screen: let LoginPage tell the phone
+      // "this was a real sign-in" so iOS / Chrome offer to save the password.
+      try {
+        beforeEnter?.();
+      } catch {
+        /* never block a sign-in because of this */
+      }
       await loadProfile();
     },
     [loadProfile],
@@ -315,14 +323,27 @@ function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const formRef = useRef(null);
+  const nativePhase = useRef(false);
 
   const submit = async (e) => {
+    // 2nd pass: the browser's own (harmless) form submit into the hidden frame. Let it through untouched.
+    if (nativePhase.current) {
+      nativePhase.current = false;
+      return;
+    }
     e.preventDefault();
     setError("");
     setBusy(true);
     try {
-      await login(username, password);
+      await login(username, password, () => {
+        // sign-in worked -> do one real form submit (into the hidden iframe below) so the phone's
+        // password manager sees a finished login and offers "Save Password".
+        nativePhase.current = true;
+        formRef.current?.requestSubmit?.();
+      });
     } catch (err) {
+      nativePhase.current = false;
       setError(err.message || "Login failed");
       setBusy(false);
     }
@@ -341,9 +362,28 @@ function LoginPage() {
 
   return (
     <AuthCard hero title="Sign in" subtitle="Enter your username and password.">
-      <form onSubmit={submit} className="space-y-3">
+      {/* the form posts to about:blank inside this hidden frame: nothing is sent anywhere */}
+      <iframe
+        name="std-login-frame"
+        title="login"
+        src="about:blank"
+        aria-hidden="true"
+        tabIndex={-1}
+        className="hidden"
+      />
+      <form
+        ref={formRef}
+        method="post"
+        action="about:blank"
+        target="std-login-frame"
+        onSubmit={submit}
+        className="space-y-3"
+      >
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">
+          <label
+            htmlFor="username"
+            className="block text-xs font-semibold text-gray-500 uppercase mb-1"
+          >
             Username
           </label>
           <input
@@ -362,7 +402,10 @@ function LoginPage() {
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">
+          <label
+            htmlFor="password"
+            className="block text-xs font-semibold text-gray-500 uppercase mb-1"
+          >
             Password
           </label>
           <input
@@ -385,7 +428,8 @@ function LoginPage() {
           {busy ? "Signing in..." : "Sign in"}
         </button>
       </form>
-      {passkeysSupported() && (
+      {/* only shown on devices where Face unlock was already enabled (otherwise iOS shows a confusing QR sheet) */}
+      {passkeysSupported() && passkeyEnrolledHere() && (
         <>
           <div className="flex items-center gap-3 my-4 text-xs text-gray-400">
             <div className="flex-1 h-px bg-gray-200" />

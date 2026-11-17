@@ -20,6 +20,24 @@ const bufToB64u = (buf) => {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 };
 
+// remembers (on THIS device only) that Face unlock was enabled here, so the login page can show its button
+const ENROLLED_KEY = "std-passkey-here";
+export function passkeyEnrolledHere() {
+  try {
+    return localStorage.getItem(ENROLLED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+const setEnrolled = (on) => {
+  try {
+    if (on) localStorage.setItem(ENROLLED_KEY, "1");
+    else localStorage.removeItem(ENROLLED_KEY);
+  } catch {
+    /* private mode: ignore */
+  }
+};
+
 export function passkeysSupported() {
   return (
     typeof window !== "undefined" &&
@@ -162,6 +180,7 @@ async function registerPasskey(password, deviceName) {
     });
     if (!res.ok)
       throw new Error(await readError(res, "Could not save Face unlock."));
+    setEnrolled(true);
   } catch (err) {
     throw friendly(err);
   }
@@ -183,7 +202,11 @@ export function PasskeySettings() {
   const load = useCallback(async () => {
     try {
       const res = await apiFetch(`${BASE_URL}/auth/passkey/list`);
-      if (res.ok) setList(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setList(data);
+        if (data.length === 0) setEnrolled(false);
+      }
     } catch {
       /* ignore: the list is only informational */
     }
