@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import "./index.css";
 import App from "./App.jsx";
-
+import UpdatePrompt from "./UpdatePrompt.jsx";
 
 // One-time cleanup of any old service worker and cached files
 if ("serviceWorker" in navigator) {
@@ -22,6 +22,7 @@ createRoot(document.getElementById("root")).render(
   <StrictMode>
     <BrowserRouter>
       <App />
+      <UpdatePrompt />
     </BrowserRouter>
-  </StrictMode>
+  </StrictMode>,
 );

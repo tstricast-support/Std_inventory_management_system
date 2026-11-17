@@ -41,7 +41,6 @@ export function CompanyProvider({ children }) {
   const [company, setCompany] = useState(null);
   const [companies, setCompanies] = useState([]);
   const [error, setError] = useState("");
-  const baseTitle = useRef(document.title);
 
   const reload = useCallback(async () => {
     clearCompanyProfileCache(); // the PDFs fetch the fresh profile next time
@@ -70,53 +69,9 @@ export function CompanyProvider({ children }) {
     }
   }, [ready, reload]);
 
-  // browser tab title = company name (index.html keeps a neutral app name until this is loaded)
-  useEffect(() => {
-    document.title = company?.name || baseTitle.current;
-  }, [company?.name]);
-
-  // browser tab icon = company logo (goes back to the default icon when there is no logo)
-  useEffect(() => {
-    const setIcon = (rel, href) => {
-      let link = document.querySelector(`link[rel="${rel}"]`);
-      if (!link) {
-        link = document.createElement("link");
-        link.setAttribute("rel", rel);
-        document.head.appendChild(link);
-      }
-      link.removeAttribute("type"); // the logo may be jpg / webp / svg, not only png
-      link.setAttribute("href", href);
-    };
-    const url = company?.logo_url;
-    if (url) {
-      // the extra ?v= makes the browser load the new logo, not the old cached icon
-      const v = `${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`;
-      setIcon("icon", v);
-      setIcon("apple-touch-icon", v);
-    } else {
-      setIcon("icon", "/pwa-192x192.png");
-      setIcon("apple-touch-icon", "/pwa-192x192.png");
-    }
-  }, [company?.logo_url]);
-
-  // installed-app icon: point the page at this company's manifest (the server puts the logo in it)
-  useEffect(() => {
-    if (!company?.id || !BASE_URL.startsWith("/")) return;
-    const link = document.querySelector('link[rel="manifest"]');
-    if (!link) return;
-    if (!link.dataset.app) {
-      link.dataset.app = (link.getAttribute("href") || "").includes("admin")
-        ? "admin"
-        : "employee";
-    }
-    const logo = company.logo_url || "";
-    let h = 7;
-    for (let i = 0; i < logo.length; i++) h = (h * 31 + logo.charCodeAt(i)) | 0;
-    link.setAttribute(
-      "href",
-      `${BASE_URL}/company/${company.id}/manifest.webmanifest?app=${link.dataset.app}&v=${(h >>> 0).toString(36)}`,
-    );
-  }, [company?.id, company?.logo_url]);
+  // NOTE: the browser title, favicon, apple-touch-icon and the installed-app manifest
+  // are FIXED (index.html / admin.html / manifest-*.json + pwa-*.png).
+  // The company logo is only used inside the app (sidebar, profile page, PDFs).
 
   const value = useMemo(
     () => ({ company, companies, reload, error }),
