@@ -165,6 +165,13 @@ const updateCustomer = (id, payload) =>
   customerRequest(String(id), "PUT", payload, "Failed to update customer");
 const deleteCustomer = (id) =>
   customerRequest(String(id), "DELETE", null, "Failed to delete customer");
+const getCustomerHistory = (id) =>
+  customerRequest(
+    `${id}/history`,
+    "GET",
+    null,
+    "Failed to load customer history",
+  );
 
 // ---------- Taxes ----------
 async function taxRequest(path, method, payload, failMsg) {
@@ -13988,6 +13995,895 @@ function TopSoldItemsPanel() {
   );
 }
 
+function HistoryItems({ items }) {
+  if (!items?.length) return null;
+  return (
+    <table className="w-full text-xs mt-1 bg-gray-50 rounded-lg">
+      <thead>
+        <tr className="text-gray-500 text-left">
+          <th className="px-3 py-1.5">Item</th>
+          <th className="px-3 py-1.5 text-right">Qty</th>
+          <th className="px-3 py-1.5 text-right">Rate</th>
+          <th className="px-3 py-1.5 text-right">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {items.map((it, i) => (
+          <tr key={i} className="border-t border-gray-200">
+            <td className="px-3 py-1.5">
+              {it.item_name}
+              {it.description && (
+                <span className="text-gray-400"> - {it.description}</span>
+              )}
+            </td>
+            <td className="px-3 py-1.5 text-right">{it.quantity}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">
+              {formatRs(it.rate)}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums">
+              {formatRs(it.amount)}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function CustomerHistory({ customerId, go }) {
+  const { can, hasRight } = useAuth();
+  const [data, setData] = useState(null);
+  const [recs, setRecs] = useState({
+    invoices: [],
+    payments: [],
+    credits: [],
+    docs: [],
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [tab, setTab] = useState("statement");
+  const [openRows, setOpenRows] = useState({});
+  const [edit, setEdit] = useState(null); // { type, rec } - which form is open
+  const [remove, setRemove] = useState(null); // { type, rec, verb } - waiting for the typed VOID / DELETE
+  const [preview, setPreview] = useState(null); // { kind, rec }
+  const back = () => go({ view: "customers" });
+  const toggle = (key) => setOpenRows((s) => ({ ...s, [key]: !s[key] }));
+
+  const load = async () => {
+    try {
+      const cid = Number(customerId);
+      const mine = (list) => list.filter((x) => x.customer_id === cid);
+      // a missing permission on one list must not break the whole page
+      const [h, inv, pay, cn, qt, so] = await Promise.all([
+        getCustomerHistory(customerId),
+        getInvoices().catch(() => []),
+        getPayments().catch(() => []),
+        getCreditNotes().catch(() => []),
+        getSalesDocs("quote").catch(() => []),
+        getSalesDocs("sales_order").catch(() => []),
+      ]);
+      setData(h);
+      setRecs({
+        invoices: mine(inv),
+        payments: mine(pay),
+        credits: mine(cn),
+        docs: mine([...qt, ...so]).sort(
+          (a, b) => b.doc_date.localeCompare(a.doc_date) || b.id - a.id,
+        ),
+      });
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    load();
+  }, [customerId]);
+
+  const doRemove = async () => {
+    const { type, rec, verb } = remove;
+    setRemove(null);
+    try {
+      if (type === "invoice")
+        await (verb === "Void" ? voidInvoice(rec.id) : deleteInvoice(rec.id));
+      else if (type === "credit")
+        await (verb === "Void"
+          ? voidCreditNote(rec.id)
+          : deleteCreditNote(rec.id));
+      else if (type === "payment") await deletePayment(rec.id);
+      else await deleteSalesDoc(rec.id);
+      await load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const th =
+    "px-3 py-2 text-xs font-semibold text-gray-500 text-left whitespace-nowrap";
+  const td = "px-3 py-2 text-sm text-gray-800 whitespace-nowrap";
+  const num = "text-right tabular-nums";
+  const gray = "border-gray-300 text-gray-700 hover:bg-gray-50";
+  const blue = "border-blue-300 text-blue-700 hover:bg-blue-50";
+  const green = "border-green-300 text-green-700 hover:bg-green-50";
+  const red = "border-red-200 text-red-600 hover:bg-red-50";
+  const btn = (label, onClick, cls) => (
+    <button
+      key={label}
+      type="button"
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${cls}`}
+    >
+      {label}
+    </button>
+  );
+  const badge = (s) => (
+    <span
+      className={`text-xs px-2 py-0.5 rounded-full ${
+        s === "void" || s === "declined"
+          ? "bg-red-50 text-red-600"
+          : "bg-gray-100 text-gray-600"
+      }`}
+    >
+      {s}
+    </span>
+  );
+  const empty = (t) => (
+    <p className="text-gray-400 text-center py-10 text-sm">{t}</p>
+  );
+  const stat = (label, value, strong) => (
+    <div className="bg-white border border-gray-200 rounded-xl p-3">
+      <p className="text-xs text-gray-500">{label}</p>
+      <p
+        className={`text-lg font-semibold ${strong ? "text-red-600" : "text-gray-900"}`}
+      >
+        {value}
+      </p>
+    </div>
+  );
+  const arrow = (key) => (openRows[key] ? "▾" : "▸");
+
+  const c = data?.customer;
+  const s = data?.summary;
+  const tabs = data
+    ? [
+        ["statement", "Statement", data.statement.length],
+        ["invoices", "Invoices", recs.invoices.length],
+        ["payments", "Payments", recs.payments.length],
+        ["credits", "Credit notes", recs.credits.length],
+        ["documents", "Quotes / Orders", recs.docs.length],
+      ]
+    : [];
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <SubHeader
+        title={c?.display_name || "Customer"}
+        subtitle={
+          c
+            ? [c.company_name, c.customer_type].filter(Boolean).join(" · ")
+            : undefined
+        }
+        onBack={back}
+      />
+      <main className="p-4 sm:p-6 w-full max-w-5xl space-y-5">
+        {loading ? (
+          <p className="text-gray-400 text-center py-16">Loading...</p>
+        ) : error ? (
+          <p className="text-red-500 text-center py-16">{error}</p>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-2">
+              {can("invoices", "create") &&
+                btn(
+                  "+ New invoice",
+                  () => setEdit({ type: "newinvoice" }),
+                  green,
+                )}
+              {can("payments_in", "create") &&
+                btn(
+                  "+ Record payment",
+                  () => setEdit({ type: "newpay" }),
+                  green,
+                )}
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {stat("Total invoiced", formatRs(s.total_invoiced))}
+              {stat("Total paid", formatRs(s.total_paid))}
+              {stat("Credit notes", formatRs(s.total_credits))}
+              {stat("Balance owed", formatRs(s.balance), s.balance > 0)}
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+                <DetailRow
+                  label="Contact person"
+                  value={c.contact_person || "-"}
+                />
+                <DetailRow label="Phone" value={c.phone || "-"} />
+                <DetailRow label="Email" value={c.email || "-"} />
+                <DetailRow label="Payment terms" value={c.payment_terms} />
+                <DetailRow
+                  label="Opening balance"
+                  value={formatRs(c.opening_balance)}
+                />
+                <DetailRow
+                  label="Invoices still unpaid"
+                  value={formatRs(s.invoices_due)}
+                />
+                <DetailRow
+                  label="Last invoice"
+                  value={
+                    s.last_invoice_date
+                      ? formatJournalDate(s.last_invoice_date)
+                      : "-"
+                  }
+                />
+                <DetailRow
+                  label="Last payment"
+                  value={
+                    s.last_payment_date
+                      ? formatJournalDate(s.last_payment_date)
+                      : "-"
+                  }
+                />
+                <DetailRow
+                  label="Billing address"
+                  value={c.billing_address || "-"}
+                />
+                <DetailRow
+                  label="Shipping address"
+                  value={c.shipping_address || "-"}
+                />
+                <DetailRow
+                  label="Status"
+                  value={c.is_active ? "Active" : "Inactive"}
+                />
+                {c.notes && <DetailRow label="Notes" value={c.notes} />}
+              </dl>
+            </div>
+
+            <div className="flex gap-1 overflow-x-auto border-b border-gray-200">
+              {tabs.map(([key, label, count]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setTab(key)}
+                  className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px ${
+                    tab === key
+                      ? "border-blue-600 text-blue-700 font-medium"
+                      : "border-transparent text-gray-500 hover:text-gray-800"
+                  }`}
+                >
+                  {label} ({count})
+                </button>
+              ))}
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+              {/* STATEMENT */}
+              {tab === "statement" && (
+                <table className="w-full min-w-[600px]">
+                  <thead>
+                    <tr className="border-b border-gray-200">
+                      <th className={th}>Date</th>
+                      <th className={th}>Type</th>
+                      <th className={th}>Number</th>
+                      <th className={`${th} text-right`}>Charges</th>
+                      <th className={`${th} text-right`}>Payments / credits</th>
+                      <th className={`${th} text-right`}>Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-b border-gray-100 text-gray-500">
+                      <td className={td} colSpan={5}>
+                        Opening balance
+                      </td>
+                      <td className={`${td} ${num}`}>
+                        {formatRs(c.opening_balance)}
+                      </td>
+                    </tr>
+                    {data.statement.map((r, i) => (
+                      <tr key={i} className="border-b border-gray-100">
+                        <td className={td}>{formatJournalDate(r.date)}</td>
+                        <td className={td}>{r.type}</td>
+                        <td className={td}>{r.number}</td>
+                        <td className={`${td} ${num}`}>
+                          {r.debit ? formatRs(r.debit) : ""}
+                        </td>
+                        <td className={`${td} ${num}`}>
+                          {r.credit ? formatRs(r.credit) : ""}
+                        </td>
+                        <td className={`${td} ${num} font-medium`}>
+                          {formatRs(r.balance)}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="font-semibold">
+                      <td className={td} colSpan={5}>
+                        Balance owed
+                      </td>
+                      <td className={`${td} ${num}`}>{formatRs(s.balance)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              )}
+
+              {/* INVOICES */}
+              {tab === "invoices" &&
+                (recs.invoices.length === 0 ? (
+                  empty("No invoices yet.")
+                ) : (
+                  <table className="w-full min-w-[640px]">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className={th}>Invoice</th>
+                        <th className={th}>Date</th>
+                        <th className={th}>Due</th>
+                        <th className={th}>Status</th>
+                        <th className={`${th} text-right`}>Total</th>
+                        <th className={`${th} text-right`}>Paid</th>
+                        <th className={`${th} text-right`}>Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recs.invoices.map((inv) => {
+                        const key = `inv-${inv.id}`;
+                        const st = invoiceStatus(inv);
+                        return (
+                          <Fragment key={inv.id}>
+                            <tr
+                              className="border-b border-gray-100 cursor-pointer hover:bg-gray-50"
+                              onClick={() => toggle(key)}
+                            >
+                              <td className={`${td} font-medium text-blue-700`}>
+                                {arrow(key)} {inv.invoice_number}
+                              </td>
+                              <td className={td}>
+                                {formatJournalDate(inv.invoice_date)}
+                              </td>
+                              <td className={td}>
+                                {formatJournalDate(inv.due_date)}
+                              </td>
+                              <td className={td}>
+                                <span
+                                  className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}
+                                >
+                                  {st.label}
+                                </span>
+                              </td>
+                              <td className={`${td} ${num}`}>
+                                {formatRs(inv.total)}
+                              </td>
+                              <td className={`${td} ${num}`}>
+                                {formatRs(inv.amount_paid)}
+                              </td>
+                              <td className={`${td} ${num}`}>
+                                {formatRs(inv.balance_due)}
+                              </td>
+                            </tr>
+                            {openRows[key] && (
+                              <tr className="border-b border-gray-100">
+                                <td colSpan={7} className="px-3 pb-3 space-y-2">
+                                  {(inv.order_number ||
+                                    inv.notes ||
+                                    inv.discount_amount > 0) && (
+                                    <p className="text-xs text-gray-500">
+                                      {[
+                                        inv.order_number &&
+                                          `PO: ${inv.order_number}`,
+                                        inv.discount_amount > 0 &&
+                                          `Discount: ${formatRs(inv.discount_amount)}`,
+                                        inv.notes,
+                                      ]
+                                        .filter(Boolean)
+                                        .join(" · ")}
+                                    </p>
+                                  )}
+                                  <HistoryItems items={inv.items} />
+                                  <div className="flex flex-wrap gap-2 pt-1">
+                                    {inv.status !== "void" &&
+                                      inv.amount_paid <= 0.004 &&
+                                      can("invoices", "full") &&
+                                      btn(
+                                        "Edit invoice",
+                                        () =>
+                                          setEdit({
+                                            type: "invoice",
+                                            rec: inv,
+                                          }),
+                                        gray,
+                                      )}
+                                    {btn(
+                                      "Preview",
+                                      () =>
+                                        setPreview({
+                                          kind: "invoice",
+                                          rec: inv,
+                                        }),
+                                      blue,
+                                    )}
+                                    {inv.status !== "void" &&
+                                      inv.balance_due > 0.004 &&
+                                      btn(
+                                        "Record payment",
+                                        () =>
+                                          setEdit({ type: "pay", rec: inv }),
+                                        green,
+                                      )}
+                                    {inv.status !== "void" &&
+                                      btn(
+                                        "Credit note",
+                                        () =>
+                                          setEdit({
+                                            type: "creditfor",
+                                            rec: inv,
+                                          }),
+                                        gray,
+                                      )}
+                                    {inv.status !== "void" &&
+                                      hasRight("void_transactions") &&
+                                      btn(
+                                        "Void",
+                                        () =>
+                                          setRemove({
+                                            type: "invoice",
+                                            rec: inv,
+                                            verb: "Void",
+                                          }),
+                                        red,
+                                      )}
+                                    {inv.status === "void" &&
+                                      hasRight("delete_records") &&
+                                      btn(
+                                        "Delete",
+                                        () =>
+                                          setRemove({
+                                            type: "invoice",
+                                            rec: inv,
+                                            verb: "Delete",
+                                          }),
+                                        red,
+                                      )}
+                                  </div>
+                                  {inv.status !== "void" &&
+                                    inv.amount_paid > 0.004 && (
+                                      <p className="text-xs text-gray-400">
+                                        A paid invoice can't be edited. Delete
+                                        its payment first, or issue a credit
+                                        note.
+                                      </p>
+                                    )}
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ))}
+
+              {/* PAYMENTS */}
+              {tab === "payments" &&
+                (recs.payments.length === 0 ? (
+                  empty("No payments yet.")
+                ) : (
+                  <table className="w-full min-w-[600px]">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className={th}>Payment</th>
+                        <th className={th}>Date</th>
+                        <th className={th}>Mode</th>
+                        <th className={th}>Deposited to</th>
+                        <th className={th}>Reference</th>
+                        <th className={`${th} text-right`}>Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recs.payments.map((p) => {
+                        const key = `pay-${p.id}`;
+                        return (
+                          <Fragment key={p.id}>
+                            <tr
+                              className="border-b border-gray-100 cursor-pointer hover:bg-gray-50"
+                              onClick={() => toggle(key)}
+                            >
+                              <td className={`${td} font-medium text-blue-700`}>
+                                {arrow(key)} {p.payment_number}
+                              </td>
+                              <td className={td}>
+                                {formatJournalDate(p.payment_date)}
+                              </td>
+                              <td className={td}>{p.payment_mode}</td>
+                              <td className={td}>{p.deposit_account_name}</td>
+                              <td className={td}>{p.reference || ""}</td>
+                              <td className={`${td} ${num}`}>
+                                {formatRs(p.amount)}
+                              </td>
+                            </tr>
+                            {openRows[key] && (
+                              <tr className="border-b border-gray-100">
+                                <td colSpan={6} className="px-3 pb-3 space-y-2">
+                                  {p.notes && (
+                                    <p className="text-xs text-gray-500">
+                                      {p.notes}
+                                    </p>
+                                  )}
+                                  <div className="text-xs text-gray-600">
+                                    {p.allocations.length === 0
+                                      ? "Not applied to any invoice."
+                                      : p.allocations.map((a) => (
+                                          <p key={a.id}>
+                                            Applied to {a.invoice_number}:{" "}
+                                            {formatRs(a.amount)}
+                                          </p>
+                                        ))}
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    {can("payments_in", "full") &&
+                                      btn(
+                                        "Edit payment",
+                                        () =>
+                                          setEdit({ type: "editpay", rec: p }),
+                                        gray,
+                                      )}
+                                    {btn(
+                                      "Preview",
+                                      () =>
+                                        setPreview({ kind: "payment", rec: p }),
+                                      blue,
+                                    )}
+                                    {can("payments_in", "full") &&
+                                      hasRight("delete_records") &&
+                                      btn(
+                                        "Delete",
+                                        () =>
+                                          setRemove({
+                                            type: "payment",
+                                            rec: p,
+                                            verb: "Delete",
+                                          }),
+                                        red,
+                                      )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ))}
+
+              {/* CREDIT NOTES */}
+              {tab === "credits" &&
+                (recs.credits.length === 0 ? (
+                  empty("No credit notes.")
+                ) : (
+                  <table className="w-full min-w-[600px]">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className={th}>Credit note</th>
+                        <th className={th}>Date</th>
+                        <th className={th}>Invoice</th>
+                        <th className={th}>Status</th>
+                        <th className={`${th} text-right`}>Total</th>
+                        <th className={`${th} text-right`}>Applied</th>
+                        <th className={`${th} text-right`}>Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recs.credits.map((n) => {
+                        const key = `cn-${n.id}`;
+                        return (
+                          <Fragment key={n.id}>
+                            <tr
+                              className="border-b border-gray-100 cursor-pointer hover:bg-gray-50"
+                              onClick={() => toggle(key)}
+                            >
+                              <td className={`${td} font-medium text-blue-700`}>
+                                {arrow(key)} {n.credit_number}
+                              </td>
+                              <td className={td}>
+                                {formatJournalDate(n.credit_date)}
+                              </td>
+                              <td className={td}>{n.invoice_number || "-"}</td>
+                              <td className={td}>{badge(n.status)}</td>
+                              <td className={`${td} ${num}`}>
+                                {formatRs(n.total)}
+                              </td>
+                              <td className={`${td} ${num}`}>
+                                {formatRs(n.amount_applied)}
+                              </td>
+                              <td className={`${td} ${num}`}>
+                                {formatRs(n.balance)}
+                              </td>
+                            </tr>
+                            {openRows[key] && (
+                              <tr className="border-b border-gray-100">
+                                <td colSpan={7} className="px-3 pb-3 space-y-2">
+                                  {n.reason && (
+                                    <p className="text-xs text-gray-500">
+                                      Reason: {n.reason}
+                                    </p>
+                                  )}
+                                  <HistoryItems items={n.items} />
+                                  {n.applications.map((a) => (
+                                    <p
+                                      key={a.id}
+                                      className="text-xs text-gray-600"
+                                    >
+                                      Applied to {a.invoice_number}:{" "}
+                                      {formatRs(a.amount)}
+                                    </p>
+                                  ))}
+                                  <div className="flex flex-wrap gap-2 pt-1">
+                                    {n.status !== "void" &&
+                                      n.amount_applied <= 0.004 &&
+                                      can("credit_notes", "full") &&
+                                      btn(
+                                        "Edit credit note",
+                                        () =>
+                                          setEdit({ type: "credit", rec: n }),
+                                        gray,
+                                      )}
+                                    {btn(
+                                      "Preview",
+                                      () =>
+                                        setPreview({ kind: "credit", rec: n }),
+                                      blue,
+                                    )}
+                                    {n.status !== "void" &&
+                                      hasRight("void_transactions") &&
+                                      btn(
+                                        "Void",
+                                        () =>
+                                          setRemove({
+                                            type: "credit",
+                                            rec: n,
+                                            verb: "Void",
+                                          }),
+                                        red,
+                                      )}
+                                    {n.status === "void" &&
+                                      hasRight("delete_records") &&
+                                      btn(
+                                        "Delete",
+                                        () =>
+                                          setRemove({
+                                            type: "credit",
+                                            rec: n,
+                                            verb: "Delete",
+                                          }),
+                                        red,
+                                      )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ))}
+
+              {/* QUOTES / SALES ORDERS */}
+              {tab === "documents" &&
+                (recs.docs.length === 0 ? (
+                  empty("No quotes or sales orders.")
+                ) : (
+                  <table className="w-full min-w-[600px]">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className={th}>Number</th>
+                        <th className={th}>Type</th>
+                        <th className={th}>Date</th>
+                        <th className={th}>Status</th>
+                        <th className={th}>Invoice</th>
+                        <th className={`${th} text-right`}>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recs.docs.map((x) => {
+                        const key = `doc-${x.id}`;
+                        const canEditDoc =
+                          !["invoiced", "converted"].includes(x.status) &&
+                          can("sales_documents", "full");
+                        const canInvoice = [
+                          "draft",
+                          "sent",
+                          "accepted",
+                          "open",
+                        ].includes(x.status);
+                        return (
+                          <Fragment key={x.id}>
+                            <tr
+                              className="border-b border-gray-100 cursor-pointer hover:bg-gray-50"
+                              onClick={() => toggle(key)}
+                            >
+                              <td className={`${td} font-medium text-blue-700`}>
+                                {arrow(key)} {x.doc_number}
+                              </td>
+                              <td className={td}>
+                                {x.doc_type === "quote"
+                                  ? "Quote"
+                                  : "Sales order"}
+                              </td>
+                              <td className={td}>
+                                {formatJournalDate(x.doc_date)}
+                              </td>
+                              <td className={td}>{badge(x.status)}</td>
+                              <td className={td}>{x.invoice_number || "-"}</td>
+                              <td className={`${td} ${num}`}>
+                                {formatRs(x.total)}
+                              </td>
+                            </tr>
+                            {openRows[key] && (
+                              <tr className="border-b border-gray-100">
+                                <td colSpan={6} className="px-3 pb-3 space-y-2">
+                                  {x.reference && (
+                                    <p className="text-xs text-gray-500">
+                                      Reference: {x.reference}
+                                    </p>
+                                  )}
+                                  <HistoryItems items={x.items} />
+                                  <div className="flex flex-wrap gap-2 pt-1">
+                                    {canEditDoc &&
+                                      btn(
+                                        x.doc_type === "quote"
+                                          ? "Edit quote"
+                                          : "Edit sales order",
+                                        () => setEdit({ type: "doc", rec: x }),
+                                        gray,
+                                      )}
+                                    {btn(
+                                      "Preview",
+                                      () =>
+                                        setPreview({
+                                          kind: "salesdoc",
+                                          rec: x,
+                                        }),
+                                      blue,
+                                    )}
+                                    {canInvoice &&
+                                      btn(
+                                        "Create invoice",
+                                        () =>
+                                          setEdit({ type: "fromdoc", rec: x }),
+                                        green,
+                                      )}
+                                    {can("sales_documents", "full") &&
+                                      hasRight("delete_records") &&
+                                      btn(
+                                        "Delete",
+                                        () =>
+                                          setRemove({
+                                            type: "doc",
+                                            rec: x,
+                                            verb: "Delete",
+                                          }),
+                                        red,
+                                      )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ))}
+            </div>
+          </>
+        )}
+      </main>
+
+      {/* ---- forms (the same ones the Invoices / Payments / Credit notes / Quotes pages use) ---- */}
+      {(edit?.type === "invoice" || edit?.type === "newinvoice") && (
+        <InvoiceForm
+          key={edit.rec?.id ?? "new"}
+          editInvoice={edit.rec || null}
+          invoices={recs.invoices}
+          onNavigate={(inv) => setEdit({ type: "invoice", rec: inv })}
+          onClose={() => setEdit(null)}
+          onSaved={load}
+        />
+      )}
+      {edit?.type === "fromdoc" && (
+        <InvoiceForm
+          fromDoc={edit.rec}
+          onClose={() => setEdit(null)}
+          onSaved={load}
+        />
+      )}
+      {edit?.type === "pay" && (
+        <PaymentForm
+          initialCustomerId={edit.rec.customer_id}
+          initialInvoiceId={edit.rec.id}
+          onClose={() => setEdit(null)}
+          onSaved={load}
+        />
+      )}
+      {edit?.type === "newpay" && (
+        <PaymentForm
+          initialCustomerId={Number(customerId)}
+          onClose={() => setEdit(null)}
+          onSaved={load}
+        />
+      )}
+      {edit?.type === "editpay" && (
+        <PaymentForm
+          key={edit.rec.id}
+          editPayment={edit.rec}
+          onClose={() => setEdit(null)}
+          onSaved={load}
+        />
+      )}
+      {edit?.type === "creditfor" && (
+        <CreditNoteForm
+          fromInvoice={edit.rec}
+          onClose={() => setEdit(null)}
+          onSaved={load}
+        />
+      )}
+      {edit?.type === "credit" && (
+        <CreditNoteForm
+          key={edit.rec.id}
+          editNote={edit.rec}
+          onClose={() => setEdit(null)}
+          onSaved={load}
+        />
+      )}
+      {edit?.type === "doc" && (
+        <SalesDocumentForm
+          key={edit.rec.id}
+          docType={edit.rec.doc_type}
+          editDoc={edit.rec}
+          onClose={() => setEdit(null)}
+          onSaved={load}
+        />
+      )}
+
+      {preview && (
+        <DocPreviewModal
+          kind={preview.kind}
+          record={preview.rec}
+          onClose={() => setPreview(null)}
+        />
+      )}
+
+      {remove && (
+        <TypedDeleteConfirm
+          verb={remove.verb}
+          label={
+            remove.rec.invoice_number ||
+            remove.rec.credit_number ||
+            remove.rec.payment_number ||
+            remove.rec.doc_number
+          }
+          note={
+            remove.type === "payment"
+              ? "Its invoices will owe the money again and the ledger entry is removed."
+              : remove.verb === "Void" && remove.type === "invoice"
+                ? "The stock goes back and its ledger entry is removed."
+                : undefined
+          }
+          onCancel={() => setRemove(null)}
+          onConfirm={doRemove}
+        />
+      )}
+    </div>
+  );
+}
+
 function CustomersPage({ isAdmin, go }) {
   const { can, hasRight } = useAuth();
   const canEdit = can("customers", "full");
@@ -14083,7 +14979,10 @@ function CustomersPage({ isAdmin, go }) {
               {shown.map((c) => (
                 <div
                   key={c.id}
-                  className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 lg:py-1 lg:px-3"
+                  onClick={() =>
+                    go({ view: "customers", customer: String(c.id) })
+                  }
+                  className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 lg:py-1 lg:px-3 cursor-pointer hover:bg-gray-50"
                 >
                   <div className="flex-1 min-w-0 lg:flex lg:items-center lg:gap-4">
                     <p className="font-medium text-gray-900 truncate lg:w-56 lg:shrink-0 lg:text-sm">
@@ -14100,19 +14999,21 @@ function CustomersPage({ isAdmin, go }) {
                     <p>Opening: {formatRs(c.opening_balance)}</p>
                   </div>
                   {(canEdit || canDelete) && (
-                    <ItemActionsMenu
-                      onEdit={
-                        canEdit
-                          ? () => {
-                              setEditing(c);
-                              setFormOpen(true);
-                            }
-                          : undefined
-                      }
-                      onDelete={
-                        canDelete ? () => setDeleteTarget(c) : undefined
-                      }
-                    />
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <ItemActionsMenu
+                        onEdit={
+                          canEdit
+                            ? () => {
+                                setEditing(c);
+                                setFormOpen(true);
+                              }
+                            : undefined
+                        }
+                        onDelete={
+                          canDelete ? () => setDeleteTarget(c) : undefined
+                        }
+                      />
+                    </div>
                   )}
                 </div>
               ))}
@@ -25636,7 +26537,14 @@ function AppWindow() {
   } else if (searchParams.get("view") === "journals" && isAdmin) {
     page = <JournalsPage isAdmin={isAdmin} go={setSearchParams} />;
   } else if (searchParams.get("view") === "customers" && isAdmin) {
-    page = <CustomersPage isAdmin={isAdmin} go={setSearchParams} />;
+    page = searchParams.get("customer") ? (
+      <CustomerHistory
+        customerId={searchParams.get("customer")}
+        go={setSearchParams}
+      />
+    ) : (
+      <CustomersPage isAdmin={isAdmin} go={setSearchParams} />
+    );
   } else if (searchParams.get("view") === "quotes" && isAdmin) {
     page = (
       <SalesDocumentsPage
