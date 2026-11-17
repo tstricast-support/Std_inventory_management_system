@@ -39,7 +39,8 @@ AUTH_REQUIRED = _env_bool("AUTH_REQUIRED", False)
 JWT_SECRET = os.getenv("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_MINUTES = 30
-REFRESH_TOKEN_HOURS = 12
+REFRESH_TOKEN_HOURS = 24 * 30      # stay signed in for 30 days; every refresh renews it (sliding)
+REFRESH_GRACE_SECONDS = 120        # a just-rotated token may be presented again for 2 min (lost response on mobile)
 
 # Secure cookie flag. Defaults to ON in production and OFF otherwise, so local http://localhost still works.
 REFRESH_COOKIE_SECURE = _env_bool("REFRESH_COOKIE_SECURE", IS_PRODUCTION)

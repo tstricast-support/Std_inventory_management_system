@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..audit import get_client_ip, log_audit_company
 from ..auth import (
     ACCESS_TOKEN_MINUTES,AUTH_REQUIRED, JWT_SECRET, LOCKOUT_MINUTES, MAX_FAILED_ATTEMPTS, REFRESH_COOKIE_NAME,
-    REFRESH_COOKIE_PATH, REFRESH_COOKIE_SECURE, REFRESH_TOKEN_HOURS, burn_password_time,
+    REFRESH_COOKIE_PATH, REFRESH_COOKIE_SECURE, REFRESH_TOKEN_HOURS,REFRESH_GRACE_SECONDS, burn_password_time,
     accessible_companies, create_access_token, default_company_id, get_current_user,get_user_for_switch, has_company_access,
     hash_password, hash_refresh_token, new_refresh_token, normalize_username, oldest_active_company_id,
     password_needs_rehash, refresh_expiry, user_permissions, user_rights, utcnow, validate_new_password, verify_password,
@@ -63,14 +63,14 @@ def _error(status_code: int, detail: str, clear_cookie: bool = False) -> JSONRes
 def _set_cookie(response: Response, token: str) -> None:
     response.set_cookie(
         key=REFRESH_COOKIE_NAME, value=token, max_age=REFRESH_TOKEN_HOURS * 3600,
-        httponly=True, secure=REFRESH_COOKIE_SECURE, samesite="strict", path=REFRESH_COOKIE_PATH,
+        httponly=True, secure=REFRESH_COOKIE_SECURE, samesite="lax", path=REFRESH_COOKIE_PATH,
     )
 
 
 def _clear_cookie(response: Response) -> None:
     response.delete_cookie(
         key=REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH,
-        httponly=True, secure=REFRESH_COOKIE_SECURE, samesite="strict",
+        httponly=True, secure=REFRESH_COOKIE_SECURE, samesite="lax",
     )
 
 
@@ -219,36 +219,53 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_publ
 
     user = db.query(User).filter(User.id == row.user_id).first()
 
+    in_grace = False
+    successor = None
     if row.revoked:
-        # a rotated/revoked token came back: someone may have copied it -> kill the whole login chain
-        db.query(RefreshToken).filter(RefreshToken.family_id == row.family_id).update(
-            {"revoked": True}, synchronize_session=False)
-        log_audit(db, user, "refresh_reuse_detected", "user", row.user_id,
-                  "A used refresh token was presented again; session revoked", request)
-        db.commit()
-        return _error(401, "Session expired", clear_cookie=True)
+        # Mobile case: the browser never received the new cookie (page frozen / network dropped), so it
+        # comes back with the token we already rotated. If its successor was issued only moments ago
+        # and is still active, this is a lost response, not theft: just issue another token.
+        newest_cutoff = utcnow() + timedelta(hours=REFRESH_TOKEN_HOURS) - timedelta(seconds=REFRESH_GRACE_SECONDS)
+        successor = db.query(RefreshToken).filter(
+            RefreshToken.family_id == row.family_id,
+            RefreshToken.revoked == False,  # noqa: E712
+            RefreshToken.expires_at > newest_cutoff,
+        ).first()
+        if successor is not None and user is not None and user.is_active:
+            in_grace = True
+        else:
+            # really old / logged-out token came back: kill the whole login chain
+            db.query(RefreshToken).filter(RefreshToken.family_id == row.family_id).update(
+                {"revoked": True}, synchronize_session=False)
+            log_audit(db, user, "refresh_reuse_detected", "user", row.user_id,
+                      "A used refresh token was presented again; session revoked", request)
+            db.commit()
+            return _error(401, "Session expired", clear_cookie=True)
 
     if row.expires_at <= utcnow() or user is None or not user.is_active:
         row.revoked = True
         db.commit()
         return _error(401, "Session expired", clear_cookie=True)
 
-    # rotate: the UPDATE only succeeds for the first request that uses this token
-    won = db.query(RefreshToken).filter(RefreshToken.id == row.id, RefreshToken.revoked == False).update(  # noqa: E712
-        {"revoked": True}, synchronize_session=False)
-    if won != 1:
-        db.rollback()
-        return _error(401, "Session expired", clear_cookie=True)
+    if not in_grace:
+        # rotate: the UPDATE only succeeds for the first request that uses this token
+        won = db.query(RefreshToken).filter(RefreshToken.id == row.id, RefreshToken.revoked == False).update(  # noqa: E712
+            {"revoked": True}, synchronize_session=False)
+        if won != 1:
+            db.rollback()
+            return _error(401, "Session expired", clear_cookie=True)
 
     # keep the company through rotation, unless the user lost access to it meanwhile
-    company_id = row.company_id if row.company_id and has_company_access(db, user.id, row.company_id) else default_company_id(db, user)
+    source = successor if in_grace else row
+    company_id = (source.company_id
+                  if source.company_id and has_company_access(db, user.id, source.company_id)
+                  else default_company_id(db, user))
     if company_id is None:
-        db.commit()   # the old token stays revoked
+        db.commit()
         return _error(403, "You have not been given access to any company. Ask an administrator.", clear_cookie=True)
     token = _start_session(db, user, request, response, company_id, family_id=row.family_id)
     db.commit()
     return _session_json(db, user, token, company_id)
-
 
 @router.post("/logout")
 def logout(request: Request, response: Response, db: Session = Depends(get_public_db)):

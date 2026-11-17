@@ -665,6 +665,21 @@ class RefreshToken(Base):
     # the company this login chain is working in; kept through refresh-token rotation
     company_id = Column(Integer, ForeignKey("public.companies.id", ondelete="SET NULL"), nullable=True)
 
+class PasskeyCredential(Base):
+    """One Face ID / fingerprint passkey per device. Only the PUBLIC key is stored."""
+    __tablename__ = "passkey_credentials"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False, index=True)
+    credential_id = Column(String(512), nullable=False, unique=True)   # base64url
+    public_key = Column(Text, nullable=False)                          # base64url (COSE key)
+    sign_count = Column(Integer, nullable=False, default=0, server_default="0")
+    device_name = Column(String(100))
+    transports = Column(String(100))
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    last_used_at = Column(TIMESTAMP, nullable=True)
+
 
 class Company(Base):
     """One company file. Its data lives in the PostgreSQL schema co_<id> (never built from user text)."""

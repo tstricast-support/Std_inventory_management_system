@@ -7,7 +7,7 @@ from app.auth import IS_PRODUCTION, require_area, validate_auth_settings
 from app.security import SecurityMiddleware
 import app.audit_events  
 from app.company_init import run_startup
-from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments,sales_documents,credit_notes,taxes,banking,reports,dashboard,product_import,auth,users,audit_log,companies
+from app.routers import products, requests, stock_movements, bills, issued, vendors, accounts, customers, journals, invoices,payments,purchase_bills,vendor_payments,sales_documents,credit_notes,taxes,banking,reports,dashboard,product_import,auth,users,audit_log,companies,passkeys
 validate_auth_settings()
 run_startup()      # shared tables + every company schema (create tables, column upgrades, seeds) + roles + first Owner
 
@@ -57,6 +57,7 @@ def guard(area: str):
 
 
 app.include_router(auth.router)   # login / refresh / logout / switch-company live here and are NOT guarded by an area
+app.include_router(passkeys.router)   # Face unlock / fingerprint sign-in (lives under /api/auth so the cookie works)
 app.include_router(companies.router)
 app.include_router(products.router, dependencies=guard("inventory"))
 app.include_router(product_import.router, dependencies=guard("inventory"))

@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Building2, LayoutGrid, LogOut } from "lucide-react";
+import { Building2, Fingerprint, LayoutGrid, LogOut } from "lucide-react";
 import {
   BASE_URL,
   apiFetch,
@@ -16,6 +16,10 @@ import {
   setAccessToken,
   setAuthLostHandler,
 } from "./api.js";
+import {
+  loginWithPasskey as passkeyLogin,
+  passkeysSupported,
+} from "./passkeys.jsx";
 
 const LEVEL_RANK = { none: 0, view: 1, create: 2, full: 3 };
 
@@ -83,7 +87,10 @@ export function AuthProvider({ children }) {
   // on page load: is login enforced? if yes, is there still a valid session cookie?
   useEffect(() => {
     let dead = false;
-    (async () => {
+    let retryTimer = null;
+    let tries = 0;
+
+    const boot = async () => {
       try {
         const cfg = await fetch(`${BASE_URL}/auth/config`, {
           credentials: "same-origin",
@@ -95,14 +102,21 @@ export function AuthProvider({ children }) {
           return;
         }
         const session = await refreshSession();
+        if (dead) return;
         if (session) await loadProfile();
-        else if (!dead) setStatus("anon");
+        else setStatus("anon");
       } catch {
-        if (!dead) setStatus("anon");
+        // network trouble right after the phone woke up: try again a few times before showing the login page
+        if (dead) return;
+        if (++tries < 4) retryTimer = setTimeout(boot, 2500);
+        else setStatus("anon");
       }
-    })();
+    };
+    boot();
+
     return () => {
       dead = true;
+      clearTimeout(retryTimer);
     };
   }, [loadProfile]);
 
@@ -123,6 +137,14 @@ export function AuthProvider({ children }) {
     },
     [loadProfile],
   );
+
+  // Face unlock / fingerprint: the same result as a password login, only the proof is different
+  const loginWithPasskey = useCallback(async () => {
+    const session = await passkeyLogin();
+    setAccessToken(session.access_token);
+    setNeedsPick((session.companies || []).length > 1);
+    await loadProfile();
+  }, [loadProfile]);
 
   // Enter another company: the server checks access and returns a NEW token for it, then a full reload so
   // no data of the old company stays in memory (the refresh cookie remembers the company across the reload).
@@ -198,6 +220,7 @@ export function AuthProvider({ children }) {
       can,
       hasRight,
       login,
+      loginWithPasskey,
       logout,
       changePassword,
       reloadUser: loadProfile,
@@ -211,6 +234,7 @@ export function AuthProvider({ children }) {
       can,
       hasRight,
       login,
+      loginWithPasskey,
       logout,
       changePassword,
       loadProfile,
@@ -286,7 +310,7 @@ function AuthCard({ title, subtitle, hero, children }) {
 }
 
 function LoginPage() {
-  const { login } = useAuth();
+  const { login, loginWithPasskey } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -304,22 +328,35 @@ function LoginPage() {
     }
   };
 
+  const faceLogin = async () => {
+    setError("");
+    setBusy(true);
+    try {
+      await loginWithPasskey();
+    } catch (err) {
+      setError(err.message || "Face unlock failed");
+      setBusy(false);
+    }
+  };
+
   return (
-    <AuthCard
-      hero
-      title="Sign in"
-      subtitle="Enter your username and password."
-    >
+    <AuthCard hero title="Sign in" subtitle="Enter your username and password.">
       <form onSubmit={submit} className="space-y-3">
         <div>
           <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">
             Username
           </label>
           <input
+            id="username"
+            name="username"
+            type="text"
             className={inputCls}
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             autoComplete="username"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             autoFocus
             required
           />
@@ -329,6 +366,8 @@ function LoginPage() {
             Password
           </label>
           <input
+            id="password"
+            name="password"
             type="password"
             className={inputCls}
             value={password}
@@ -346,6 +385,23 @@ function LoginPage() {
           {busy ? "Signing in..." : "Sign in"}
         </button>
       </form>
+      {passkeysSupported() && (
+        <>
+          <div className="flex items-center gap-3 my-4 text-xs text-gray-400">
+            <div className="flex-1 h-px bg-gray-200" />
+            or
+            <div className="flex-1 h-px bg-gray-200" />
+          </div>
+          <button
+            type="button"
+            onClick={faceLogin}
+            disabled={busy}
+            className="w-full flex items-center justify-center gap-2 border border-gray-300 text-gray-800 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
+          >
+            <Fingerprint size={18} /> Sign in with Face unlock
+          </button>
+        </>
+      )}
     </AuthCard>
   );
 }
@@ -570,6 +626,10 @@ function IdleWatcher() {
   const [secondsLeft, setSecondsLeft] = useState(0);
 
   useEffect(() => {
+    // Phones freeze the page in the background, so the idle timer would sign users out every time they
+    // switch apps. Touch devices stay signed in (the session still ends after 30 days or on Sign out).
+    if (window.matchMedia?.("(pointer: coarse)").matches) return;
+
     const bump = () => {
       if (!warning.current) lastActive.current = Date.now();
     };

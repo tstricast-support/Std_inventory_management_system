@@ -17,17 +17,27 @@ let refreshInFlight = null;
 export function refreshSession() {
   if (!refreshInFlight) {
     const run = async () => {
-      const res = await fetch(`${BASE_URL}/auth/refresh`, { method: "POST", credentials: "same-origin" });
-      if (!res.ok) return null;
-      const session = await res.json();
-      accessToken = session.access_token;
-      return session;
+      // A phone that just woke up often has no network for a moment, so retry before giving up.
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const res = await fetch(`${BASE_URL}/auth/refresh`, { method: "POST", credentials: "same-origin" });
+          if (res.ok) {
+            const session = await res.json();
+            accessToken = session.access_token;
+            return session;
+          }
+          if (res.status === 401 || res.status === 403) return null; // the server says: session really is over
+        } catch {
+          /* network not ready yet */
+        }
+        await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+      }
+      throw new Error("NETWORK"); // could not reach the server: NOT the same as "logged out"
     };
-    // Web Locks makes two browser TABS take turns: the 2nd tab then sends the NEW cookie, not the used one.
     const job = typeof navigator !== "undefined" && navigator.locks
       ? navigator.locks.request("std-auth-refresh", run)
       : run();
-    refreshInFlight = job.catch(() => null).finally(() => { refreshInFlight = null; });
+    refreshInFlight = job.finally(() => { refreshInFlight = null; });
   }
   return refreshInFlight;
 }
@@ -40,7 +50,8 @@ async function handleLostCompany(url, res) {
   const last = Number(sessionStorage.getItem("std-co-lost") || 0);
   if (Date.now() - last < 10000) return; // never loop
   sessionStorage.setItem("std-co-lost", String(Date.now()));
-  const session = await refreshSession(); // the server falls back to a company I still have
+    const session = await refreshSession().catch(() => undefined); // the server falls back to a company I still have
+  if (session === undefined) return; // network problem, do nothing
   if (!session) {
     if (onAuthLost) onAuthLost();
     return;
@@ -60,10 +71,15 @@ export async function apiFetch(url, options = {}) {
   if (res.status === 403) await handleLostCompany(url, res);
   if (res.status !== 401) return res;
 
-  const session = await refreshSession();     // try once
+  let session;
+  try {
+    session = await refreshSession();      // try once
+  } catch {
+    return res;                            // network problem: keep the user signed in, just fail this request
+  }
   if (!session) {
-    if (onAuthLost) onAuthLost();
+    if (onAuthLost) onAuthLost();          // only when the server really said "session over"
     return res;
   }
-  return send();                               // retry once with the new token
+  return send();                           // retry once with the new token
 }
