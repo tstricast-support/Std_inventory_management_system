@@ -252,7 +252,7 @@ def create_invoice(payload: schemas.InvoiceCreate, db: Session = Depends(get_db)
 
 @router.put("/{invoice_id}", response_model=schemas.InvoiceOut)
 def update_invoice(invoice_id: int, payload: schemas.InvoiceCreate, db: Session = Depends(get_db)):
-    """Edits an invoice in place (it keeps its number): the old stock and ledger entry are reversed, then the new ones are posted."""
+    """Edits an invoice in place: the old stock and ledger entry are reversed, then the new ones are posted. The invoice number can be changed."""
     invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).with_for_update().first()
     if not invoice:
         raise HTTPException(404, "Invoice not found")
@@ -300,8 +300,7 @@ def update_invoice(invoice_id: int, payload: schemas.InvoiceCreate, db: Session 
         if products[pid].subitems:
             raise HTTPException(400, f"{products[pid].name} is a parent item. Pick one of its subitems.")
 
-    
-    # ---- build the new lines and the new ledger entry ----
+    # ---- the invoice number: a typed number wins, otherwise the invoice keeps its own ----
     number = invoice.invoice_number
     requested = (payload.invoice_number or "").strip()
     if requested and requested != number:   # the user changed the number
@@ -309,6 +308,8 @@ def update_invoice(invoice_id: int, payload: schemas.InvoiceCreate, db: Session 
             db, requested, model=models.Invoice, column=models.Invoice.invoice_number,
             prefix="INV", journal_source="invoice", self_id=invoice.id,
         )
+
+    # ---- build the new lines and the new ledger entry ----
     invoice_lines = []
     total = Decimal("0")
     income: dict[int, Decimal] = {}
@@ -399,7 +400,6 @@ def update_invoice(invoice_id: int, payload: schemas.InvoiceCreate, db: Session 
     ))
     db.commit()
     return db.query(models.Invoice).options(*_options()).filter(models.Invoice.id == invoice.id).one()
-
 @router.put("/{invoice_id}/void", response_model=schemas.InvoiceOut)
 def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
     """Cancels an invoice: puts the stock back and removes its ledger entry. The invoice stays on record as Void."""

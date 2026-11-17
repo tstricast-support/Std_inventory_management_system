@@ -207,7 +207,7 @@ def create_purchase_bill(payload: schemas.PurchaseBillCreate, db: Session = Depe
 
 @router.put("/{bill_id}", response_model=schemas.PurchaseBillOut)
 def update_purchase_bill(bill_id: int, payload: schemas.PurchaseBillCreate, db: Session = Depends(get_db)):
-    """Edits a bill in place (it keeps its number): the old stock and ledger entry are reversed, then the new ones are posted."""
+    """Edits a bill in place: the old stock and ledger entry are reversed, then the new ones are posted. The bill number can be changed."""
     bill = db.query(models.PurchaseBill).filter(models.PurchaseBill.id == bill_id).with_for_update().first()
     if not bill:
         raise HTTPException(404, "Bill not found")
@@ -229,7 +229,7 @@ def update_purchase_bill(bill_id: int, payload: schemas.PurchaseBillCreate, db: 
             db, requested, model=models.PurchaseBill, column=models.PurchaseBill.bill_number,
             prefix="PB", journal_source="purchase_bill", self_id=bill.id,
         )
-        due_date = payload.due_date or payload.bill_date
+    due_date = payload.due_date or payload.bill_date
     if due_date < payload.bill_date:
         raise HTTPException(400, "Due date can't be before the bill date")
 
@@ -333,13 +333,14 @@ def update_purchase_bill(bill_id: int, payload: schemas.PurchaseBillCreate, db: 
         if pid in products:
             products[pid].quantity -= qty
 
+    # the old stock-history rows are found by the OLD number
     db.query(models.StockMovement).filter(models.StockMovement.note == f"Purchase bill {old_number}").delete()
     for journal in db.query(models.Journal).filter(
         models.Journal.source_type == "purchase_bill", models.Journal.source_id == bill.id
     ).all():
         db.delete(journal)
     db.flush()   # the old journal must be gone before the new one reuses its number
-    
+
     bill.bill_number = number
     bill.items = bill_lines
     bill.vendor_ref = (payload.vendor_ref or "").strip() or None
