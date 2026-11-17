@@ -14707,6 +14707,24 @@ function AccountDetail({ accountId, go, fromParam }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [data, showEditForm, showDeleteConfirm]);
 
+  // Ctrl+E edits the account being viewed
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "e") return;
+      const el = document.activeElement;
+      if (
+        el &&
+        (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) ||
+          el.isContentEditable)
+      )
+        return;
+      e.preventDefault(); // stops the browser's "focus address/search bar"
+      if (data && !showEditForm && !showDeleteConfirm) setShowEditForm(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [data, showEditForm, showDeleteConfirm]);
+
   const basisLabel = data?.value_basis === "price" ? "sales price" : "cost";
   const itemLinked = data ? ITEM_LINKED_TYPES.has(data.account_type) : false;
 
@@ -15199,6 +15217,7 @@ function AccountingPage({ isAdmin, go }) {
   const [sort, setSort] = useState({ key: "type", dir: "asc" });
   const [selectedId, setSelectedId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [editTarget, setEditTarget] = useState(null);
 
   const load = async () => {
     try {
@@ -15234,6 +15253,35 @@ function AccountingPage({ isAdmin, go }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [accounts, selectedId, deleteTarget, formOpen, panelOpen]);
+
+  // select an account, press Ctrl+E to edit it
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "e") return;
+      const el = document.activeElement;
+      if (
+        el &&
+        (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) ||
+          el.isContentEditable)
+      )
+        return;
+      e.preventDefault();
+      if (editTarget || deleteTarget || formOpen || panelOpen || colsOpen)
+        return;
+      const a = accounts.find((x) => x.id === selectedId);
+      if (a) setEditTarget(a);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    accounts,
+    selectedId,
+    editTarget,
+    deleteTarget,
+    formOpen,
+    panelOpen,
+    colsOpen,
+  ]);
 
   const handleDeleteAccount = async () => {
     try {
@@ -15842,6 +15890,17 @@ function AccountingPage({ isAdmin, go }) {
           onClose={() => setFormOpen(false)}
           onSubmit={async (payload) => {
             await createAccount(payload);
+            await load();
+          }}
+        />
+      )}
+
+      {editTarget && (
+        <AccountForm
+          initialData={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSubmit={async (id, payload) => {
+            await updateAccount(id, payload);
             await load();
           }}
         />
@@ -24025,6 +24084,8 @@ const SHORTCUT_HELP = [
     [
       ["Ctrl + F  or  /", "Find (search)"],
       ["Ctrl + Enter", "Save the open form"],
+      ["Ctrl + E", "Edit the selected / open account (Chart of accounts)"],
+      ["Ctrl + D", "Delete the selected / open account (Chart of accounts)"],
       ["Esc", "Close the open form"],
       ["F1  or  ?", "Show this list"],
     ],
