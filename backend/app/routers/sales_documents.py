@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from .. import models, schemas
 from ..database import get_db
+from ..numbering import next_number, resolve_number
 
 router = APIRouter(prefix="/api/sales-documents", tags=["sales-documents"])
 
@@ -33,14 +34,7 @@ def _load(db: Session, doc_id: int):
 
 
 def _next_number(db: Session, doc_type: str) -> str:
-    last = (
-        db.query(models.SalesDocument)
-        .filter(models.SalesDocument.doc_type == doc_type)
-        .order_by(models.SalesDocument.id.desc())
-        .first()
-    )
-    number = int(last.doc_number.split("-")[1]) + 1 if last else 1
-    return f"{PREFIX[doc_type]}-{number:04d}"
+    return next_number(db, models.SalesDocument.doc_number, PREFIX[doc_type])
 
 
 @router.get("/", response_model=list[schemas.SalesDocumentOut])
@@ -51,6 +45,13 @@ def list_documents(doc_type: str | None = None, customer_id: int | None = None, 
     if customer_id:
         query = query.filter(models.SalesDocument.customer_id == customer_id)
     return query.order_by(models.SalesDocument.doc_date.desc(), models.SalesDocument.id.desc()).all()
+
+
+@router.get("/next-number")
+def next_document_number(doc_type: str, db: Session = Depends(get_db)):
+    if doc_type not in PREFIX:
+        raise HTTPException(400, "doc_type must be quote or sales_order")
+    return {"doc_number": _next_number(db, doc_type)}
 
 
 @router.post("/", response_model=schemas.SalesDocumentOut)
@@ -100,9 +101,14 @@ def create_document(payload: schemas.SalesDocumentCreate, db: Session = Depends(
     if total <= 0:
         raise HTTPException(400, "The total must be greater than 0")
 
+    # a number typed by the user wins; empty -> the next free number
+    number = resolve_number(
+        db, payload.doc_number, model=models.SalesDocument, column=models.SalesDocument.doc_number,
+        prefix=PREFIX[payload.doc_type], journal_source="sales_document",
+    )
     doc = models.SalesDocument(
         doc_type=payload.doc_type,
-        doc_number=_next_number(db, payload.doc_type),
+        doc_number=number,
         customer_id=customer.id,
         doc_date=payload.doc_date,
         expiry_date=payload.expiry_date,
@@ -118,7 +124,7 @@ def create_document(payload: schemas.SalesDocumentCreate, db: Session = Depends(
 
 @router.put("/{doc_id}", response_model=schemas.SalesDocumentOut)
 def update_document(doc_id: int, payload: schemas.SalesDocumentUpdate, db: Session = Depends(get_db)):
-    """Edit a quote / sales order. Locked once it is invoiced or converted."""
+    """Edit a quote / sales order (the number can be changed too). Locked once it is invoiced or converted."""
     doc = _load(db, doc_id)
     if not doc:
         raise HTTPException(404, "Document not found")
@@ -167,6 +173,14 @@ def update_document(doc_id: int, payload: schemas.SalesDocumentUpdate, db: Sessi
     if total <= 0:
         raise HTTPException(400, "The total must be greater than 0")
 
+    # the number: a typed (changed) number wins, otherwise the document keeps its own
+    requested = (payload.doc_number or "").strip()
+    if requested and requested != doc.doc_number:
+        doc.doc_number = resolve_number(
+            db, requested, model=models.SalesDocument, column=models.SalesDocument.doc_number,
+            prefix=PREFIX[doc.doc_type], journal_source="sales_document", self_id=doc.id,
+        )
+
     doc.customer_id = customer.id
     doc.doc_date = payload.doc_date
     doc.expiry_date = payload.expiry_date
@@ -176,7 +190,6 @@ def update_document(doc_id: int, payload: schemas.SalesDocumentUpdate, db: Sessi
     doc.items = lines          # the old lines are deleted automatically (delete-orphan)
     db.commit()
     return _load(db, doc_id)
-
 @router.put("/{doc_id}/status", response_model=schemas.SalesDocumentOut)
 def set_quote_status(doc_id: int, payload: schemas.SalesDocumentStatusUpdate, db: Session = Depends(get_db)):
     """Quotes only: draft -> sent -> accepted / declined."""
@@ -207,7 +220,10 @@ def quote_to_sales_order(doc_id: int, db: Session = Depends(get_db)):
 
     order = models.SalesDocument(
         doc_type="sales_order",
-        doc_number=_next_number(db, "sales_order"),
+        doc_number=resolve_number(
+            db, None, model=models.SalesDocument, column=models.SalesDocument.doc_number,
+            prefix=PREFIX["sales_order"], journal_source="sales_document",
+        ),
         customer_id=quote.customer_id,
         doc_date=date.today(),
         expiry_date=None,
@@ -228,7 +244,6 @@ def quote_to_sales_order(doc_id: int, db: Session = Depends(get_db)):
     quote.status = "converted"
     db.commit()
     return _load(db, order.id)
-
 
 @router.delete("/{doc_id}")
 def delete_document(doc_id: int, db: Session = Depends(get_db)):

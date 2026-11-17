@@ -1331,6 +1331,19 @@ function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
   const [customerId, setCustomerId] = useState(
     editDoc ? editDoc.customer_id : "",
   );
+  // our own number: new = the suggested next number (editable), edit = the saved number (editable)
+  const [docNo, setDocNo] = useState(editDoc?.doc_number || "");
+  const [suggestedNo, setSuggestedNo] = useState("");
+  const loadNextNo = () =>
+    getNextDocNumber(docType)
+      .then((r) => {
+        setDocNo(r.doc_number);
+        setSuggestedNo(r.doc_number);
+      })
+      .catch(() => {});
+  useEffect(() => {
+    if (!editDoc) loadNextNo();
+  }, []);
   const [date, setDate] = useState(editDoc?.doc_date || toISODate(new Date()));
   const [endDate, setEndDate] = useState(editDoc?.expiry_date || "");
   const [reference, setReference] = useState(editDoc?.reference || "");
@@ -1339,24 +1352,24 @@ function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [quickCustomerName, setQuickCustomerName] = useState(null); // typed name, or null = popup closed
-    const draft = useFormDraft({
-      name: `sales-${docType}`,
-      enabled: !editDoc,
-      snapshot: { customerId, date, endDate, reference, notes, lines },
-      hasContent:
-        Boolean(customerId) ||
-        Boolean(reference.trim()) ||
-        Boolean(notes.trim()) ||
-        lines.some(docLineFilled),
-      apply: (d) => {
-        setCustomerId(d.customerId ?? "");
-        setDate(d.date || toISODate(new Date()));
-        setEndDate(d.endDate || "");
-        setReference(d.reference || "");
-        setNotes(d.notes || "");
-        setLines(d.lines?.length ? d.lines : docLinesFrom(null));
-      },
-    });
+  const draft = useFormDraft({
+    name: `sales-${docType}`,
+    enabled: !editDoc,
+    snapshot: { customerId, date, endDate, reference, notes, lines },
+    hasContent:
+      Boolean(customerId) ||
+      Boolean(reference.trim()) ||
+      Boolean(notes.trim()) ||
+      lines.some(docLineFilled),
+    apply: (d) => {
+      setCustomerId(d.customerId ?? "");
+      setDate(d.date || toISODate(new Date()));
+      setEndDate(d.endDate || "");
+      setReference(d.reference || "");
+      setNotes(d.notes || "");
+      setLines(d.lines?.length ? d.lines : docLinesFrom(null));
+    },
+  });
   const cls =
     "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
 
@@ -1417,6 +1430,7 @@ function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
     setNotes("");
     setLines(docLinesFrom(null));
     setError(null);
+    if (!editDoc) loadNextNo(); // a fresh suggested number for the next document
   };
 
   const save = async (andNew) => {
@@ -1424,7 +1438,10 @@ function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
     setSubmitting(true);
     setError(null);
     try {
+      const typedNo = docNo.trim();
       const payload = {
+        // a typed number wins; the untouched suggestion means "give me the next free one at save time"
+        doc_number: typedNo && typedNo !== suggestedNo ? typedNo : null,
         customer_id: customerId,
         doc_date: date,
         expiry_date: endDate || null,
@@ -1462,7 +1479,7 @@ function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
         </div>
       )}
 
-      {/* ---------- header: customer / address / memo | date / expiry / ref no / amount ---------- */}
+      {/* ---------- header: customer / address / memo | number / date / expiry / ref no / amount ---------- */}
       <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] gap-4 bg-blue-50/60 border border-blue-200 rounded-lg p-3 sm:p-4">
         <div className="space-y-3 min-w-0">
           <div>
@@ -1512,6 +1529,17 @@ function SalesDocumentForm({ docType, editDoc = null, onClose, onSaved }) {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-1 gap-3 content-start">
+          <label className="text-xs text-gray-500">
+            {info.title} no.
+            <input
+              value={docNo}
+              onChange={(e) => setDocNo(e.target.value)}
+              maxLength={30}
+              placeholder="Auto"
+              title="Type your own number, or keep the suggested one"
+              className={cls + " mt-1 font-medium"}
+            />
+          </label>
           <label className="text-xs text-gray-500">
             {info.dateLabel}
             <input
@@ -1714,6 +1742,15 @@ const getSalesDocs = (docType) =>
     null,
     "Failed to fetch documents",
   );
+
+const getNextDocNumber = (docType) =>
+  salesDocRequest(
+    `next-number?doc_type=${docType}`,
+    "GET",
+    null,
+    "Failed to get the next number",
+  );
+
 const createSalesDoc = (payload) =>
   salesDocRequest("", "POST", payload, "Failed to save document");
 const updateSalesDoc = (id, payload) =>

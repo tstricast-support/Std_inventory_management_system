@@ -390,6 +390,7 @@ class SalesDocumentItemCreate(BaseModel):
 
 class SalesDocumentCreate(BaseModel):
     doc_type: str                           # "quote" or "sales_order"
+    doc_number: Optional[str] = None        # typed by the user; empty -> next free number
     customer_id: int
     doc_date: date
     expiry_date: Optional[date] = None
@@ -402,6 +403,7 @@ class SalesDocumentStatusUpdate(BaseModel):
 
 
 class SalesDocumentUpdate(BaseModel):
+    doc_number: Optional[str] = None        # change the number (empty = keep the current one)
     customer_id: int
     doc_date: date
     expiry_date: Optional[date] = None
