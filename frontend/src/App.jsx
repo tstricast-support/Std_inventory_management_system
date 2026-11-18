@@ -9344,43 +9344,148 @@ function PLTransactions({
   );
 }
 
-// full details of one transaction: the invoice / bill itself + the accounting entries it posted
-function PLTransactionModal({ tx, onClose }) {
+// full details of one transaction: the invoice / bill itself + the accounting entries it posted.
+// NEW: the person can also EDIT it, or VOID / DELETE it, right here (same forms + same rules as its own page).
+function PLTransactionModal({ tx, onClose, onChanged }) {
+  const { can, hasRight } = useAuth();
   const [journal, setJournal] = useState(null);
-  const [doc, setDoc] = useState(null); // the invoice or purchase bill
+  const [rec, setRec] = useState(null); // the saved invoice / bill / credit note / payment / bill payment / manual journal
   const [error, setError] = useState(null);
   const [pdfFor, setPdfFor] = useState(null);
+  const [editing, setEditing] = useState(false); // the edit form is open
+  const [confirmRemove, setConfirmRemove] = useState(false); // waiting for the typed VOID / DELETE
+  const [busy, setBusy] = useState(false);
+
+  const st = tx.source_type || null; // null = a manual journal
+  const isBank = (st || "").startsWith("bank_");
 
   useEffect(() => {
     let off = false;
     getPLJournal(tx.journal_id)
       .then((j) => !off && setJournal(j))
       .catch((e) => !off && setError(e.message));
-    const loadDoc =
-      tx.source_type === "invoice"
-        ? invoiceRequest(
-            String(tx.source_id),
-            "GET",
-            null,
-            "Failed to load the invoice",
-          )
-        : tx.source_type === "purchase_bill"
-          ? purchaseBillRequest(
-              String(tx.source_id),
-              "GET",
-              null,
-              "Failed to load the bill",
-            )
-          : null;
-    loadDoc?.then((d) => !off && setDoc(d)).catch(() => {});
+
+    const byId = (list, id) => (list || []).find((r) => r.id === id) || null;
+    let load = null;
+    if (st === "invoice")
+      load = invoiceRequest(String(tx.source_id), "GET", null, "Failed to load the invoice");
+    else if (st === "purchase_bill")
+      load = purchaseBillRequest(String(tx.source_id), "GET", null, "Failed to load the bill");
+    else if (st === "credit_note")
+      load = getCreditNotes().then((l) => byId(l, tx.source_id));
+    else if (st === "payment")
+      load = getPayments().then((l) => byId(l, tx.source_id));
+    else if (st === "vendor_payment")
+      load = getVendorPayments().then((l) => byId(l, tx.source_id));
+    else if (!st)
+      load = getJournals().then((l) => byId(l, tx.journal_id)); // manual journal
+    load?.then((d) => !off && setRec(d)).catch(() => {});
     return () => {
       off = true;
     };
   }, [tx.journal_id]);
 
-  const isInvoice = tx.source_type === "invoice" && doc;
-  const isBill = tx.source_type === "purchase_bill" && doc;
-  const st = isInvoice ? invoiceStatus(doc) : null;
+  const doc = st === "invoice" || st === "purchase_bill" ? rec : null;
+  const isInvoice = st === "invoice" && !!doc;
+  const isBill = st === "purchase_bill" && !!doc;
+  const stat = isInvoice ? invoiceStatus(doc) : null;
+  const num = (v) => Number(v || 0);
+
+  // what the person may do with this transaction - the same rules as the Invoices / Bills / Payments ... pages
+  let canEdit = false;
+  let remove = null; // { verb, label, note, run }
+  let hint = "";
+  if (rec && st === "invoice") {
+    const live = rec.status !== "void";
+    canEdit = live && num(rec.amount_paid) <= 0.004 && can("invoices", "full");
+    if (live && hasRight("void_transactions"))
+      remove = {
+        verb: "Void",
+        label: rec.invoice_number,
+        note: "The stock goes back and its ledger entry is removed.",
+        run: () => voidInvoice(rec.id),
+      };
+    if (live && num(rec.amount_paid) > 0.004)
+      hint = "This invoice has payments / credits. Remove them first to edit or void it.";
+  } else if (rec && st === "purchase_bill") {
+    const live = rec.status !== "void";
+    canEdit = live && num(rec.amount_paid) <= 0.004 && can("purchase_bills", "full");
+    if (live && hasRight("void_transactions"))
+      remove = {
+        verb: "Void",
+        label: rec.bill_number,
+        note: "The stock it added is taken back and its ledger entry is removed.",
+        run: () => voidPurchaseBill(rec.id),
+      };
+    if (live && num(rec.amount_paid) > 0.004)
+      hint = "This bill has payments. Remove them first to edit or void it.";
+  } else if (rec && st === "credit_note") {
+    const live = rec.status !== "void";
+    canEdit = live && num(rec.amount_applied) <= 0.004 && can("credit_notes", "full");
+    if (live && hasRight("void_transactions"))
+      remove = {
+        verb: "Void",
+        label: rec.credit_number,
+        note: "Returned stock is taken out again and its ledger entry is removed.",
+        run: () => voidCreditNote(rec.id),
+      };
+    if (live && num(rec.amount_applied) > 0.004)
+      hint = "This credit note is applied to an invoice. Take it off first to edit it.";
+  } else if (rec && st === "payment") {
+    canEdit = can("payments_in", "full");
+    if (can("payments_in", "full") && hasRight("delete_records"))
+      remove = {
+        verb: "Delete",
+        label: rec.payment_number,
+        note: "Its invoices will owe the money again and the ledger entry is removed.",
+        run: () => deletePayment(rec.id),
+      };
+  } else if (rec && st === "vendor_payment") {
+    canEdit = can("payments_out", "full");
+    if (can("payments_out", "full") && hasRight("delete_records"))
+      remove = {
+        verb: "Delete",
+        label: rec.payment_number,
+        note: "Its bills will be owed again and the ledger entry is removed.",
+        run: () => deleteVendorPayment(rec.id),
+      };
+  } else if (rec && !st) {
+    canEdit = can("journals", "full");
+    if (can("journals", "full") && hasRight("delete_records"))
+      remove = {
+        verb: "Delete",
+        label: rec.journal_number,
+        note: "This can't be undone.",
+        run: () => deleteJournal(rec.id),
+      };
+  } else if (isBank && can("banking", "full")) {
+    // deposits / withdrawals / transfers / opening balances have no edit form - they can only be deleted
+    remove = {
+      verb: "Delete",
+      label: tx.number,
+      note: "The ledger entry is removed.",
+      run: () => deleteBankTransaction(tx.journal_id),
+    };
+  }
+
+  // the edit form saved: the old ledger entry is replaced by a new one, so close this window and refresh the report
+  const afterSaved = () => {
+    onChanged?.();
+    onClose();
+  };
+  const handleRemove = async () => {
+    setConfirmRemove(false);
+    setBusy(true);
+    try {
+      await remove.run();
+      onChanged?.();
+      onClose();
+    } catch (err) {
+      setBusy(false);
+      alert(err.message);
+    }
+  };
+
   const th = "py-1.5 text-xs font-semibold text-gray-500";
   const row = (k, val) =>
     val ? (
@@ -9400,7 +9505,7 @@ function PLTransactionModal({ tx, onClose }) {
               <span className="text-gray-400 font-normal"> · {tx.name}</span>
             )}
           </h3>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
             {isInvoice && (
               <button
                 type="button"
@@ -9408,6 +9513,26 @@ function PLTransactionModal({ tx, onClose }) {
                 className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
               >
                 View PDF
+              </button>
+            )}
+            {canEdit && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setEditing(true)}
+                className="inline-flex items-center gap-1.5 border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+              >
+                <Pencil size={14} /> Edit
+              </button>
+            )}
+            {remove && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setConfirmRemove(true)}
+                className="inline-flex items-center gap-1.5 border border-red-200 text-red-600 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-red-50 disabled:opacity-50"
+              >
+                <Trash2 size={14} /> {remove.verb}
               </button>
             )}
             <button
@@ -9422,6 +9547,11 @@ function PLTransactionModal({ tx, onClose }) {
 
         <div className="overflow-y-auto p-4 space-y-5 text-sm">
           {error && <p className="text-red-500">{error}</p>}
+          {hint && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              {hint}
+            </p>
+          )}
           {!journal && !error && (
             <p className="text-gray-400 text-center py-10">Loading...</p>
           )}
@@ -9432,11 +9562,11 @@ function PLTransactionModal({ tx, onClose }) {
                 <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-400">
                   {isInvoice ? "Invoice" : "Bill"} details
                 </h4>
-                {st && (
+                {stat && (
                   <span
-                    className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${st.cls}`}
+                    className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${stat.cls}`}
                   >
-                    {st.label}
+                    {stat.label}
                   </span>
                 )}
               </div>
@@ -9562,8 +9692,69 @@ function PLTransactionModal({ tx, onClose }) {
           )}
         </div>
       </div>
+
       {pdfFor && (
         <InvoicePreviewModal invoice={pdfFor} onClose={() => setPdfFor(null)} />
+      )}
+
+      {/* the same edit windows the Invoices / Bills / Payments ... pages open */}
+      {editing && rec && st === "invoice" && (
+        <InvoiceForm
+          key={rec.id}
+          editInvoice={rec}
+          onClose={() => setEditing(false)}
+          onSaved={afterSaved}
+        />
+      )}
+      {editing && rec && st === "purchase_bill" && (
+        <PurchaseBillForm
+          key={rec.id}
+          editBill={rec}
+          onClose={() => setEditing(false)}
+          onSaved={afterSaved}
+        />
+      )}
+      {editing && rec && st === "credit_note" && (
+        <CreditNoteForm
+          key={rec.id}
+          editNote={rec}
+          onClose={() => setEditing(false)}
+          onSaved={afterSaved}
+        />
+      )}
+      {editing && rec && st === "payment" && (
+        <PaymentForm
+          key={rec.id}
+          editPayment={rec}
+          onClose={() => setEditing(false)}
+          onSaved={afterSaved}
+        />
+      )}
+      {editing && rec && st === "vendor_payment" && (
+        <VendorPaymentForm
+          key={rec.id}
+          editPayment={rec}
+          onClose={() => setEditing(false)}
+          onSaved={afterSaved}
+        />
+      )}
+      {editing && rec && !st && (
+        <JournalForm
+          key={rec.id}
+          editJournal={rec}
+          onClose={() => setEditing(false)}
+          onSaved={afterSaved}
+        />
+      )}
+
+      {confirmRemove && remove && (
+        <TypedDeleteConfirm
+          verb={remove.verb}
+          label={remove.label}
+          note={remove.note}
+          onCancel={() => setConfirmRemove(false)}
+          onConfirm={handleRemove}
+        />
       )}
     </div>
   );
@@ -25088,9 +25279,10 @@ function QuickReportModal({ accountId, onClose }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [txOpen, setTxOpen] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0); // bumped after a transaction is edited / voided / deleted
   const { data, loading, error } = useReport(
     () => getAccountTransactions(accountId, to, false, from),
-    [accountId, from, to],
+    [accountId, from, to, reloadKey],
   );
   const th = "px-2 py-1.5 text-xs font-semibold text-gray-500";
   const dateBox = (label, value, set) => (
@@ -25110,7 +25302,12 @@ function QuickReportModal({ accountId, onClose }) {
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200">
           <h3 className="font-semibold text-gray-900 truncate">
             Quick report
-            {data && <span className="text-gray-400 font-normal"> · {data.account.name}</span>}
+            {data && (
+              <span className="text-gray-400 font-normal">
+                {" "}
+                · {data.account.name}
+              </span>
+            )}
           </h3>
           <button
             type="button"
@@ -25126,17 +25323,24 @@ function QuickReportModal({ accountId, onClose }) {
           {(from || to) && (
             <button
               type="button"
-              onClick={() => { setFrom(""); setTo(""); }}
+              onClick={() => {
+                setFrom("");
+                setTo("");
+              }}
               className="text-sm text-blue-700 underline pb-1.5"
             >
               All dates
             </button>
           )}
-          {!from && !to && <span className="text-xs text-gray-400 pb-2">All dates</span>}
+          {!from && !to && (
+            <span className="text-xs text-gray-400 pb-2">All dates</span>
+          )}
         </div>
         <div className="overflow-auto p-4">
           {error && <p className="text-red-500 text-sm">{error}</p>}
-          {loading && !data && <p className="text-gray-400 text-center py-10">Loading...</p>}
+          {loading && !data && (
+            <p className="text-gray-400 text-center py-10">Loading...</p>
+          )}
           {data && (
             <table className="w-full text-sm min-w-[640px]">
               <thead>
@@ -25152,41 +25356,78 @@ function QuickReportModal({ accountId, onClose }) {
               <tbody>
                 {from && (
                   <tr className="border-b border-gray-100 text-gray-500">
-                    <td className="px-2 py-1.5" colSpan={5}>Opening balance</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{plNum(data.opening_balance)}</td>
+                    <td className="px-2 py-1.5" colSpan={5}>
+                      Opening balance
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {plNum(data.opening_balance)}
+                    </td>
                   </tr>
                 )}
                 {data.rows.length === 0 && (
-                  <tr><td colSpan={6} className="px-2 py-6 text-center text-gray-400">No transactions.</td></tr>
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-2 py-6 text-center text-gray-400"
+                    >
+                      No transactions.
+                    </td>
+                  </tr>
                 )}
                 {data.rows.map((r) => (
                   <tr key={r.id} className="border-b border-gray-100">
-                    <td className="px-2 py-1.5 whitespace-nowrap">{formatJournalDate(r.date)}</td>
                     <td className="px-2 py-1.5 whitespace-nowrap">
-                      <button type="button" onClick={() => setTxOpen(r)} className="text-blue-700 underline font-medium">
+                      {formatJournalDate(r.date)}
+                    </td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => setTxOpen(r)}
+                        className="text-blue-700 underline font-medium"
+                      >
                         {r.type} {r.number}
                       </button>
                     </td>
                     <td className="px-2 py-1.5">
                       {r.name}
-                      {r.account && r.account !== data.account.name && <span className="text-gray-400"> · {r.account}</span>}
-                      {r.memo && <span className="text-gray-400"> - {r.memo}</span>}
+                      {r.account && r.account !== data.account.name && (
+                        <span className="text-gray-400"> · {r.account}</span>
+                      )}
+                      {r.memo && (
+                        <span className="text-gray-400"> - {r.memo}</span>
+                      )}
                     </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{r.debit ? plNum(r.debit) : ""}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{r.credit ? plNum(r.credit) : ""}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{plNum(r.balance)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {r.debit ? plNum(r.debit) : ""}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {r.credit ? plNum(r.credit) : ""}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {plNum(r.balance)}
+                    </td>
                   </tr>
                 ))}
                 <tr className="font-semibold">
-                  <td className="px-2 py-2" colSpan={5}>Balance</td>
-                  <td className="px-2 py-2 text-right tabular-nums">{plNum(data.closing_balance)}</td>
+                  <td className="px-2 py-2" colSpan={5}>
+                    Balance
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums">
+                    {plNum(data.closing_balance)}
+                  </td>
                 </tr>
               </tbody>
             </table>
           )}
         </div>
       </div>
-      {txOpen && <PLTransactionModal tx={txOpen} onClose={() => setTxOpen(null)} />}
+      {txOpen && (
+        <PLTransactionModal
+          tx={txOpen}
+          onClose={() => setTxOpen(null)}
+          onChanged={() => setReloadKey((k) => k + 1)}
+        />
+      )}
     </div>
   );
 }
