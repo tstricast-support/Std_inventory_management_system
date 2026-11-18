@@ -504,3 +504,98 @@ export async function downloadPurchaseBillPdf(b, vendor, asFile = false) {
   if (asFile) return new File([doc.output("blob")], `${b.bill_number}.pdf`, { type: "application/pdf" });
   doc.save(`${b.bill_number}.pdf`);
 }
+
+// ---------- Daily Sales & Collection report (one day) ----------
+export async function makeDailySalesPdf(day, rep, det) {
+  const company = await loadCompanyProfile();
+  const logo = company.logo ? await loadImage(company.logo, 300) : null; // null if it can't load: PDF still works
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const M = 14;
+  const dark = [31, 41, 55];
+  const grey = [107, 114, 128];
+
+  // ---- header: logo + company (left), title + date (right) ----
+  let leftY = M;
+  if (logo) {
+    const h = 16;
+    const w = Math.min(40, (logo.w / logo.h) * h);
+    doc.addImage(logo.data, "JPEG", M, M - 2, w, h);
+    leftY = M + h + 1;
+  }
+  doc.setTextColor(...dark);
+  doc.setFont("helvetica", "bold").setFontSize(13);
+  doc.text(company.name || "", M, leftY + 4);
+  doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(...grey);
+  company.lines.forEach((l, i) => doc.text(l, M, leftY + 9 + i * 4.2));
+  const headerBottom = leftY + 9 + company.lines.length * 4.2;
+
+  doc.setTextColor(...dark);
+  doc.setFont("helvetica", "bold").setFontSize(18);
+  doc.text("DAILY SALES REPORT", pageW - M, M + 6, { align: "right" });
+  doc.setFont("helvetica", "bold").setFontSize(11);
+  doc.text(dateText(day), pageW - M, M + 13, { align: "right" });
+  doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(...grey);
+  doc.text(`Printed ${new Date().toLocaleString("en-GB")}`, pageW - M, M + 18, { align: "right" });
+
+  let y = Math.max(headerBottom, M + 22) + 6;
+  doc.setDrawColor(229, 231, 235).line(M, y - 3, pageW - M, y - 3);
+
+  // ---- tables ----
+  const baseTable = {
+    margin: { left: M, right: M, bottom: 14 },
+    theme: "plain",
+    styles: { fontSize: 9, textColor: dark, cellPadding: 2.5, lineColor: [229, 231, 235], lineWidth: { bottom: 0.2 } },
+    headStyles: { fillColor: [243, 244, 246], textColor: grey, fontStyle: "bold", fontSize: 8 },
+  };
+  const section = (title, head, body, rightCols = []) => {
+    if (doc.lastAutoTable) y = doc.lastAutoTable.finalY + 8;
+    if (y > pageH - 40) { doc.addPage(); y = M; }
+    doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(...grey);
+    doc.text(title, M, y);
+    const columnStyles = {};
+    rightCols.forEach((c) => { columnStyles[c] = { halign: "right" }; });
+    autoTable(doc, {
+      ...baseTable,
+      startY: y + 2,
+      head: [head],
+      body: body.length ? body : [[{ content: "None", colSpan: head.length, styles: { textColor: grey } }]],
+      columnStyles,
+      didParseCell: (d) => {
+        if (d.section === "head" && rightCols.includes(d.column.index)) d.cell.styles.halign = "right";
+      },
+    });
+    y = doc.lastAutoTable.finalY;
+  };
+
+  const r = rep.rows[0] || { invoices: 0, sales: 0, returns: 0, net_sales: 0, payments: 0, collection: 0 };
+  const byMode = {};
+  for (const p of det.payments) byMode[p.mode || "Other"] = (byMode[p.mode || "Other"] || 0) + p.amount;
+
+  section("SUMMARY", ["Item", "Count", "Amount"], [
+    ["Sales (invoices)", String(r.invoices), money(r.sales)],
+    ["Returns (credit notes)", "", money(r.returns)],
+    ["Net sales", "", money(r.net_sales)],
+    ["Collection (payments)", String(r.payments), money(r.collection)],
+    ["Net sales - collection", "", money(r.net_sales - r.collection)],
+  ], [1, 2]);
+
+  section("COLLECTION BY PAYMENT MODE", ["Mode", "Amount"],
+    Object.entries(byMode).map(([mode, amt]) => [mode, money(amt)]), [1]);
+
+  section("INVOICES", ["Number", "Customer", "Total", "Paid"],
+    det.invoices.map((i) => [i.number, i.customer, money(i.total), money(i.paid)]), [2, 3]);
+
+  section("PAYMENTS RECEIVED", ["Number", "Customer", "Mode", "Amount"],
+    det.payments.map((p) => [p.number, p.customer, p.mode || "", money(p.amount)]), [3]);
+
+  // ---- page numbers ----
+  const pages = doc.getNumberOfPages();
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p);
+    doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(...grey);
+    doc.text(`Daily Sales Report ${day}  -  Page ${p} of ${pages}`, pageW / 2, pageH - 8, { align: "center" });
+  }
+  return doc;
+}

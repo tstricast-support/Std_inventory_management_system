@@ -10782,10 +10782,122 @@ function DayDetail({ day }) {
   );
 }
 
+// ---------- Save the daily report into a folder on this PC ----------
+const canPickFolder = typeof window !== "undefined" && "showDirectoryPicker" in window;
+
+// tiny IndexedDB wrapper, only used to remember the chosen folder between visits
+function folderDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("std-report-folder", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("kv");
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function folderDbGet(key) {
+  const db = await folderDb();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction("kv").objectStore("kv").get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function folderDbSet(key, value) {
+  const db = await folderDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("kv", "readwrite");
+    tx.objectStore("kv").put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// returns the saved folder (asking permission again if needed) or lets the user pick one
+async function getReportFolder(forcePick = false) {
+  let handle = forcePick ? null : await folderDbGet("dir").catch(() => null);
+  if (handle) {
+    let perm = await handle.queryPermission({ mode: "readwrite" });
+    if (perm !== "granted") perm = await handle.requestPermission({ mode: "readwrite" });
+    if (perm !== "granted") handle = null;
+  }
+  if (!handle) {
+    handle = await window.showDirectoryPicker({ id: "std-daily-sales", mode: "readwrite", startIn: "documents" });
+    await folderDbSet("dir", handle).catch(() => {});
+  }
+  return handle;
+}
+
+function reportCsvText(rows) {
+  const esc = (v) => {
+    let s = String(v ?? "");
+    if (/^[=+\-@]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+  return "\uFEFF" + rows.map((r) => r.map(esc).join(",")).join("\r\n");
+}
+
+
+// builds the one-day PDF and saves it; returns a short "where it went" text
+async function saveDailyReportToFolder(day, changeFolder = false) {
+  // ask for the folder FIRST - the browser only allows the picker right after a click
+  let dir = canPickFolder ? await getReportFolder(changeFolder) : null;
+
+  const [rep, det, pdf] = await Promise.all([
+    getDailyReport(day, day),
+    getDailyDetail(day),
+    import("./pdf.js"),
+  ]);
+  const doc = await pdf.makeDailySalesPdf(day, rep, det);
+  const name = `daily-sales_${day}.pdf`;
+
+  if (!dir) {
+    doc.save(name); // browser has no folder access: normal download instead
+    return `${name} (sent to your browser's Downloads folder)`;
+  }
+
+  const blob = doc.output("blob");
+  const write = async (folder) => {
+    const fh = await folder.getFileHandle(name, { create: true });
+    const w = await fh.createWritable();
+    await w.write(blob);
+    await w.close();
+  };
+  try {
+    await write(dir);
+  } catch (err) {
+    if (err?.name === "AbortError") throw err;
+    dir = await getReportFolder(true); // saved folder was deleted / moved: pick again
+    await write(dir);
+  }
+  return `${dir.name} / ${name}`;
+}
+
 function DailySalesReport() {
   const [range, setRange] = useDateRange("month");
   const [hideEmpty, setHideEmpty] = useState(true);
   const [openDay, setOpenDay] = useState(null);
+    const [saveDay, setSaveDay] = useState(localIso());
+    const [saving, setSaving] = useState(false);
+    const [saveMsg, setSaveMsg] = useState(null); // { ok, text }
+
+    const saveReport = async (changeFolder = false) => {
+      setSaving(true);
+      setSaveMsg(null);
+      try {
+        const where = await saveDailyReportToFolder(saveDay, changeFolder);
+        setSaveMsg({ ok: true, text: `Saved to ${where}` });
+      } catch (err) {
+        if (err?.name === "AbortError")
+          setSaveMsg(null); // user closed the folder picker
+        else
+          setSaveMsg({
+            ok: false,
+            text: err?.message || "Could not save the report",
+          });
+      } finally {
+        setSaving(false);
+      }
+    };
   const { data, loading, error } = useReport(
     () => getDailyReport(range.from, range.to),
     [range.from, range.to],
@@ -10805,13 +10917,63 @@ function DailySalesReport() {
   return (
     <>
       <DateRangeFilter value={range} onChange={setRange} />
+      <div className="flex flex-wrap items-end gap-2 mb-4">
+        <label className="text-xs text-gray-500">
+          Save report for
+          <input
+            type="date"
+            value={saveDay}
+            max={localIso()}
+            onChange={(e) => e.target.value && setSaveDay(e.target.value)}
+            className="block border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => saveReport(false)}
+          disabled={saving}
+          className={rptBtn}
+        >
+          <Download size={14} />{" "}
+          {saving
+            ? "Saving..."
+            : canPickFolder
+              ? "Save to PC folder"
+              : "Download PDF"}
+        </button>
+        {canPickFolder && (
+          <button
+            type="button"
+            onClick={() => saveReport(true)}
+            disabled={saving}
+            className={rptBtn}
+          >
+            Change folder
+          </button>
+        )}
+        {saveMsg && (
+          <span
+            className={`text-xs ${saveMsg.ok ? "text-green-700" : "text-red-600"}`}
+          >
+            {saveMsg.text}
+          </span>
+        )}
+      </div>
       <ReportBody loading={loading} error={error} data={data}>
         {data && (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
               {stat("Sales (invoices)", formatRs(data.totals.sales))}
-              {stat("Returns (credit notes)", formatRs(data.totals.returns), data.totals.returns > 0 ? "bad" : undefined)}
-              {stat("Collection (payments)", formatRs(data.totals.collection), "good")}
+              {stat(
+                "Returns (credit notes)",
+                formatRs(data.totals.returns),
+                data.totals.returns > 0 ? "bad" : undefined,
+              )}
+              {stat(
+                "Collection (payments)",
+                formatRs(data.totals.collection),
+                "good",
+              )}
               {stat(
                 "Net sales - collection",
                 formatRs(data.totals.difference),
@@ -10822,15 +10984,23 @@ function DailySalesReport() {
             {data.by_mode.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-4 text-xs">
                 {data.by_mode.map((m) => (
-                  <span key={m.mode} className="bg-white border border-gray-200 rounded-full px-3 py-1 text-gray-600">
-                    {m.mode}: <b className="text-gray-900">{formatRs(m.amount)}</b>
+                  <span
+                    key={m.mode}
+                    className="bg-white border border-gray-200 rounded-full px-3 py-1 text-gray-600"
+                  >
+                    {m.mode}:{" "}
+                    <b className="text-gray-900">{formatRs(m.amount)}</b>
                   </span>
                 ))}
               </div>
             )}
 
             <label className="flex items-center gap-2 text-xs text-gray-500 mb-2">
-              <input type="checkbox" checked={hideEmpty} onChange={(e) => setHideEmpty(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={hideEmpty}
+                onChange={(e) => setHideEmpty(e.target.checked)}
+              />
               Hide days with no sales or collection
             </label>
 
@@ -10850,11 +11020,16 @@ function DailySalesReport() {
                   </thead>
                   <tbody>
                     {data.rows
-                      .filter((r) => !hideEmpty || r.invoices || r.payments || r.returns)
+                      .filter(
+                        (r) =>
+                          !hideEmpty || r.invoices || r.payments || r.returns,
+                      )
                       .map((r) => (
                         <Fragment key={r.date}>
                           <tr
-                            onClick={() => setOpenDay(openDay === r.date ? null : r.date)}
+                            onClick={() =>
+                              setOpenDay(openDay === r.date ? null : r.date)
+                            }
                             className="border-b border-gray-50 cursor-pointer hover:bg-gray-50"
                           >
                             <td className="px-3 py-2 text-left whitespace-nowrap text-gray-900">
@@ -10862,10 +11037,16 @@ function DailySalesReport() {
                             </td>
                             <td className={td}>{r.invoices}</td>
                             <td className={td}>{formatRs(r.sales)}</td>
-                            <td className={`${td} ${r.returns > 0 ? "text-red-600" : ""}`}>{formatRs(r.returns)}</td>
+                            <td
+                              className={`${td} ${r.returns > 0 ? "text-red-600" : ""}`}
+                            >
+                              {formatRs(r.returns)}
+                            </td>
                             <td className={td}>{formatRs(r.net_sales)}</td>
                             <td className={td}>{r.payments}</td>
-                            <td className={`${td} text-green-700`}>{formatRs(r.collection)}</td>
+                            <td className={`${td} text-green-700`}>
+                              {formatRs(r.collection)}
+                            </td>
                           </tr>
                           {openDay === r.date && (
                             <tr className="bg-gray-50">
@@ -10883,12 +11064,17 @@ function DailySalesReport() {
                       <td className={td}>{formatRs(data.totals.returns)}</td>
                       <td className={td}>{formatRs(data.totals.net_sales)}</td>
                       <td className={td}>{data.totals.payments}</td>
-                      <td className={`${td} text-green-700`}>{formatRs(data.totals.collection)}</td>
+                      <td className={`${td} text-green-700`}>
+                        {formatRs(data.totals.collection)}
+                      </td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-              <p className="text-xs text-gray-400 mt-2">Tap a day to see its invoices and payments. Void invoices are not counted.</p>
+              <p className="text-xs text-gray-400 mt-2">
+                Tap a day to see its invoices and payments. Void invoices are
+                not counted.
+              </p>
             </ReportCard>
           </>
         )}
