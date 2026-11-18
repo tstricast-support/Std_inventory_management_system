@@ -26327,7 +26327,10 @@ function ZohoLayout({ children }) {
 
       {drawer && (
         <div className="md:hidden fixed inset-0 z-40 flex">
-          <div className="w-64 max-w-[80%] bg-[#1f2640] h-full overflow-y-auto">
+          <div
+            className="w-64 max-w-[80%] bg-[#1f2640] h-full overflow-y-auto"
+            style={{ paddingTop: "env(safe-area-inset-top)" }} // keep the menu clear of the iPhone status bar
+          >
             <ZohoSidebar onNavigate={() => setDrawer(false)} />
           </div>
           <div
@@ -26338,7 +26341,11 @@ function ZohoLayout({ children }) {
       )}
 
       <div className="flex-1 min-w-0">
-        <div className="md:hidden flex items-center gap-3 bg-[#1f2640] text-white px-4 py-3">
+        {/* phone navigation bar: always visible (sticky), sits just under the iPhone status bar */}
+        <div
+          className="md:hidden sticky z-30 flex items-center gap-3 bg-[#1f2640] text-white px-4 py-3 shadow-md"
+          style={{ top: "env(safe-area-inset-top)" }}
+        >
           <button
             onClick={() => setDrawer(true)}
             aria-label="Open menu"

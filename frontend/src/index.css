@@ -20,6 +20,20 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
+/* iPhone: paint the status-bar area with the navigation colour (no white strip above the bar) */
+body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top);
+  background: var(--sidebar-bg, #1f2640);
+  /* follows your sidebar colour theme */
+  z-index: 35;
+  pointer-events: none;
+}
+
 /* =====================================================================
    APP THEMES  (switched from the Appearance panel in App.jsx)
    <html data-theme="light|dark|quickbooks" data-accent="blue|green|purple|orange|teal|rose" data-size="small|normal|large">
