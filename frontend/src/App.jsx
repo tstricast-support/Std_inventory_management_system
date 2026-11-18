@@ -9149,7 +9149,10 @@ function PLCells({ v, dcols, incomeV, onCell }) {
         {clickable ? (
           <button
             type="button"
-            onClick={() => onCell(dc.i)}
+            onClick={(e) => {
+              e.stopPropagation(); // the row itself is clickable too - this one opens just this column
+              onCell(dc.i);
+            }}
             title="Show the entries behind this number"
             className="hover:underline hover:text-blue-700 print:no-underline"
           >
@@ -9163,26 +9166,56 @@ function PLCells({ v, dcols, incomeV, onCell }) {
   });
 }
 
-// kind = item | header | subtotal | total | grand.  toggle/open = chevron (items: show entries, headers: collapse)
-function PLRow({ line, dcols, incomeV, toggle, open = false, onCell }) {
+// kind = item | header | subtotal | total | grand.
+// The WHOLE row is clickable (items: show entries, headers: collapse). Click a row to select it,
+// then Ctrl+Q opens the Quick report of that account (data-account-id).
+function PLRow({
+  line,
+  dcols,
+  incomeV,
+  toggle,
+  open = false,
+  onCell,
+  selected = false,
+}) {
   const { kind, label, depth = 0, v } = line;
   const Chev = open ? ChevronDown : ChevronRight;
+  const acctId = line.accountId ?? line.id; // header / subtotal rows carry `id`, items carry `accountId`
+  const clickProps = toggle
+    ? {
+        onClick: toggle,
+        onKeyDown: (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggle();
+          }
+        },
+        tabIndex: 0,
+        role: "button",
+        "aria-expanded": open,
+      }
+    : {};
+  const hover = toggle
+    ? "cursor-pointer hover:bg-[#f2f7ff] focus:outline-none print:hover:bg-transparent"
+    : "";
+  const pick = selected ? "bg-[#e3eeff] ring-1 ring-inset ring-[#9fbfee]" : "";
+
   const labelNode = toggle ? (
-    <button
-      type="button"
-      onClick={toggle}
-      className="inline-flex items-center gap-1 text-left hover:underline print:no-underline"
-    >
+    <span className="inline-flex items-center gap-1 text-left">
       <Chev size={14} className="shrink-0 print:hidden" />
       {label}
-    </button>
+    </span>
   ) : (
     label
   );
 
   if (kind === "header") {
     return (
-      <tr className="text-[#0f172a] font-semibold border-b border-[#eef2fa]">
+      <tr
+        data-account-id={acctId ?? undefined}
+        {...clickProps}
+        className={`text-[#0f172a] font-semibold border-b border-[#eef2fa] ${hover} ${pick}`}
+      >
         <td
           className="px-3 py-1.5 text-sm"
           style={{ paddingLeft: 12 + depth * 20 }}
@@ -9206,7 +9239,7 @@ function PLRow({ line, dcols, incomeV, toggle, open = false, onCell }) {
         : kind === "subtotal"
           ? "border-y border-[#dbe4f3] font-semibold text-[#0f172a]"
           : "border-b border-[#dbe4f3] text-[#0f172a]";
-  const pad =
+  const padStyle =
     kind === "item"
       ? { paddingLeft: 24 + depth * 20 }
       : kind === "subtotal"
@@ -9214,8 +9247,12 @@ function PLRow({ line, dcols, incomeV, toggle, open = false, onCell }) {
         : undefined;
 
   return (
-    <tr className={rowCls}>
-      <td className="px-3 py-1.5 text-sm" style={pad}>
+    <tr
+      data-account-id={kind === "item" ? (acctId ?? undefined) : undefined}
+      {...clickProps}
+      className={`${rowCls} ${hover} ${pick}`}
+    >
+      <td className="px-3 py-1.5 text-sm" style={padStyle}>
         {labelNode}
       </td>
       <PLCells v={v} dcols={dcols} incomeV={incomeV} onCell={onCell} />
@@ -9223,20 +9260,20 @@ function PLRow({ line, dcols, incomeV, toggle, open = false, onCell }) {
   );
 }
 
-// grey section band ("Income", "Cost of Goods Sold"...). Collapsed -> shows the section total on the band.
+// section band ("Income", "Cost of Goods Sold"...). Collapsed -> shows the section total on the band.
+// The whole band is clickable.
 function PLBand({ line, dcols, incomeV, toggle, open }) {
   const Chev = open ? ChevronDown : ChevronRight;
   return (
-    <tr className={PL_BAND}>
+    <tr
+      onClick={toggle}
+      className={`${PL_BAND} cursor-pointer hover:brightness-95 print:hover:filter-none`}
+    >
       <td className="px-3 py-1.5 text-sm font-bold">
-        <button
-          type="button"
-          onClick={toggle}
-          className="inline-flex items-center gap-1 text-left"
-        >
+        <span className="inline-flex items-center gap-1 text-left">
           <Chev size={14} className="shrink-0 print:hidden" />
           {line.label}
-        </button>
+        </span>
       </td>
       {open ? (
         <td colSpan={dcols.length} />
@@ -9811,6 +9848,105 @@ const PL_VIEWS = [
   ["year", "Columns: by year"],
 ];
 
+// ONE field for the whole period: shows "This Year (to date)  01/01/2026 – 18/11/2026".
+// Click it -> pick Today / Yesterday / Last Month ... ; "Custom" reveals the From / To dates.
+function PLPeriodPicker({ preset, from, to, onPreset, onRange }) {
+  const [open, setOpen] = useState(false);
+  const [dFrom, setDFrom] = useState(from);
+  const [dTo, setDTo] = useState(to);
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setDFrom(from);
+    setDTo(to);
+    const close = (e) => {
+      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  const label = (PL_PRESETS.find(([k]) => k === preset) || [])[1] || "Custom";
+  const rangeText =
+    from === to
+      ? formatJournalDate(from)
+      : `${formatJournalDate(from)} – ${formatJournalDate(to)}`;
+
+  return (
+    <div className="relative" ref={boxRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1 bg-white hover:bg-gray-50 min-w-[17rem]"
+      >
+        <span className="font-semibold text-slate-900">{label}</span>
+        <span className="text-gray-500 truncate">{rangeText}</span>
+        <ChevronDown size={14} className="text-gray-400 ml-auto shrink-0" />
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-2 w-80 bg-white border border-gray-200 rounded-xl shadow-lg p-3">
+          <div className="grid grid-cols-2 gap-2">
+            {PL_PRESETS.map(([key, text]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => {
+                  onPreset(key);
+                  if (key !== "custom") setOpen(false); // Custom stays open to show the dates
+                }}
+                className={`px-2 py-2 rounded-lg text-sm font-medium border text-left ${
+                  preset === key
+                    ? "bg-slate-900 text-white border-slate-900"
+                    : "bg-white text-slate-800 border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+          {preset === "custom" && (
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-xs text-gray-500">
+                  From
+                  <input
+                    type="date"
+                    value={dFrom}
+                    max={dTo}
+                    onChange={(e) => e.target.value && setDFrom(e.target.value)}
+                    className={dateInputCls}
+                  />
+                </label>
+                <label className="text-xs text-gray-500">
+                  To
+                  <input
+                    type="date"
+                    value={dTo}
+                    min={dFrom}
+                    onChange={(e) => e.target.value && setDTo(e.target.value)}
+                    className={dateInputCls}
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onRange(dFrom, dTo);
+                  setOpen(false);
+                }}
+                className="mt-3 w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700"
+              >
+                Apply
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProfitLossReport() {
   const [preset, setPreset] = useState("year");
   const [from, setFrom] = useState(`${new Date().getFullYear()}-01-01`);
@@ -9820,7 +9956,7 @@ function ProfitLossReport() {
   const [customers, setCustomers] = useState([]);
   const [showZero, setShowZero] = useState(false);
   const [showPct, setShowPct] = useState(false); // "% of Income" column
-  const [sortMode, setSortMode] = useState("name");
+  const [selKey, setSelKey] = useState(null); // the row you clicked last (Ctrl+Q = quick report on it)
   const [tick, setTick] = useState(0); // Refresh button
   const [collapsed, setCollapsed] = useState(() => new Set()); // "sec:income" / "acc:12"
   const [openRows, setOpenRows] = useState(() => new Map()); // line key -> value column whose entries are showing
@@ -9854,7 +9990,7 @@ function ProfitLossReport() {
   }, [from, to, view, customerId, showZero, tick]);
 
   const vcs = data ? plValueColumns(view, data, from, to) : [];
-  const built = data ? buildPLLines(data, vcs, sortMode) : null;
+  const built = data ? buildPLLines(data, vcs, "name") : null;
   const multi = view !== "total" && view !== "prev" && view !== "prevYear"; // columns by period
 
   // what the table shows, left to right
@@ -9894,6 +10030,12 @@ function ProfitLossReport() {
       setTo(t);
       setOpenRows(new Map());
     }
+  };
+  const applyRange = (f, t) => {
+    setFrom(f);
+    setTo(t);
+    setPreset("custom");
+    setOpenRows(new Map());
   };
   const collapseAll = () => {
     const all = new Set();
@@ -9974,7 +10116,11 @@ function ProfitLossReport() {
           dcols={dcols}
           incomeV={built.income}
           open={!collapsed.has(`acc:${l.id}`)}
-          toggle={() => flip(setCollapsed, `acc:${l.id}`)}
+          selected={selKey === l.key}
+          toggle={() => {
+            setSelKey(l.key);
+            flip(setCollapsed, `acc:${l.id}`);
+          }}
         />
       );
     }
@@ -9989,8 +10135,15 @@ function ProfitLossReport() {
             dcols={dcols}
             incomeV={built.income}
             open={isOpen}
-            toggle={() => toggleRow(l.key, whole)}
-            onCell={(i) => toggleRow(l.key, i)}
+            selected={selKey === l.key}
+            toggle={() => {
+              setSelKey(l.key);
+              toggleRow(l.key, whole);
+            }}
+            onCell={(i) => {
+              setSelKey(l.key);
+              toggleRow(l.key, i);
+            }}
           />
           {isOpen && (
             <PLTransactions
@@ -10011,132 +10164,90 @@ function ProfitLossReport() {
 
   return (
     <>
-      <div className="flex flex-wrap items-end gap-3 mb-3 print:hidden">
-        <label className="text-xs text-gray-500">
-          Report period
-          <select
-            value={preset}
-            onChange={(e) => pickPreset(e.target.value)}
-            className={`${sel} block`}
-          >
-            {PL_PRESETS.map(([k, l]) => (
-              <option key={k} value={k}>
-                {l}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-gray-500">
-          From
-          <input
-            type="date"
-            value={from}
-            max={to}
-            onChange={(e) => {
-              if (!e.target.value) return;
-              setFrom(e.target.value);
-              setPreset("custom");
-              setOpenRows(new Map());
-            }}
-            className={`${sel} block`}
-          />
-        </label>
-        <label className="text-xs text-gray-500">
-          To
-          <input
-            type="date"
-            value={to}
-            min={from}
-            onChange={(e) => {
-              if (!e.target.value) return;
-              setTo(e.target.value);
-              setPreset("custom");
-              setOpenRows(new Map());
-            }}
-            className={`${sel} block`}
-          />
-        </label>
-        <label className="text-xs text-gray-500">
-          Columns
-          <select
-            value={view}
-            onChange={(e) => {
-              setView(e.target.value);
-              setOpenRows(new Map());
-            }}
-            className={`${sel} block`}
-          >
-            {PL_VIEWS.map(([k, l]) => (
-              <option key={k} value={k}>
-                {l}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-gray-500">
-          Customer
-          <select
-            value={customerId}
-            onChange={(e) => {
-              setCustomerId(e.target.value);
-              setOpenRows(new Map());
-            }}
-            className={`${sel} block max-w-[200px]`}
-          >
-            <option value="">All customers</option>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.display_name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-gray-500">
-          Sort rows
-          <select
-            value={sortMode}
-            onChange={(e) => setSortMode(e.target.value)}
-            className={`${sel} block`}
-          >
-            <option value="name">Account name</option>
-            <option value="amount">Highest amount</option>
-          </select>
-        </label>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3 mb-4 print:hidden">
-        <label className="flex items-center gap-1.5 text-sm text-gray-600">
-          <input
-            type="checkbox"
-            checked={showPct}
-            onChange={(e) => setShowPct(e.target.checked)}
-          />
-          % of Income
-        </label>
-        <label className="flex items-center gap-1.5 text-sm text-gray-600">
-          <input
-            type="checkbox"
-            checked={showZero}
-            onChange={(e) => setShowZero(e.target.checked)}
-          />
-          Show zero accounts
-        </label>
-        <div className="flex flex-wrap gap-2 ml-auto">
+      <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4 print:hidden">
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="text-xs font-medium text-gray-500">
+            Report period
+            <PLPeriodPicker
+              preset={preset}
+              from={from}
+              to={to}
+              onPreset={pickPreset}
+              onRange={applyRange}
+            />
+          </div>
+          <label className="text-xs font-medium text-gray-500">
+            Columns
+            <select
+              value={view}
+              onChange={(e) => {
+                setView(e.target.value);
+                setOpenRows(new Map());
+              }}
+              className={`${sel} block`}
+            >
+              {PL_VIEWS.map(([k, l]) => (
+                <option key={k} value={k}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs font-medium text-gray-500">
+            Customer
+            <select
+              value={customerId}
+              onChange={(e) => {
+                setCustomerId(e.target.value);
+                setOpenRows(new Map());
+              }}
+              className={`${sel} block max-w-[200px]`}
+            >
+              <option value="">All customers</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.display_name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex items-center gap-4 pb-2.5">
+            <label className="flex items-center gap-1.5 text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={showPct}
+                onChange={(e) => setShowPct(e.target.checked)}
+              />
+              % of Income
+            </label>
+            <label className="flex items-center gap-1.5 text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={showZero}
+                onChange={(e) => setShowZero(e.target.checked)}
+              />
+              Show zero accounts
+            </label>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-gray-100">
           <button onClick={() => setCollapsed(new Set())} className={btn}>
             Expand all
           </button>
           <button onClick={collapseAll} className={btn}>
             Collapse all
           </button>
-          <button onClick={() => setTick((t) => t + 1)} className={btn}>
-            Refresh
-          </button>
-          <button onClick={exportCsv} disabled={!built} className={btn}>
-            Export CSV
-          </button>
-          <button onClick={() => window.print()} className={btn}>
-            <Printer size={16} /> Print / Save PDF
-          </button>
+          <div className="flex flex-wrap gap-2 ml-auto">
+            <button onClick={() => setTick((t) => t + 1)} className={btn}>
+              Refresh
+            </button>
+            <button onClick={exportCsv} disabled={!built} className={btn}>
+              Export CSV
+            </button>
+            <button onClick={() => window.print()} className={btn}>
+              <Printer size={16} /> Print / Save PDF
+            </button>
+          </div>
         </div>
       </div>
 
@@ -10150,43 +10261,6 @@ function ProfitLossReport() {
       <ReportBody loading={loading} error={error} data={data}>
         {built && (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 print:hidden">
-              {[
-                ["Income", built.income[lastIdx], ""],
-                [
-                  "Gross profit",
-                  built.gross[lastIdx],
-                  margin(built.gross[lastIdx], built.income[lastIdx]),
-                ],
-                [
-                  "Net income",
-                  built.net[lastIdx],
-                  margin(built.net[lastIdx], built.income[lastIdx]),
-                ],
-                [
-                  "Total expenses",
-                  built.income[lastIdx] - built.net[lastIdx],
-                  margin(
-                    built.income[lastIdx] - built.net[lastIdx],
-                    built.income[lastIdx],
-                  ),
-                ],
-              ].map(([label, value, sub]) => (
-                <div
-                  key={label}
-                  className="bg-white border border-gray-200 rounded-xl p-3"
-                >
-                  <p className="text-xs text-gray-400">{label}</p>
-                  <p
-                    className={`text-lg font-bold mt-0.5 ${value < 0 ? "text-red-600" : "text-gray-900"}`}
-                  >
-                    {formatRs(value)}
-                  </p>
-                  {sub && <p className="text-[11px] text-gray-400">{sub}</p>}
-                </div>
-              ))}
-            </div>
-
             <div className="pl-statement bg-[#fff] text-[#0f172a] rounded-xl border border-[#dbe4f3] p-4">
               <div className="text-center mb-3">
                 <h2 className="text-xl font-bold">Profit &amp; Loss</h2>
@@ -10210,9 +10284,11 @@ function ProfitLossReport() {
                 )}
               </div>
               <p className="text-xs text-[#64748b] mb-2 print:hidden">
-                Click an account to see its daily entries
-                {multi ? " (or click a number for that column)" : ""}, then
-                click an invoice to open it.
+                Click any row to expand it and see its invoices, bills and
+                entries
+                {multi ? " (or click a number for just that column)" : ""}.
+                Press <b>Ctrl+Q</b> to open the full Quick report of the row you
+                clicked.
               </p>
               <div className="overflow-x-auto">
                 <table
@@ -10260,6 +10336,43 @@ function ProfitLossReport() {
               <p className="text-xs text-[#64748b] mt-3">
                 Accrual basis · {new Date().toLocaleString()}
               </p>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 print:hidden">
+              {[
+                ["Income", built.income[lastIdx], ""],
+                [
+                  "Gross profit",
+                  built.gross[lastIdx],
+                  margin(built.gross[lastIdx], built.income[lastIdx]),
+                ],
+                [
+                  "Net income",
+                  built.net[lastIdx],
+                  margin(built.net[lastIdx], built.income[lastIdx]),
+                ],
+                [
+                  "Total expenses",
+                  built.income[lastIdx] - built.net[lastIdx],
+                  margin(
+                    built.income[lastIdx] - built.net[lastIdx],
+                    built.income[lastIdx],
+                  ),
+                ],
+              ].map(([label, value, sub]) => (
+                <div
+                  key={label}
+                  className="bg-white border border-gray-200 rounded-xl p-3"
+                >
+                  <p className="text-xs text-gray-400">{label}</p>
+                  <p
+                    className={`text-lg font-bold mt-0.5 ${value < 0 ? "text-red-600" : "text-gray-900"}`}
+                  >
+                    {formatRs(value)}
+                  </p>
+                  {sub && <p className="text-[11px] text-gray-400">{sub}</p>}
+                </div>
+              ))}
             </div>
           </>
         )}
@@ -11245,6 +11358,7 @@ function BSLine({
   onToggle,
   onAmount,
   active,
+  accountId, // lets Ctrl+Q open the Quick report for this line's account
 }) {
   const tone =
     kind === "band"
@@ -11260,6 +11374,7 @@ function BSLine({
               : "text-gray-700 border-b border-gray-50";
   return (
     <div
+      data-account-id={accountId ?? undefined}
       className={`flex items-center justify-between gap-3 px-3 py-1.5 text-sm ${tone}`}
     >
       <span
@@ -11273,84 +11388,180 @@ function BSLine({
         )}
         <span className="truncate">{label}</span>
       </span>
-      {amount !== undefined &&
-        (onAmount ? (
+      <span className="flex items-center gap-3 shrink-0">
+        {/* "Details" opens / closes the invoices, bills, payments... behind this number */}
+        {amount !== undefined && onAmount && (
           <button
             type="button"
             onClick={onAmount}
-            title="See the transactions behind this number"
-            className={`tabular-nums hover:underline ${active ? "text-blue-700" : ""}`}
+            title="Show / hide the transactions behind this number"
+            className={`flex items-center gap-0.5 text-xs font-normal hover:underline ${
+              active ? "text-blue-700" : "text-blue-500"
+            }`}
           >
-            {plNum(amount)}
+            {active ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            Details
           </button>
-        ) : (
-          <span className="tabular-nums">{plNum(amount)}</span>
-        ))}
+        )}
+        {amount !== undefined &&
+          (onAmount ? (
+            <button
+              type="button"
+              onClick={onAmount}
+              title="Show / hide the transactions behind this number"
+              className={`tabular-nums hover:underline ${active ? "text-blue-700" : ""}`}
+            >
+              {plNum(amount)}
+            </button>
+          ) : (
+            <span className="tabular-nums">{plNum(amount)}</span>
+          ))}
+      </span>
     </div>
   );
 }
 
-// the entries behind one balance-sheet number, with a running balance
+// the entries behind one balance-sheet number, grouped by type
+// (Invoice, Bill, Payment, Journal ...). Each group folds open / shut.
 function BSAccountTx({ accountId, own, asOf, onOpen }) {
   const { data, loading, error } = useReport(
     () => getAccountTransactions(accountId, asOf, own),
     [accountId, own, asOf],
   );
+  const [openTypes, setOpenTypes] = useState(() => new Set()); // groups showing their rows
   const box = (c) => (
     <div className="px-6 py-2 text-xs text-gray-500 bg-[#f6f9ff]">{c}</div>
   );
   if (loading && !data) return box("Loading transactions...");
   if (error) return box(<span className="text-red-500">{error}</span>);
   if (!data || data.rows.length === 0) return box("No transactions.");
+
+  // group rows by transaction type; "net" = how much the group moved this account's balance
+  const round2 = (x) => Math.round(x * 100) / 100;
+  const byType = new Map();
+  let prev = data.opening_balance || 0;
+  data.rows.forEach((r) => {
+    const move = r.balance - prev;
+    prev = r.balance;
+    if (!byType.has(r.type))
+      byType.set(r.type, { type: r.type, rows: [], debit: 0, credit: 0, net: 0 });
+    const g = byType.get(r.type);
+    g.rows.push(r);
+    g.debit += r.debit || 0;
+    g.credit += r.credit || 0;
+    g.net += move;
+  });
+  const groups = [...byType.values()].sort((a, b) => a.type.localeCompare(b.type));
+  const allOpen = groups.every((g) => openTypes.has(g.type));
+  const toggleType = (t) =>
+    setOpenTypes((p) => {
+      const next = new Set(p);
+      next.has(t) ? next.delete(t) : next.add(t);
+      return next;
+    });
   const th = "px-2 py-1 text-xs font-semibold text-gray-500";
+  const money = "px-2 py-1 text-right tabular-nums";
+
   return (
     <div className="bg-[#f6f9ff] px-4 py-2 overflow-x-auto">
-      <table className="w-full text-xs bg-white border border-[#dbe4f3] rounded min-w-[640px]">
-        <thead>
-          <tr className="text-left bg-[#eaf1fd]">
-            <th className={th}>Date</th>
-            <th className={th}>Transaction</th>
-            <th className={th}>Name / memo</th>
-            <th className={`${th} text-right`}>Debit</th>
-            <th className={`${th} text-right`}>Credit</th>
-            <th className={`${th} text-right`}>Balance</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.rows.map((r) => (
-            <tr key={r.id} className="border-t border-[#eef2fa]">
-              <td className="px-2 py-1 whitespace-nowrap">
-                {formatJournalDate(r.date)}
-              </td>
-              <td className="px-2 py-1 whitespace-nowrap">
-                <button
-                  type="button"
-                  onClick={() => onOpen(r)}
-                  className="text-blue-700 underline font-medium"
-                >
-                  {r.type} {r.number}
-                </button>
-              </td>
-              <td className="px-2 py-1">
-                {r.name}
-                {r.memo && <span className="text-gray-400"> - {r.memo}</span>}
-              </td>
-              <td className="px-2 py-1 text-right tabular-nums">
-                {r.debit ? plNum(r.debit) : ""}
-              </td>
-              <td className="px-2 py-1 text-right tabular-nums">
-                {r.credit ? plNum(r.credit) : ""}
-              </td>
-              <td className="px-2 py-1 text-right tabular-nums">
-                {plNum(r.balance)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="min-w-[640px] bg-white border border-[#dbe4f3] rounded text-xs">
+        <div className="flex items-center justify-between px-2 py-1.5 bg-[#eaf1fd] border-b border-[#dbe4f3]">
+          <span className="font-semibold text-gray-600">
+            {data.rows.length} transaction{data.rows.length === 1 ? "" : "s"} in{" "}
+            {groups.length} type{groups.length === 1 ? "" : "s"}
+          </span>
+          <button
+            type="button"
+            onClick={() =>
+              setOpenTypes(allOpen ? new Set() : new Set(groups.map((g) => g.type)))
+            }
+            className="text-blue-700 underline"
+          >
+            {allOpen ? "Collapse all" : "Expand all"}
+          </button>
+        </div>
+
+        {groups.map((g) => {
+          const isOpen = openTypes.has(g.type);
+          return (
+            <div key={g.type} className="border-b border-[#eef2fa] last:border-b-0">
+              <button
+                type="button"
+                onClick={() => toggleType(g.type)}
+                className="w-full flex items-center justify-between gap-3 px-2 py-1.5 hover:bg-[#f6f9ff] text-left"
+              >
+                <span className="flex items-center gap-1 font-semibold text-gray-800">
+                  {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  {g.type}
+                  <span className="font-normal text-gray-400">({g.rows.length})</span>
+                </span>
+                <span className="flex items-center gap-4 tabular-nums text-gray-600">
+                  {g.debit ? <span>Dr {plNum(round2(g.debit))}</span> : null}
+                  {g.credit ? <span>Cr {plNum(round2(g.credit))}</span> : null}
+                  <span className="font-semibold text-gray-900 min-w-[6rem] text-right">
+                    {plNum(round2(g.net))}
+                  </span>
+                </span>
+              </button>
+
+              {isOpen && (
+                <table className="w-full border-t border-[#eef2fa]">
+                  <thead>
+                    <tr className="text-left bg-[#f6f9ff]">
+                      <th className={th}>Date</th>
+                      <th className={th}>Transaction</th>
+                      <th className={th}>Customer / Vendor</th>
+                      <th className={th}>Reason / memo</th>
+                      <th className={`${th} text-right`}>Debit</th>
+                      <th className={`${th} text-right`}>Credit</th>
+                      <th className={`${th} text-right`}>Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {g.rows.map((r) => (
+                      <tr key={r.id} className="border-t border-[#eef2fa]">
+                        <td className="px-2 py-1 whitespace-nowrap">
+                          {formatJournalDate(r.date)}
+                        </td>
+                        <td className="px-2 py-1 whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => onOpen(r)}
+                            className="text-blue-700 underline font-medium"
+                          >
+                            {r.type} {r.number}
+                          </button>
+                        </td>
+                        <td className="px-2 py-1">
+                          {r.name}
+                          {/* when a parent account is shown, say which child account the entry hit */}
+                          {!own && r.account && (
+                            <span className="text-gray-400"> · {r.account}</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-1 text-gray-600">{r.memo}</td>
+                        <td className={money}>{r.debit ? plNum(r.debit) : ""}</td>
+                        <td className={money}>{r.credit ? plNum(r.credit) : ""}</td>
+                        <td className={money}>{plNum(r.balance)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          );
+        })}
+
+        <div className="flex items-center justify-between px-2 py-1.5 bg-[#eaf1fd] border-t border-[#dbe4f3] font-semibold">
+          <span>Balance</span>
+          <span className="tabular-nums">{plNum(data.closing_balance)}</span>
+        </div>
+      </div>
     </div>
   );
 }
+
+
 
 function BalanceSheetReport() {
   const [asOf, setAsOf] = useState(localIso());
@@ -11370,75 +11581,80 @@ function BalanceSheetReport() {
       return next;
     });
 
-  const renderNode = (n, depth) => {
-    const canDrill = n.id != null;
-    const txFor = (key, own) =>
-      canDrill && showTx.has(key) ? (
-        <BSAccountTx
-          accountId={n.id}
-          own={own}
-          asOf={asOf}
-          onOpen={setTxOpen}
-        />
-      ) : null;
-    const drill = (key) => (canDrill ? () => flip(setShowTx, key) : undefined);
+    const renderNode = (n, depth) => {
+      const canDrill = n.id != null; // "Net Income" is calculated, it has no account behind it
+      const txFor = (key, own) =>
+        canDrill && showTx.has(key) ? (
+          <BSAccountTx
+            accountId={n.id}
+            own={own}
+            asOf={asOf}
+            onOpen={setTxOpen}
+          />
+        ) : null;
+      const drill = (key) =>
+        canDrill ? () => flip(setShowTx, key) : undefined;
 
-    if (n.children.length === 0)
+      if (n.children.length === 0)
+        return (
+          <div key={n.id ?? n.name}>
+            <BSLine
+              depth={depth}
+              label={n.name}
+              amount={n.amount}
+              accountId={n.id}
+              onAmount={drill(`own:${n.id}`)}
+              active={showTx.has(`own:${n.id}`)}
+            />
+            {txFor(`own:${n.id}`, true)}
+          </div>
+        );
+
+      const isOpen = !collapsed.has(n.id);
       return (
-        <div key={n.id ?? n.name}>
+        <div key={n.id}>
           <BSLine
             depth={depth}
             label={n.name}
-            amount={n.amount}
-            onAmount={drill(`own:${n.id}`)}
-            active={showTx.has(`own:${n.id}`)}
+            chevron={isOpen}
+            onToggle={() => flip(setCollapsed, n.id)}
+            accountId={n.id}
+            amount={isOpen ? undefined : n.total}
+            onAmount={isOpen ? undefined : drill(`all:${n.id}`)}
+            active={showTx.has(`all:${n.id}`)}
           />
-          {txFor(`own:${n.id}`, true)}
+          {!isOpen && txFor(`all:${n.id}`, false)}
+          {isOpen && (
+            <>
+              {n.amount !== 0 && (
+                <div>
+                  <BSLine
+                    depth={depth + 1}
+                    label={n.name}
+                    amount={n.amount}
+                    accountId={n.id}
+                    onAmount={drill(`own:${n.id}`)}
+                    active={showTx.has(`own:${n.id}`)}
+                  />
+                  {txFor(`own:${n.id}`, true)}
+                </div>
+              )}
+              {n.children.map((c) => renderNode(c, depth + 1))}
+              <BSLine
+                kind="total"
+                depth={depth}
+                label={`Total ${n.name}`}
+                amount={n.total}
+                accountId={n.id}
+                onAmount={drill(`all:${n.id}`)}
+                active={showTx.has(`all:${n.id}`)}
+              />
+              {txFor(`all:${n.id}`, false)}
+            </>
+          )}
         </div>
       );
-
-    const isOpen = !collapsed.has(n.id);
-    return (
-      <div key={n.id}>
-        <BSLine
-          depth={depth}
-          label={n.name}
-          chevron={isOpen}
-          onToggle={() => flip(setCollapsed, n.id)}
-          amount={isOpen ? undefined : n.total}
-          onAmount={isOpen ? undefined : drill(`all:${n.id}`)}
-          active={showTx.has(`all:${n.id}`)}
-        />
-        {!isOpen && txFor(`all:${n.id}`, false)}
-        {isOpen && (
-          <>
-            {n.amount !== 0 && (
-              <div>
-                <BSLine
-                  depth={depth + 1}
-                  label={n.name}
-                  amount={n.amount}
-                  onAmount={drill(`own:${n.id}`)}
-                  active={showTx.has(`own:${n.id}`)}
-                />
-                {txFor(`own:${n.id}`, true)}
-              </div>
-            )}
-            {n.children.map((c) => renderNode(c, depth + 1))}
-            <BSLine
-              kind="total"
-              depth={depth}
-              label={`Total ${n.name}`}
-              amount={n.total}
-              onAmount={drill(`all:${n.id}`)}
-              active={showTx.has(`all:${n.id}`)}
-            />
-            {txFor(`all:${n.id}`, false)}
-          </>
-        )}
-      </div>
-    );
-  };
+    };
 
   const renderSide = (side, totalLabel, total) => (
     <div className="mb-4">
