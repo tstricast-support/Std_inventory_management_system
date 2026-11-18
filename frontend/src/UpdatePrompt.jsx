@@ -13,9 +13,20 @@ const SNOOZE_MS = 15 * 60 * 1000; // "Later" hides the window for 15 minutes
 const entryUrl = () =>
   window.location.pathname.startsWith("/admin") ? "/admin.html" : "/";
 
-const runningScript = () =>
-  document.querySelector('script[type="module"][src]')?.getAttribute("src") ||
-  "";
+// a "version signature" = the main script + the stylesheet(s) of a page.
+// If either file name changes, a new version was deployed (so CSS-only releases are noticed too).
+const signature = (doc) => {
+  const js =
+    doc.querySelector('script[type="module"][src]')?.getAttribute("src") || "";
+  if (!js) return ""; // not a real app page (error page, login redirect...) - ignore it
+  const css = [...doc.querySelectorAll('link[rel="stylesheet"][href]')]
+    .map((l) => l.getAttribute("href"))
+    .sort()
+    .join(",");
+  return `${js}|${css}`;
+};
+
+const runningScript = () => signature(document);
 
 async function latestScript() {
   const res = await fetch(`${entryUrl()}?_=${Date.now()}`, {
@@ -24,10 +35,7 @@ async function latestScript() {
   });
   if (!res.ok) return "";
   const html = await res.text();
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  return (
-    doc.querySelector('script[type="module"][src]')?.getAttribute("src") || ""
-  );
+  return signature(new DOMParser().parseFromString(html, "text/html"));
 }
 
 export default function UpdatePrompt() {
@@ -50,7 +58,7 @@ export default function UpdatePrompt() {
       }
     };
 
-    const first = setTimeout(check, 10 * 1000);
+    const first = setTimeout(check, 1500);
     const timer = setInterval(check, CHECK_EVERY_MS);
     const onVisible = () => document.visibilityState === "visible" && check();
     document.addEventListener("visibilitychange", onVisible);
