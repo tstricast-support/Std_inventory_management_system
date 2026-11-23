@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from ..audit import log_audit_company
 from ..auth import get_user_and_company, user_rights
 from ..company_init import init_company_schema
+from ..backup_service import create_backup
 from ..database import engine, get_public_db, quote_schema, schema_for
 from ..imagekit_client import delete_image, upload_image
 from ..models import Company, UserCompanyAccess
@@ -258,7 +259,16 @@ def delete_company(company_id: int, payload: DeleteCompanyIn, request: Request,
     name, schema = company.name, schema_for(company.id)
     S = quote_schema(schema)
     file_ids = [company.logo_file_id] if company.logo_file_id else []
+    actor_id, actor_name = user.id, user.username
     db.rollback()                                   # end the read transaction so it cannot block the DROP below
+
+    # SAFETY COPY: a full backup is saved BEFORE anything is dropped, so this delete can be undone later.
+    try:
+        safety = create_backup(company_id, "pre_delete", actor_id, actor_name,
+                               note="Automatic copy taken just before the company was deleted")
+    except Exception:
+        log.exception("safety backup before deleting company %s failed", company_id)
+        raise HTTPException(500, "Could not make a safety backup first, so nothing was deleted.")
 
     try:                                            # remember the ImageKit files BEFORE the data is gone
         with engine.connect() as c:
@@ -279,7 +289,7 @@ def delete_company(company_id: int, payload: DeleteCompanyIn, request: Request,
         raise HTTPException(500, "Could not delete the company. Nothing was deleted.")
 
     failed = 0
-    for fid in file_ids:                            # best effort: the data is already gone, a leftover picture is harmless
+    for fid in ([] if safety else file_ids):        # pictures are KEPT so a restore brings them back too
         try:
             delete_image(fid)
         except Exception:
@@ -288,7 +298,7 @@ def delete_company(company_id: int, payload: DeleteCompanyIn, request: Request,
     # the deleted company's own audit log is gone with it, so the event is recorded in the company the user is in
     log_audit_company(current_id, user, "company_deleted", "company", company_id,
                       f"Company '{name}' (#{company_id}) permanently deleted", request)
-    return {"deleted": company_id, "name": name, "images_not_removed": failed}
+    return {"deleted": company_id, "name": name, "images_not_removed": failed, "backup_id": safety["id"]}
 
 # ---------- profile of the CURRENT company ----------
 @router.get("/company/profile")

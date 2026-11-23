@@ -64,6 +64,7 @@ import {
   X,
   Printer,
   Building2,
+  Archive,
 } from "lucide-react";
 import "./index.css";
 import { BASE_URL, apiFetch } from "./api.js";
@@ -86,6 +87,7 @@ import {
   SidebarCompanyHeader,
   useCompany,
 } from "./company.jsx";
+import { BackupsPage } from "./backups.jsx";
 
 // const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
@@ -26149,6 +26151,7 @@ const VIEW_AREA = {
 };
 function viewAllowed(id, can, hasRight, openMode) {
   if (id === "company") return true;
+  if (id === "backups") return !openMode && hasRight("manage_companies");
   if (id === "users" || id === "audit")
     return !openMode && can("users", "view") && hasRight("manage_users");
   if (openMode) return true;
@@ -26194,6 +26197,7 @@ const ZOHO_NAV = [
     { id: "company", label: "Company Profile", Icon: Building2 },
     { id: "users", label: "Users & Roles", Icon: ShieldCheck },
     { id: "audit", label: "Audit Log", Icon: ScrollText },
+    { id: "backups", label: "Backup & Restore", Icon: Archive },
   ],
 ];
 
@@ -27352,6 +27356,10 @@ function AppWindow() {
     page = <UsersAdminPage />;
   } else if (searchParams.get("view") === "audit") {
     page = <AuditLogPage />;
+  
+  } else if (searchParams.get("view") === "backups") {
+  page = <BackupsPage />;
+  
   } else if (searchParams.get("view") === "items") {
     page = (
       <ItemsPage

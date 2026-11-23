@@ -1,5 +1,5 @@
-from sqlalchemy import Column, Integer, String, Text, Numeric, Boolean, ForeignKey, TIMESTAMP, Date, func, Index, UniqueConstraint, text
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, Text, Numeric, Boolean, ForeignKey, TIMESTAMP, Date, func, Index, UniqueConstraint, text ,LargeBinary
+from sqlalchemy.orm import relationship, deferred
 from .database import Base
 
 class Account(Base):
@@ -731,3 +731,43 @@ class AuditLog(Base):
     record_id = Column(Integer)
     summary = Column(Text)
     ip = Column(String(64))
+
+class CompanyBackup(Base):
+    """One saved backup of ONE company. company_id has NO foreign key on purpose, so backups survive a company delete."""
+    __tablename__ = "company_backups"
+    __table_args__ = (
+        Index("ix_company_backups_company", "company_id", "created_at"),
+        {"schema": "public"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, nullable=False)
+    company_name = Column(String(150), nullable=False)
+    kind = Column(String(20), nullable=False)          # manual | scheduled | pre_delete | pre_restore
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    created_by_id = Column(Integer, nullable=True)
+    created_by_name = Column(String(100))
+    size_bytes = Column(Integer, nullable=False, default=0)
+    row_count = Column(Integer, nullable=False, default=0)
+    table_counts = Column(Text)
+    sha256 = Column(String(64), nullable=False)
+    access_user_ids = Column(Text)
+    note = Column(Text)
+    data = deferred(Column(LargeBinary, nullable=False))
+
+
+class CompanyBackupSetting(Base):
+    __tablename__ = "company_backup_settings"
+    __table_args__ = {"schema": "public"}
+
+    company_id = Column(Integer, primary_key=True, autoincrement=False)
+    frequency = Column(String(10), nullable=False, default="off", server_default="off")   # off | weekly | monthly
+    weekday = Column(Integer, nullable=False, default=0, server_default="0")
+    month_day = Column(Integer, nullable=False, default=1, server_default="1")
+    run_hour = Column(Integer, nullable=False, default=2, server_default="2")
+    keep_count = Column(Integer, nullable=False, default=8, server_default="8")
+    next_run_at = Column(TIMESTAMP, nullable=True)
+    last_run_at = Column(TIMESTAMP, nullable=True)
+    last_status = Column(String(10), nullable=True)
+    last_error = Column(Text, nullable=True)
+    updated_by_id = Column(Integer, nullable=True)
