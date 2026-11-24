@@ -1800,7 +1800,7 @@ function whatsappNumber(phone) {
 }
 
 
-async function sendWhatsApp(kind, record) {
+async function sendWhatsApp(kind, record, preOpenedTab = null) {
   // vendor-side documents (bills, payments made) go to the vendor, everything else to the customer
   const vendorSide = kind === "bill" || kind === "vendorpayment";
   // phones: the share sheet can attach the PDF directly
@@ -1811,7 +1811,10 @@ async function sendWhatsApp(kind, record) {
       files: [new File(["x"], "t.pdf", { type: "application/pdf" })],
     });
   // computers: open the tab now, before the slow PDF work, so the browser doesn't block it
-  const tab = canShareFiles ? null : window.open("about:blank", "_blank");
+  if (canShareFiles && preOpenedTab) preOpenedTab.close(); // phones use the share sheet instead
+  const tab = canShareFiles
+    ? null
+    : preOpenedTab || window.open("about:blank", "_blank");
   try {
     const [pdf, people] = await Promise.all([
       import("./pdf.js"),
@@ -1822,11 +1825,16 @@ async function sendWhatsApp(kind, record) {
     ); // (for vendor-side documents this is the vendor; the PDF code reads name / address / phone / email from it)
     const phone = customer?.phone;
     let file;
-    if (kind === "invoice") file = await pdf.downloadInvoicePdf(record, customer, true);
-    else if (kind === "credit") file = await pdf.downloadCreditNotePdf(record, customer, true);
-    else if (kind === "payment") file = await pdf.downloadPaymentPdf(record, customer, true);
-    else if (kind === "vendorpayment") file = await pdf.downloadVendorPaymentPdf(record, customer, true);
-    else if (kind === "bill") file = await pdf.downloadPurchaseBillPdf(record, customer, true);
+    if (kind === "invoice")
+      file = await pdf.downloadInvoicePdf(record, customer, true);
+    else if (kind === "credit")
+      file = await pdf.downloadCreditNotePdf(record, customer, true);
+    else if (kind === "payment")
+      file = await pdf.downloadPaymentPdf(record, customer, true);
+    else if (kind === "vendorpayment")
+      file = await pdf.downloadVendorPaymentPdf(record, customer, true);
+    else if (kind === "bill")
+      file = await pdf.downloadPurchaseBillPdf(record, customer, true);
     else file = await pdf.downloadSalesDocPdf(record, customer, true);
 
     const who = record.customer_name || record.vendor_name;
@@ -1837,12 +1845,18 @@ async function sendWhatsApp(kind, record) {
       record.payment_number ||
       record.bill_number;
     let text;
-    if (kind === "invoice") text = `Hello ${who}, please find your invoice ${number}.`;
-    else if (kind === "credit") text = `Hello ${who}, please find your credit note ${number}.`;
-    else if (kind === "payment") text = `Hello ${who}, thank you for your payment. Please find the receipt ${number}.`;
-    else if (kind === "vendorpayment") text = `Hello ${who}, we have made payment ${number}. Please find the details attached.`;
-    else if (kind === "bill") text = `Hello ${who}, please find our record of bill ${number}.`;
-    else text = `Hello ${who}, please find your ${record.doc_type === "quote" ? "quote" : "sales order"} ${number}.`;
+    if (kind === "invoice")
+      text = `Hello ${who}, please find your invoice ${number}.`;
+    else if (kind === "credit")
+      text = `Hello ${who}, please find your credit note ${number}.`;
+    else if (kind === "payment")
+      text = `Hello ${who}, thank you for your payment. Please find the receipt ${number}.`;
+    else if (kind === "vendorpayment")
+      text = `Hello ${who}, we have made payment ${number}. Please find the details attached.`;
+    else if (kind === "bill")
+      text = `Hello ${who}, please find our record of bill ${number}.`;
+    else
+      text = `Hello ${who}, please find your ${record.doc_type === "quote" ? "quote" : "sales order"} ${number}.`;
 
     if (canShareFiles && navigator.canShare({ files: [file] })) {
       try {
@@ -19142,6 +19156,7 @@ function InvoiceForm({
   const [size, setSize] = useState({ w: null, h: null }); // null = default size until the user resizes
   const [preview, setPreview] = useState(null); // { url } while the preview window is open
   const [previewBusy, setPreviewBusy] = useState(false);
+  const [sendAsk, setSendAsk] = useState(null); // "whatsapp" | "download" while the "save first?" box is open
   const panelRef = useRef(null);
   // "Record payment" while creating the invoice (customer paid on the spot)
   const [accounts, setAccounts] = useState([]); // cash / bank accounts the money can go into
@@ -19150,45 +19165,45 @@ function InvoiceForm({
   const [payMode, setPayMode] = useState("Cash");
   const [payDepositId, setPayDepositId] = useState("");
   const [payReference, setPayReference] = useState("");
-    const draft = useFormDraft({
-      name: "invoice",
-      enabled: !editInvoice && !fromDoc,
-      snapshot: {
-        customerId,
-        date,
-        dueDate,
-        orderNumber,
-        notes,
-        discountType,
-        discountValue,
-        lines,
-        payNow,
-        payAmount,
-        payMode,
-        payDepositId,
-        payReference,
-      },
-      hasContent:
-        Boolean(customerId) ||
-        Boolean(orderNumber.trim()) ||
-        Boolean(notes.trim()) ||
-        lines.some((l) => l.product_id || (l.description || "").trim()),
-      apply: (d) => {
-        setCustomerId(d.customerId ?? "");
-        setDate(d.date || toISODate(new Date()));
-        setDueDate(d.dueDate || "");
-        setOrderNumber(d.orderNumber || "");
-        setNotes(d.notes || "");
-        setDiscountType(d.discountType || "amount");
-        setDiscountValue(d.discountValue || "");
-        setLines(d.lines?.length ? d.lines : [blankInvoiceLine()]);
-        setPayNow(Boolean(d.payNow));
-        setPayAmount(d.payAmount || "");
-        setPayMode(d.payMode || "Cash");
-        if (d.payDepositId) setPayDepositId(d.payDepositId);
-        setPayReference(d.payReference || "");
-      },
-    });
+  const draft = useFormDraft({
+    name: "invoice",
+    enabled: !editInvoice && !fromDoc,
+    snapshot: {
+      customerId,
+      date,
+      dueDate,
+      orderNumber,
+      notes,
+      discountType,
+      discountValue,
+      lines,
+      payNow,
+      payAmount,
+      payMode,
+      payDepositId,
+      payReference,
+    },
+    hasContent:
+      Boolean(customerId) ||
+      Boolean(orderNumber.trim()) ||
+      Boolean(notes.trim()) ||
+      lines.some((l) => l.product_id || (l.description || "").trim()),
+    apply: (d) => {
+      setCustomerId(d.customerId ?? "");
+      setDate(d.date || toISODate(new Date()));
+      setDueDate(d.dueDate || "");
+      setOrderNumber(d.orderNumber || "");
+      setNotes(d.notes || "");
+      setDiscountType(d.discountType || "amount");
+      setDiscountValue(d.discountValue || "");
+      setLines(d.lines?.length ? d.lines : [blankInvoiceLine()]);
+      setPayNow(Boolean(d.payNow));
+      setPayAmount(d.payAmount || "");
+      setPayMode(d.payMode || "Cash");
+      if (d.payDepositId) setPayDepositId(d.payDepositId);
+      setPayReference(d.payReference || "");
+    },
+  });
 
   // only for a NEW invoice: load the deposit accounts (if this user can't read them, the button is simply hidden)
   useEffect(() => {
@@ -19555,63 +19570,111 @@ function InvoiceForm({
     setPreview(null);
   };
 
+  // saves (or updates) the invoice and records the payment if "Record payment" is on.
+  // returns { saved, payError } - it does NOT close the form
+  const saveInvoice = async () => {
+    const invoicePayload = {
+      customer_id: customerId,
+      sales_document_id: fromDoc ? fromDoc.id : null,
+      // a typed number wins; the untouched suggestion means "give me the next free one at save time"
+      invoice_number:
+        invoiceNo.trim() && invoiceNo.trim() !== suggestedNo
+          ? invoiceNo.trim()
+          : null,
+      invoice_date: date,
+      due_date: effectiveDue,
+      order_number: orderNumber.trim() || null,
+      notes: notes.trim() || null,
+      discount_type: discountType,
+      discount_value: discountNum,
+      items: filled.map((l) => ({
+        product_id: l.product_id,
+        description: l.description.trim() || null,
+        quantity: Number(l.quantity),
+        rate: Number(l.rate) || 0,
+      })),
+    };
+    if (editInvoice) {
+      return {
+        saved: await updateInvoice(editInvoice.id, invoicePayload),
+        payError: null,
+      };
+    }
+    const created = await createInvoice(invoicePayload);
+    let saved = created;
+    let payError = null;
+    if (payNow) {
+      try {
+        await createPayment({
+          customer_id: customerId,
+          payment_date: date,
+          payment_mode: payMode,
+          deposit_account_id: Number(payDepositId),
+          reference: payReference.trim() || null,
+          notes: null,
+          allocations: [{ invoice_id: created.id, amount: payCents / 100 }],
+        });
+        // reload so the PDF shows the paid amount / balance
+        saved = await invoiceRequest(
+          String(created.id),
+          "GET",
+          null,
+          "Failed to reload invoice",
+        ).catch(() => created);
+      } catch (e) {
+        payError = e;
+      }
+    }
+    return { saved, payError };
+  };
+
+  const payErrorText = (saved, payError) =>
+    `${saved.invoice_number} was saved, but the payment could not be recorded (${payError.message}). Use "Record payment" on the invoice list.`;
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
     try {
-      const invoicePayload = {
-        customer_id: customerId,
-        sales_document_id: fromDoc ? fromDoc.id : null,
-        // a typed number wins; the untouched suggestion means "give me the next free one at save time"
-        invoice_number:
-          invoiceNo.trim() && invoiceNo.trim() !== suggestedNo
-            ? invoiceNo.trim()
-            : null,
-        invoice_date: date,
-        due_date: effectiveDue,
-        order_number: orderNumber.trim() || null,
-        notes: notes.trim() || null,
-        discount_type: discountType,
-        discount_value: discountNum,
-        items: filled.map((l) => ({
-          product_id: l.product_id,
-          description: l.description.trim() || null,
-          quantity: Number(l.quantity),
-          rate: Number(l.rate) || 0,
-        })),
-      };
-      if (editInvoice) {
-        await updateInvoice(editInvoice.id, invoicePayload);
-      } else {
-        const created = await createInvoice(invoicePayload);
-        if (payNow) {
-          try {
-            await createPayment({
-              customer_id: customerId,
-              payment_date: date,
-              payment_mode: payMode,
-              deposit_account_id: Number(payDepositId),
-              reference: payReference.trim() || null,
-              notes: null,
-              allocations: [{ invoice_id: created.id, amount: payCents / 100 }],
-            });
-          } catch (payErr) {
-            // the invoice is already saved, so close the form and tell the user what is left to do
-            draft.clear();
-            await onSaved();
-            onClose();
-            alert(
-              `${created.invoice_number} was saved, but the payment could not be recorded (${payErr.message}). Use "Record payment" on the invoice list.`,
-            );
-            return;
-          }
-        }
-      }
+      const { saved, payError } = await saveInvoice();
       draft.clear();
       await onSaved();
       onClose();
+      if (payError) alert(payErrorText(saved, payError));
     } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // "Download PDF" / "Send WhatsApp": runs from the "Save & continue" click of the box below
+  const handleSaveAnd = async (action) => {
+    if (!canSave || submitting || readOnly) return;
+    // computers WITHOUT a share sheet: open the WhatsApp tab inside this click so it is not blocked
+    const canShare =
+      typeof navigator.share === "function" &&
+      typeof navigator.canShare === "function" &&
+      navigator.canShare({
+        files: [new File(["x"], "t.pdf", { type: "application/pdf" })],
+      });
+    const waTab =
+      action === "whatsapp" && !canShare
+        ? window.open("about:blank", "_blank")
+        : null;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const { saved, payError } = await saveInvoice();
+      draft.clear();
+      // do the share / download RIGHT AWAY, while the browser still accepts the click
+      if (action === "whatsapp") await sendWhatsApp("invoice", saved, waTab);
+      else await downloadPdf("invoice", saved);
+      await onSaved();
+      onClose();
+      if (payError) alert(payErrorText(saved, payError));
+    } catch (err) {
+      if (waTab) waTab.close();
       setError(err.message);
     } finally {
       setSubmitting(false);
@@ -20066,6 +20129,26 @@ function InvoiceForm({
                     : "Save Invoice"}
             </button>
           </div>
+          {!readOnly && (
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setSendAsk("download")}
+                disabled={!canSave || submitting}
+                className="flex-1 border border-gray-300 text-gray-700 rounded-lg py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              >
+                <Download size={14} /> Download PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => setSendAsk("whatsapp")}
+                disabled={!canSave || submitting}
+                className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700 disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              >
+                <MessageCircle size={14} /> Send WhatsApp
+              </button>
+            </div>
+          )}
         </form>
 
         {/* resize handle (bottom-right corner) */}
@@ -20080,6 +20163,43 @@ function InvoiceForm({
             }}
           />
         </div>
+
+        {sendAsk && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60]">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5">
+              <h3 className="text-base font-semibold mb-2">
+                Save this invoice first?
+              </h3>
+              <p className="text-sm text-gray-600 mb-4">
+                To{" "}
+                {sendAsk === "whatsapp"
+                  ? "send it by WhatsApp"
+                  : "download the PDF"}
+                , the invoice must be saved. Save it and continue?
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSendAsk(null)}
+                  className="flex-1 border border-gray-300 text-gray-700 rounded-lg py-2 text-sm font-medium hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const action = sendAsk;
+                    setSendAsk(null);
+                    handleSaveAnd(action); // runs inside this click, so the share sheet is allowed
+                  }}
+                  className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700"
+                >
+                  Save &amp; continue
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {quickCustomerName !== null && (
           <QuickCustomerModal
