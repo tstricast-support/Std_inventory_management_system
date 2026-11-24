@@ -19088,6 +19088,43 @@ const blankInvoiceLine = () => ({
 });
 
 
+// ---- remembers where the user dragged / how big they resized the invoice window (per user, on this device) ----
+const INVOICE_WIN_KEY = "invoice_form_layout_v1";
+function readInvoiceLayout(userId) {
+  const none = { pos: { x: 0, y: 0 }, size: { w: null, h: null } };
+  try {
+    const s = JSON.parse(
+      localStorage.getItem(`${INVOICE_WIN_KEY}:${userId ?? "u"}`) || "null",
+    );
+    if (!s) return none;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    // the screen may be smaller than last time, so keep everything inside it
+    const w = Number(s.size?.w) ? clamp(Number(s.size.w), Math.min(420, W - 16), W - 16) : null;
+    const h = Number(s.size?.h) ? clamp(Number(s.size.h), Math.min(300, H - 16), H - 16) : null;
+    const pw = w ?? Math.min(W, Math.max(W / 2, 640));
+    const ph = h ?? H * 0.92;
+    return {
+      size: { w, h },
+      pos: {
+        x: clamp(Number(s.pos?.x) || 0, -(W / 2 + pw / 2 - 100), W / 2 + pw / 2 - 100),
+        y: clamp(Number(s.pos?.y) || 0, ph / 2 - H / 2, H / 2 + ph / 2 - 40),
+      },
+    };
+  } catch {
+    return none;
+  }
+}
+function saveInvoiceLayout(userId, pos, size) {
+  try {
+    localStorage.setItem(
+      `${INVOICE_WIN_KEY}:${userId ?? "u"}`,
+      JSON.stringify({ pos, size }),
+    );
+  } catch {}
+}
+
 function InvoiceForm({
   fromDoc = null,
   editInvoice = null,
@@ -19152,8 +19189,16 @@ function InvoiceForm({
   const [confirmItem, setConfirmItem] = useState(null); // { name, lineIndex } or null = question closed
   const [invoiceNo, setInvoiceNo] = useState(editInvoice?.invoice_number || "");
   const [suggestedNo, setSuggestedNo] = useState(""); // the auto number shown when the form opened
-  const [pos, setPos] = useState({ x: 0, y: 0 }); // how far the window has been dragged
-  const [size, setSize] = useState({ w: null, h: null }); // null = default size until the user resizes
+  const { user } = useAuth();
+  const savedLayout = useRef(null);
+  if (savedLayout.current === null) savedLayout.current = readInvoiceLayout(user?.id); // read once, when the form opens
+  const [pos, setPos] = useState(savedLayout.current.pos); // how far the window has been dragged
+  const [size, setSize] = useState(savedLayout.current.size); // null = default size until the user resizes
+  // save the position / size a moment after every drag or resize, so the next login opens it the same way
+  useEffect(() => {
+    const t = setTimeout(() => saveInvoiceLayout(user?.id, pos, size), 300);
+    return () => clearTimeout(t);
+  }, [pos, size, user?.id]);
   const [preview, setPreview] = useState(null); // { url } while the preview window is open
   const [previewBusy, setPreviewBusy] = useState(false);
   const [sendAsk, setSendAsk] = useState(null); // "whatsapp" | "download" while the "save first?" box is open
@@ -19165,45 +19210,45 @@ function InvoiceForm({
   const [payMode, setPayMode] = useState("Cash");
   const [payDepositId, setPayDepositId] = useState("");
   const [payReference, setPayReference] = useState("");
-  const draft = useFormDraft({
-    name: "invoice",
-    enabled: !editInvoice && !fromDoc,
-    snapshot: {
-      customerId,
-      date,
-      dueDate,
-      orderNumber,
-      notes,
-      discountType,
-      discountValue,
-      lines,
-      payNow,
-      payAmount,
-      payMode,
-      payDepositId,
-      payReference,
-    },
-    hasContent:
-      Boolean(customerId) ||
-      Boolean(orderNumber.trim()) ||
-      Boolean(notes.trim()) ||
-      lines.some((l) => l.product_id || (l.description || "").trim()),
-    apply: (d) => {
-      setCustomerId(d.customerId ?? "");
-      setDate(d.date || toISODate(new Date()));
-      setDueDate(d.dueDate || "");
-      setOrderNumber(d.orderNumber || "");
-      setNotes(d.notes || "");
-      setDiscountType(d.discountType || "amount");
-      setDiscountValue(d.discountValue || "");
-      setLines(d.lines?.length ? d.lines : [blankInvoiceLine()]);
-      setPayNow(Boolean(d.payNow));
-      setPayAmount(d.payAmount || "");
-      setPayMode(d.payMode || "Cash");
-      if (d.payDepositId) setPayDepositId(d.payDepositId);
-      setPayReference(d.payReference || "");
-    },
-  });
+    const draft = useFormDraft({
+      name: "invoice",
+      enabled: !editInvoice && !fromDoc,
+      snapshot: {
+        customerId,
+        date,
+        dueDate,
+        orderNumber,
+        notes,
+        discountType,
+        discountValue,
+        lines,
+        payNow,
+        payAmount,
+        payMode,
+        payDepositId,
+        payReference,
+      },
+      hasContent:
+        Boolean(customerId) ||
+        Boolean(orderNumber.trim()) ||
+        Boolean(notes.trim()) ||
+        lines.some((l) => l.product_id || (l.description || "").trim()),
+      apply: (d) => {
+        setCustomerId(d.customerId ?? "");
+        setDate(d.date || toISODate(new Date()));
+        setDueDate(d.dueDate || "");
+        setOrderNumber(d.orderNumber || "");
+        setNotes(d.notes || "");
+        setDiscountType(d.discountType || "amount");
+        setDiscountValue(d.discountValue || "");
+        setLines(d.lines?.length ? d.lines : [blankInvoiceLine()]);
+        setPayNow(Boolean(d.payNow));
+        setPayAmount(d.payAmount || "");
+        setPayMode(d.payMode || "Cash");
+        if (d.payDepositId) setPayDepositId(d.payDepositId);
+        setPayReference(d.payReference || "");
+      },
+    });
 
   // only for a NEW invoice: load the deposit accounts (if this user can't read them, the button is simply hidden)
   useEffect(() => {
