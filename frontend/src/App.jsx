@@ -3796,6 +3796,66 @@ function ProductKindChooser({ onPick, onClose }) {
 //       "subitem"    -> Create Subitem (Subitem of is required, parents = existing subitems)
 //       "under-item" -> opened by "+ New" inside a subitem form (Subitem of required, parents = top-level items)
 
+// ---- calculator inside the Cost / Sales Price boxes: type 100*.70 and press Enter ----
+// Safe evaluator (no eval): numbers, + - * / ( ) and x / × / ÷. Returns a number, or null if it can't be calculated.
+function evalMath(text) {
+  const s = String(text ?? "")
+    .replace(/[×xX]/g, "*")
+    .replace(/÷/g, "/")
+    .replace(/\s+/g, "");
+  if (!s || !/^[0-9+\-*/().]+$/.test(s)) return null;
+  let i = 0;
+  const expr = () => {
+    let v = term();
+    while (s[i] === "+" || s[i] === "-") {
+      const op = s[i++];
+      const r = term();
+      v = op === "+" ? v + r : v - r;
+    }
+    return v;
+  };
+  const term = () => {
+    let v = factor();
+    while (s[i] === "*" || s[i] === "/") {
+      const op = s[i++];
+      const r = factor();
+      v = op === "*" ? v * r : v / r;
+    }
+    return v;
+  };
+  const factor = () => {
+    if (s[i] === "-") {
+      i++;
+      return -factor();
+    }
+    if (s[i] === "+") {
+      i++;
+      return factor();
+    }
+    if (s[i] === "(") {
+      i++;
+      const v = expr();
+      if (s[i] !== ")") throw new Error("bad");
+      i++;
+      return v;
+    }
+    const m = /^(\d+\.?\d*|\.\d+)/.exec(s.slice(i));
+    if (!m) throw new Error("bad");
+    i += m[0].length;
+    return parseFloat(m[0]);
+  };
+  try {
+    const v = expr();
+    return i === s.length && isFinite(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+// true when the text is a calculation (100*.70) and not just a number (70 or -5)
+const isMathExpr = (t) =>
+  /[+\-*/×÷xX()]/.test(String(t ?? "").trim().replace(/^-/, ""));
+const MATH_CHARS = /^[0-9+\-*/().\s×÷xX]*$/; // what may be typed in those boxes
+
 function ProductFormBody({
   initialData,
   duplicateFrom = null, // an existing item to copy into a NEW item
@@ -3892,6 +3952,74 @@ function ProductFormBody({
 
   const handleChange = (field, value) =>
     setForm((prev) => ({ ...prev, [field]: value }));
+
+  // ---- Cost / Markup % / Margin % / Sales Price calculator (QuickBooks style) ----
+  // calc = the % box the user is typing in ("markup" | "margin"); null = percentages are just calculated
+  const [calc, setCalc] = useState({ field: null, text: "" });
+  const costNum = Number(form.cost) || 0;
+  const priceNum = Number(form.price) || 0;
+  const profit = priceNum - costNum;
+  const markupPct =
+    costNum > 0 && priceNum > 0 ? (profit / costNum) * 100 : null; // profit as a % of cost
+  const marginPct =
+    costNum > 0 && priceNum > 0 ? (profit / priceNum) * 100 : null; // profit as a % of the sales price
+  const fmtPct = (n) => (n === null ? "" : String(Math.round(n * 100) / 100));
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const priceFrom = (field, cost, pct) =>
+    field === "markup"
+      ? round2(cost * (1 + pct / 100))
+      : pct < 100
+        ? round2(cost / (1 - pct / 100))
+        : null;
+  const validPct = (t) => t !== "" && t !== "-" && !isNaN(Number(t));
+
+  // cost typed: if a markup / margin % was typed before, the price follows it; otherwise the price stays
+  const handleCostChange = (v) => {
+    setForm((prev) => {
+      const next = { ...prev, cost: v };
+      if (calc.field && validPct(calc.text) && Number(v) > 0) {
+        const p = priceFrom(calc.field, Number(v), Number(calc.text));
+        if (p !== null) next.price = p;
+      }
+      return next;
+    });
+  };
+  // markup % or margin % typed: the sales price is calculated from the cost
+  const handlePctChange = (field, text) => {
+    setCalc({ field, text });
+    if (validPct(text) && costNum > 0) {
+      const p = priceFrom(field, costNum, Number(text));
+      if (p !== null) handleChange("price", p);
+    }
+  };
+  // sales price typed by hand: both percentages are recalculated from it
+  const handlePriceChange = (v) => {
+    setCalc({ field: null, text: "" });
+    handleChange("price", v);
+  };
+  // Enter / leaving the box turns "100*.70" into 70 (and the other fields follow)
+  const resolveMath = (field) => {
+    const t = String(form[field] ?? "");
+    if (!isMathExpr(t)) return true;
+    const r = evalMath(t);
+    if (r === null || r < 0) {
+      setError(`Cannot calculate "${t}"`);
+      return false;
+    }
+    const v = String(round2(r));
+    if (field === "cost") handleCostChange(v);
+    else handlePriceChange(v);
+    setError(null);
+    return true;
+  };
+  const mathKeyDown = (field) => (e) => {
+    if (e.key === "Enter" && isMathExpr(form[field])) {
+      e.preventDefault(); // calculate instead of saving the form
+      resolveMath(field);
+    }
+  };
+  const markupShown = calc.field === "markup" ? calc.text : fmtPct(markupPct);
+  const marginShown = calc.field === "margin" ? calc.text : fmtPct(marginPct);
     const handleFileChange = (e) => {
       const input = e.target;
       const files = Array.from(input.files);
@@ -3982,6 +4110,17 @@ function ProductFormBody({
     try {
       const { is_subitem, ...rest } = form;
       const values = { ...rest, parent_id: is_subitem ? form.parent_id : "" };
+      // a calculation left in Cost / Sales Price (100*.70) is worked out before saving
+      for (const f of ["cost", "price"]) {
+        const t = String(form[f] ?? "").trim();
+        if (t === "") continue;
+        const r = evalMath(t);
+        if (r === null || r < 0) {
+          setSubmitting(false);
+          return setError(`Cannot calculate "${t}" in ${f === "cost" ? "Cost" : "Sales Price"}`);
+        }
+        values[f] = round2(r);
+      }
       if (isEditMode) {
         await onSubmit(initialData.id, values);
       } else {
@@ -4119,11 +4258,16 @@ function ProductFormBody({
                     <div>
                       <label className={lbl}>Cost</label>
                       <input
-                        type="number"
-                        step="0.01"
-                        min="0"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="e.g. 100*.70"
                         value={form.cost}
-                        onChange={(e) => handleChange("cost", e.target.value)}
+                        onChange={(e) =>
+                          MATH_CHARS.test(e.target.value) &&
+                          handleCostChange(e.target.value)
+                        }
+                        onKeyDown={mathKeyDown("cost")}
+                        onBlur={() => resolveMath("cost")}
                         className={inp}
                       />
                     </div>
@@ -4167,17 +4311,55 @@ function ProductFormBody({
                       className={inp}
                     />
                   </div>
-                  <div>
-                    <label className={lbl}>Sales Price</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={form.price}
-                      onChange={(e) => handleChange("price", e.target.value)}
-                      className={inp}
-                    />
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className={lbl}>Sales Price</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="e.g. 100*.70"
+                        value={form.price}
+                        onChange={(e) =>
+                          MATH_CHARS.test(e.target.value) &&
+                          handlePriceChange(e.target.value)
+                        }
+                        onKeyDown={mathKeyDown("price")}
+                        onBlur={() => resolveMath("price")}
+                        className={inp}
+                      />
+                    </div>
+                    <div>
+                      <label className={lbl}>Markup %</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={markupShown}
+                        onChange={(e) =>
+                          handlePctChange("markup", e.target.value)
+                        }
+                        className={inp}
+                      />
+                    </div>
+                    <div>
+                      <label className={lbl}>Margin %</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={marginShown}
+                        onChange={(e) =>
+                          handlePctChange("margin", e.target.value)
+                        }
+                        className={inp}
+                      />
+                    </div>
                   </div>
+                  <p
+                    className={`text-xs -mt-1 ${profit < 0 && priceNum > 0 ? "text-red-600" : "text-gray-500"}`}
+                  >
+                    {costNum > 0 && priceNum > 0
+                      ? `Profit ${formatRs(profit)} per item`
+                      : "Enter the cost, then a Markup % or Margin % (or the Sales Price) and the rest is calculated. You can also type a calculation like 100*.70 in Cost or Sales Price and press Enter."}
+                  </p>
                   <div>
                     <label className={lbl}>Income Account</label>
                     <AccountSelect
