@@ -7249,6 +7249,23 @@ function ItemsTableView({
   );
 }
 
+// Remembers the last Items view ("table" | "default") per user on this device
+const ITEMS_LIST_MODE_KEY = "items_list_mode_v1";
+const itemsModeKey = (userId) => `${ITEMS_LIST_MODE_KEY}:${userId ?? "u"}`;
+function readItemsListMode(userId) {
+  try {
+    return localStorage.getItem(itemsModeKey(userId)) === "table"
+      ? "table"
+      : "default";
+  } catch {
+    return "default";
+  }
+}
+function saveItemsListMode(userId, mode) {
+  try {
+    localStorage.setItem(itemsModeKey(userId), mode);
+  } catch {}
+}
 
 function ItemsPage({
   isAdmin,
@@ -7258,9 +7275,23 @@ function ItemsPage({
   refreshToken,
   onProductAdded,
 }) {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const [params] = useSearchParams();
-  const tableMode = params.get("list") === "table"; // sidebar > Items > "Table version"
+  const listParam = params.get("list"); // "table" | "default" | null (not chosen in this URL)
+  // explicit choice in the URL wins; otherwise use what this user last viewed
+  const tableMode = listParam
+    ? listParam === "table"
+    : !itemId && readItemsListMode(user?.id) === "table";
+
+  useEffect(() => {
+    if (itemId) return; // an open item must not change or redirect the list mode
+    if (listParam === "table" || listParam === "default") {
+      saveItemsListMode(user?.id, listParam); // remember the last choice
+    } else if (readItemsListMode(user?.id) === "table") {
+      go({ view: "items", list: "table" }, { replace: true }); // keep URL and sidebar highlight in sync
+    }
+  }, [listParam, itemId, user?.id]);
+
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -7326,7 +7357,7 @@ function ItemsPage({
   // Back from an item opened out of the table version returns to the table version
   const itemsHome = tableMode
     ? { view: "items", list: "table" }
-    : { view: "items" };
+    : { view: "items", list: "default" };
 
   const handleDelete = async () => {
     const target = deleteTarget;
@@ -7452,7 +7483,7 @@ function ItemsPage({
               go(
                 mode === "table"
                   ? { view: "items", list: "table" }
-                  : { view: "items" },
+                  : { view: "items", list: "default" },
               )
             }
             className={`px-3 py-1.5 border first:rounded-l-md last:rounded-r-md -ml-px first:ml-0 ${
@@ -26369,18 +26400,17 @@ function ZohoSidebar({ onNavigate }) {
   }, [activeId]);
 
   // Ctrl / Cmd / Shift + click = open that page in a new window
-  const go = (id, inNewWindow = false, mode = "default") => {
-    const tableQuery = id === "items" && mode === "table";
+  const go = (id, inNewWindow = false, mode) => {
+    // mode: "table" | "default" only when a child (Default list / Table version) was clicked
+    const listQuery = id === "items" && mode ? `&list=${mode}` : "";
     if (inNewWindow && wins) {
-      wins.openWindow(
-        id === "home" ? "" : `view=${id}${tableQuery ? "&list=table" : ""}`,
-      );
+      wins.openWindow(id === "home" ? "" : `view=${id}${listQuery}`);
     } else {
       setParams(
         id === "home"
           ? {}
-          : tableQuery
-            ? { view: id, list: "table" }
+          : id === "items" && mode
+            ? { view: id, list: mode }
             : { view: id },
       );
     }
