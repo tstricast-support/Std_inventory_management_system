@@ -3792,10 +3792,6 @@ function ProductKindChooser({ onPick, onClose }) {
   );
 }
 
-// kind: "item"       -> normal form (Subitem of is optional, parents = top-level items)
-//       "subitem"    -> Create Subitem (Subitem of is required, parents = existing subitems)
-//       "under-item" -> opened by "+ New" inside a subitem form (Subitem of required, parents = top-level items)
-
 // ---- calculator inside the Cost / Sales Price boxes: type 100*.70 and press Enter ----
 // Safe evaluator (no eval): numbers, + - * / ( ) and x / × / ÷. Returns a number, or null if it can't be calculated.
 function evalMath(text) {
@@ -3952,6 +3948,26 @@ function ProductFormBody({
 
   const handleChange = (field, value) =>
     setForm((prev) => ({ ...prev, [field]: value }));
+
+  // ---- Purchase / Sales description: what is typed in one box is copied into the other ----
+  // The copy stops as soon as the other box has its own text, so the two can still be different.
+  // (only for a brand-new item; editing or duplicating never overwrites an existing description)
+  const descIsCopy = useRef({ description: false, purchase_description: false });
+  const handleDescChange = (field, value) => {
+    const other =
+      field === "description" ? "purchase_description" : "description";
+    descIsCopy.current[field] = false; // typed by the user, so it is no longer an automatic copy
+    const copy =
+      !isEditMode &&
+      !isDuplicate &&
+      (!form[other] || descIsCopy.current[other]); // other box is empty, or still just a copy
+    if (copy) descIsCopy.current[other] = true;
+    setForm((prev) => ({
+      ...prev,
+      [field]: value,
+      ...(copy ? { [other]: value } : {}),
+    }));
+  };
 
   // ---- Cost / Markup % / Margin % / Sales Price calculator (QuickBooks style) ----
   // calc = the % box the user is typing in ("markup" | "margin"); null = percentages are just calculated
@@ -4249,7 +4265,7 @@ function ProductFormBody({
                       rows={3}
                       value={form.purchase_description}
                       onChange={(e) =>
-                        handleChange("purchase_description", e.target.value)
+                        handleDescChange("purchase_description", e.target.value)
                       }
                       className={inp}
                     />
@@ -4306,7 +4322,7 @@ function ProductFormBody({
                       rows={3}
                       value={form.description}
                       onChange={(e) =>
-                        handleChange("description", e.target.value)
+                        handleDescChange("description", e.target.value)
                       }
                       className={inp}
                     />
