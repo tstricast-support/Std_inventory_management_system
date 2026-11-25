@@ -7087,6 +7087,61 @@ function useItemTableColumns() {
   return [cols, save, defaults];
 }
 
+// Column widths for the Items table (drag the header border to resize)
+const ITEM_TABLE_WIDTHS_KEY = "item_table_widths_v1";
+const ITEM_TABLE_DEFAULT_W = {
+  name: 260,
+  type: 110,
+  description: 280,
+  purchase_description: 280,
+  account: 160,
+  cogs: 160,
+  asset: 160,
+  vendor: 170,
+  mpn: 170,
+};
+const itemColW = (widths, key) =>
+  widths[key] || ITEM_TABLE_DEFAULT_W[key] || 120;
+
+function useItemTableWidths() {
+  const { company } = useCompany();
+  const key = `${ITEM_TABLE_WIDTHS_KEY}${company?.id ? `:${company.id}` : ""}`;
+  const read = () => {
+    try {
+      const w = JSON.parse(localStorage.getItem(key) || "null");
+      return w && typeof w === "object" && !Array.isArray(w) ? w : {};
+    } catch (e) {
+      return {};
+    }
+  };
+  const [widths, setWidths] = useState(read);
+  useEffect(() => {
+    setWidths(read());
+  }, [key]);
+  const widthsRef = useRef(widths);
+  widthsRef.current = widths;
+
+  const setWidth = (k, w) =>
+    setWidths((p) => ({ ...p, [k]: Math.max(50, Math.round(w)) }));
+  const commit = () => {
+    try {
+      localStorage.setItem(key, JSON.stringify(widthsRef.current));
+    } catch (e) {
+      /* storage blocked */
+    }
+  };
+  const resetOne = (k) => {
+    setWidths((p) => {
+      const n = { ...p };
+      delete n[k];
+      widthsRef.current = n;
+      return n;
+    });
+    setTimeout(commit, 0);
+  };
+  return [widths, setWidth, commit, resetOne];
+}
+
 const itemTableNum = (n) =>
   Number(n || 0).toLocaleString(undefined, {
     minimumFractionDigits: 2,
@@ -7214,6 +7269,27 @@ function ItemsTableView({
   onOpenItem,
 }) {
   const [cols, saveCols, colsDefault] = useItemTableColumns();
+    const [widths, setWidth, commitWidths, resetWidth] = useItemTableWidths();
+    const justResized = useRef(false);
+    const startResize = (e, key, startW) => {
+      e.preventDefault();
+      e.stopPropagation();
+      justResized.current = true;
+      const startX = e.clientX;
+      const onMove = (ev) => setWidth(key, startW + ev.clientX - startX);
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        commitWidths();
+        setTimeout(() => (justResized.current = false), 0);
+      };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    };
   const [colsOpen, setColsOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -7247,6 +7323,8 @@ function ItemsTableView({
     .filter((c) => c.visible)
     .map((c) => ITEM_TABLE_DEFS.find((d) => d.key === c.key))
     .filter(Boolean);
+  
+  const tableW = visCols.reduce((s, c) => s + itemColW(widths, c.key), 0);
 
   // totals count real (leaf) items only, so a parent's rolled-up stock is never added twice
   const leaves = allRows.filter((r) => !r._isParent);
@@ -7308,7 +7386,7 @@ function ItemsTableView({
       case "description":
         return (
           <span
-            className="block max-w-[22rem] truncate text-gray-600"
+            className="block truncate text-gray-600"
             title={n.description || ""}
           >
             {n.description || ""}
@@ -7317,7 +7395,7 @@ function ItemsTableView({
       case "purchase_description":
         return (
           <span
-            className="block max-w-[22rem] truncate text-gray-600"
+            className="block truncate text-gray-600"
             title={n.purchase_description || ""}
           >
             {n.purchase_description || ""}
@@ -7435,18 +7513,29 @@ function ItemsTableView({
         </p>
       ) : (
         <div className="overflow-auto max-h-[calc(100vh-250px)]">
-          <table className="w-full text-sm border-collapse">
+          <table
+            className="text-sm border-collapse"
+            style={{ tableLayout: "fixed", width: tableW }}
+          >
+            <colgroup>
+              {visCols.map((c) => (
+                <col key={c.key} style={{ width: itemColW(widths, c.key) }} />
+              ))}
+            </colgroup>
             <thead className="sticky top-0 z-10 bg-gray-100 border-b border-gray-300">
               <tr>
                 {visCols.map((c) => (
                   <th
                     key={c.key}
-                    onClick={() => toggleSort(c.key)}
+                    onClick={() => {
+                      if (justResized.current) return;
+                      toggleSort(c.key);
+                    }}
                     onContextMenu={(e) => {
                       e.preventDefault(); // right-click a header = Customize Columns (like QuickBooks)
                       setColsOpen(true);
                     }}
-                    className={`${th} ${c.right ? "text-right" : "text-left"}`}
+                    className={`${th} relative overflow-hidden text-ellipsis ${c.right ? "text-right" : "text-left"}`}
                   >
                     {c.label}
                     {sort.key === c.key && (
@@ -7454,6 +7543,18 @@ function ItemsTableView({
                         {sort.dir === "asc" ? "▲" : "▼"}
                       </span>
                     )}
+                    {/* drag handle: drag = resize, double-click = reset width */}
+                    <span
+                      onMouseDown={(e) =>
+                        startResize(e, c.key, itemColW(widths, c.key))
+                      }
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        resetWidth(c.key);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute top-0 right-0 h-full w-2 cursor-col-resize hover:bg-blue-400/60"
+                    />
                   </th>
                 ))}
               </tr>
@@ -7488,7 +7589,7 @@ function ItemsTableView({
                     {visCols.map((c) => (
                       <td
                         key={c.key}
-                        className={`px-3 py-1 border-r border-gray-100 whitespace-nowrap ${
+                        className={`px-3 py-1 border-r border-gray-100 whitespace-nowrap overflow-hidden text-ellipsis ${
                           c.right ? "text-right tabular-nums" : "text-left"
                         }`}
                       >
@@ -7504,7 +7605,7 @@ function ItemsTableView({
                 {visCols.map((c, i) => (
                   <td
                     key={c.key}
-                    className={`px-3 py-1.5 whitespace-nowrap ${c.right ? "text-right tabular-nums" : "text-left"}`}
+                    className={`px-3 py-1.5 whitespace-nowrap overflow-hidden text-ellipsis ${c.right ? "text-right tabular-nums" : "text-left"}`}
                   >
                     {i === 0
                       ? "Total"
