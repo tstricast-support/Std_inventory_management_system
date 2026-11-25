@@ -7095,7 +7095,7 @@ const itemTableNum = (n) =>
 
 // Builds the visible rows: filters (search + type), rolls stock up into parent rows,
 // sorts every level, then flattens the tree into one ordered list.
-function buildItemTableRows(products, { q, typeFilter, sort, collapsed }) {
+function buildItemTableRows(products, { q, typeFilter, sort, expanded }) {
   const haystack = (p) =>
     [
       p.name,
@@ -7196,7 +7196,7 @@ function buildItemTableRows(products, { q, typeFilter, sort, collapsed }) {
   const out = [];
   const walk = (n) => {
     out.push(n);
-    if (!collapsed.has(n.id) || q) [...n._kids].sort(cmp).forEach(walk);
+      if (expanded.has(n.id) || q) [...n._kids].sort(cmp).forEach(walk);
   };
   products
     .map((p) => build(p, 0, false))
@@ -7219,17 +7219,37 @@ function ItemsTableView({
   const [typeFilter, setTypeFilter] = useState("all");
   const [sort, setSort] = useState({ key: "name", dir: "asc" });
   const [selectedId, setSelectedId] = useState(null);
-  const [collapsed, setCollapsed] = useState(() => new Set());
+  const [expanded, setExpanded] = useState(() => new Set()); // empty = everything collapsed
+  // every item that has subitems (any depth)
+  const allParentIds = () => {
+    const ids = [];
+    const walk = (list) =>
+      list.forEach((p) => {
+        if (p.subitems?.length) {
+          ids.push(p.id);
+          walk(p.subitems);
+        }
+      });
+    walk(products);
+    return ids;
+  };
 
   const q = search.trim().toLowerCase();
-  const rows = buildItemTableRows(products, { q, typeFilter, sort, collapsed });
+  const rows = buildItemTableRows(products, { q, typeFilter, sort, expanded });
+  // totals must count every item, even the ones hidden inside a collapsed parent
+  const allRows = buildItemTableRows(products, {
+    q,
+    typeFilter,
+    sort,
+    expanded: new Set(allParentIds()),
+  });
   const visCols = cols
     .filter((c) => c.visible)
     .map((c) => ITEM_TABLE_DEFS.find((d) => d.key === c.key))
     .filter(Boolean);
 
   // totals count real (leaf) items only, so a parent's rolled-up stock is never added twice
-  const leaves = rows.filter((r) => !r._isParent);
+  const leaves = allRows.filter((r) => !r._isParent);
   const totalQty = leaves.reduce((s, r) => s + r._qty, 0);
   const totalValue = leaves.reduce((s, r) => s + r._value, 0);
 
@@ -7239,8 +7259,8 @@ function ItemsTableView({
         ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
         : { key, dir: "asc" },
     );
-  const toggleCollapsed = (id) =>
-    setCollapsed((prev) => {
+  const toggleExpanded = (id) =>
+    setExpanded((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
@@ -7260,12 +7280,12 @@ function ItemsTableView({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  toggleCollapsed(n.id);
+                  toggleExpanded(n.id);
                 }}
                 className="text-gray-500 hover:text-gray-800 shrink-0"
-                aria-label={collapsed.has(n.id) ? "Expand" : "Collapse"}
+                aria-label={!expanded.has(n.id) ? "Expand" : "Collapse"}
               >
-                {collapsed.has(n.id) && !q ? (
+                {!expanded.has(n.id) && !q ? (
                   <ChevronRight size={14} />
                 ) : (
                   <ChevronDown size={14} />
@@ -7383,6 +7403,20 @@ function ItemsTableView({
           className="inline-flex items-center gap-1.5 px-3 py-1 rounded-sm text-sm border border-gray-300 bg-white hover:bg-gray-100 text-gray-700"
         >
           <Settings size={14} /> Customize Columns
+        </button>
+        <button
+          type="button"
+          onClick={() => setExpanded(new Set(allParentIds()))}
+          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-sm text-sm border border-gray-300 bg-white hover:bg-gray-100 text-gray-700"
+        >
+          <ChevronDown size={14} /> Expand all
+        </button>
+        <button
+          type="button"
+          onClick={() => setExpanded(new Set())}
+          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-sm text-sm border border-gray-300 bg-white hover:bg-gray-100 text-gray-700"
+        >
+          <ChevronRight size={14} /> Collapse all
         </button>
         <span className="ml-auto text-xs text-gray-500">
           {leaves.length} {leaves.length === 1 ? "item" : "items"}
