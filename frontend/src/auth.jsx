@@ -18,7 +18,6 @@ import {
 } from "./api.js";
 import {
   loginWithPasskey as passkeyLogin,
-  passkeyEnrolledHere,
   passkeysSupported,
 } from "./passkeys.jsx";
 
@@ -41,8 +40,8 @@ export const ACCOUNTING_AREAS = [
   "vendors",
 ];
 
-const IDLE_LIMIT_MS = 30 * 60 * 1000; // sign out after 30 minutes without activity
-const IDLE_WARN_MS = 28 * 60 * 1000; // warn at 28 minutes
+const IDLE_LIMIT_MS = 8 * 60 * 60 * 1000; // sign out after 8 hours without activity
+const IDLE_WARN_MS = (8 * 60 - 2) * 60 * 1000; // warn 2 minutes before
 
 const AuthContext = createContext(null);
 
@@ -429,7 +428,7 @@ function LoginPage() {
         </button>
       </form>
       {/* only shown on devices where Face unlock was already enabled (otherwise iOS shows a confusing QR sheet) */}
-      {passkeysSupported() && passkeyEnrolledHere() && (
+      {passkeysSupported() && (        
         <>
           <div className="flex items-center gap-3 my-4 text-xs text-gray-400">
             <div className="flex-1 h-px bg-gray-200" />
