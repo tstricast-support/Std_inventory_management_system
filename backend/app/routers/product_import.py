@@ -175,7 +175,8 @@ def import_products(
     if len(rows) > 5000:
         raise HTTPException(400, "Too many rows (max 5000 per file)")
 
-    accounts = {a.name.strip().lower(): a for a in db.query(models.Account).all()}
+    # key = (name, account type): the same name can exist as income, COGS and asset accounts
+    accounts = {(a.name.strip().lower(), a.account_type): a for a in db.query(models.Account).all()}
     vendors = {v.name.strip().lower(): v for v in db.query(models.Vendor).all()}
     by_sku = {p.sku.strip().lower(): p for p in db.query(models.Product).filter(models.Product.sku.isnot(None)).all()}
     by_name = {}
@@ -185,12 +186,12 @@ def import_products(
     errors, results = [], []
     created = updated = skipped = 0
 
-    def find_account(label, value):
+    def find_account(label, value, account_type):
         if not value:
             return None
-        acc = accounts.get(value.lower())
+        acc = accounts.get((value.lower(), account_type))
         if not acc:
-            raise ValueError(f"{label} '{value}' not found")
+            raise ValueError(f"{label} '{value}' not found (it must be a {account_type} account)")
         return acc.id
 
     def find_parent(value):
@@ -243,9 +244,9 @@ def import_products(
                     reorder_min=_to_int(row.get("reorder_min"), "Reorder Min", allow_blank=True),
                     reorder_max=_to_int(row.get("reorder_max"), "Reorder Max", allow_blank=True),
                     parent_id=parent.id if parent else None,
-                    income_account_id=find_account("Income Account", _clean(row.get("income_account"))),
-                    cogs_account_id=find_account("COGS Account", _clean(row.get("cogs_account"))),
-                    asset_account_id=find_account("Asset Account", _clean(row.get("asset_account"))),
+                    income_account_id=find_account("Income Account", _clean(row.get("income_account")), "income"),
+                    cogs_account_id=find_account("COGS Account", _clean(row.get("cogs_account")), "cogs"),
+                    asset_account_id=find_account("Asset Account", _clean(row.get("asset_account")), "asset"),
                     preferred_vendor_id=vendor.id if vendor else None,
                 )
                 quantity = _to_int(row.get("quantity"), "Quantity")
