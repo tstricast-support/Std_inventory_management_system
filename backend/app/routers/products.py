@@ -63,6 +63,8 @@ def create_product(
 ):
 
     check_image_count(images)
+    if not name.strip():
+        raise HTTPException(400, "Item name is required")
     safe_names = [validate_image(img) for img in images]   # refuse bad pictures BEFORE the item is saved
 
     if parent_id is not None:
@@ -71,7 +73,7 @@ def create_product(
             raise HTTPException(400, f"Parent item {parent_id} does not exist")
 
     product = models.Product(
-        name=name, sku=(sku or "").strip() or None, description=description, purchase_description=purchase_description,
+        name=name.strip(), sku=(sku or "").strip() or None, description=description, purchase_description=purchase_description,
         quantity=quantity, price=price, cost=cost,
         item_type=item_type, manufacturer_part_number=manufacturer_part_number,
         reorder_min=reorder_min, reorder_max=reorder_max, parent_id=parent_id,
@@ -124,6 +126,11 @@ def update_product(product_id: int, payload: schemas.ProductUpdate, db: Session 
     data = payload.model_dump(exclude_unset=True)
     if "sku" in data:
         data["sku"] = (data["sku"] or "").strip() or None
+
+    if "name" in data:
+        data["name"] = (data["name"] or "").strip()
+        if not data["name"]:
+            raise HTTPException(400, "Item name is required")
 
     old_qty = product.quantity or 0
     for field, value in data.items():

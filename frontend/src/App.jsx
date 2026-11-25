@@ -2511,6 +2511,7 @@ function RestockModal({ product, onSubmit, onClose }) {
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -3331,6 +3332,7 @@ function ComboWithCreate({
   confirmOnly = false,
   onQuickAdd,
   onSetUp,
+  onMiss,
 }) {
   const listId = useRef("dl-" + Math.random().toString(36).slice(2)).current;
   const selected = options.find((o) => String(o.id) === String(value));
@@ -3343,16 +3345,24 @@ function ComboWithCreate({
     setText(selected?.label || "");
   }, [value, selected?.label]);
 
-  const findMatch = (t) => {
-    const q = t.trim().toLowerCase();
+  const norm = (s) =>
+    String(s || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+
+  const findMatchIn = (list, t) => {
+    const q = norm(t);
     if (!q) return null;
-    const byLabel = options.find((o) => (o.label || "").toLowerCase() === q);
+    const byLabel = list.find((o) => norm(o.label) === q);
     if (byLabel) return byLabel;
-    const byName = options.filter((o) => (o.name || "").toLowerCase() === q);
+    const byName = list.filter((o) => norm(o.name) === q);
     return byName.length === 1 ? byName[0] : null;
   };
 
-  const commit = () => {
+  const findMatch = (t) => findMatchIn(options, t);
+
+  const commit = async () => {
     if (askFor) return;
     const t = text.trim();
     if (!t) {
@@ -3364,7 +3374,20 @@ function ComboWithCreate({
       if (String(m.id) !== String(value)) onChange(String(m.id));
       return;
     }
-    setAskFor(t); // not in the list -> ask
+    // not in the list we have: the list may be old or may have failed to load, so fetch it again first
+    if (onMiss) {
+      try {
+        const fresh = await onMiss();
+        const m2 = fresh ? findMatchIn(fresh, t) : null;
+        if (m2) {
+          onChange(String(m2.id));
+          return;
+        }
+      } catch {
+        /* could not reload: fall through and ask */
+      }
+    }
+    setAskFor(t); // really not there -> ask
   };
 
   const cancelAsk = () => {
@@ -3450,6 +3473,7 @@ function ParentItemSelect({
   onChange,
   onCreateParent,
   onNew,
+  onRefresh,
   allowQuickAdd = true,
   placeholder = "Select parent item...",
   disabled,
@@ -3469,6 +3493,16 @@ function ParentItemSelect({
       onChange={onChange}
       onQuickAdd={onCreateParent}
       onSetUp={onNew}
+      onMiss={
+        onRefresh
+          ? async () =>
+              (await onRefresh()).map((p) => ({
+                id: p.id,
+                name: p.name,
+                label: p.label || p.name,
+              }))
+          : undefined
+      }
     />
   );
 }
@@ -3904,14 +3938,14 @@ function ProductFormBody({
   const [imageFiles, setImageFiles] = useState([]);
   const [images, setImages] = useState(initialData?.images || []);
   const [submitting, setSubmitting] = useState(false);
-  
-    const draft = useFormDraft({
-      name: `item-${kind}`,
-      enabled: !isEditMode && !isDuplicate && !initialName,
-      snapshot: { form },
-      hasContent: Boolean(form.name.trim()),
-      apply: (d) => setForm((prev) => ({ ...prev, ...d.form })),
-    });
+
+  const draft = useFormDraft({
+    name: `item-${kind}`,
+    enabled: !isEditMode && !isDuplicate && !initialName,
+    snapshot: { form },
+    hasContent: Boolean(form.name.trim()),
+    apply: (d) => setForm((prev) => ({ ...prev, ...d.form })),
+  });
   const [imageBusy, setImageBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -3952,7 +3986,10 @@ function ProductFormBody({
   // ---- Purchase / Sales description: what is typed in one box is copied into the other ----
   // The copy stops as soon as the other box has its own text, so the two can still be different.
   // (only for a brand-new item; editing or duplicating never overwrites an existing description)
-  const descIsCopy = useRef({ description: false, purchase_description: false });
+  const descIsCopy = useRef({
+    description: false,
+    purchase_description: false,
+  });
   const handleDescChange = (field, value) => {
     const other =
       field === "description" ? "purchase_description" : "description";
@@ -4036,32 +4073,32 @@ function ProductFormBody({
   };
   const markupShown = calc.field === "markup" ? calc.text : fmtPct(markupPct);
   const marginShown = calc.field === "margin" ? calc.text : fmtPct(marginPct);
-    const handleFileChange = (e) => {
-      const input = e.target;
-      const files = Array.from(input.files);
-      setImageFiles(files);
-      if (!files.length) {
-        setImageBusy(false);
-        return;
-      }
-      setImageBusy(true); // OK stays hidden until every chosen image is read
-      Promise.all(
-        files.map(
-          (f) =>
-            new Promise((resolve, reject) => {
-              const r = new FileReader();
-              r.onload = () => resolve();
-              r.onerror = () => reject();
-              r.readAsArrayBuffer(f);
-            }),
-        ),
-      )
-        .catch(() => {
-          setImageFiles([]); // unreadable image: clear it so the user can pick again
-          input.value = "";
-        })
-        .finally(() => setImageBusy(false));
-    };
+  const handleFileChange = (e) => {
+    const input = e.target;
+    const files = Array.from(input.files);
+    setImageFiles(files);
+    if (!files.length) {
+      setImageBusy(false);
+      return;
+    }
+    setImageBusy(true); // OK stays hidden until every chosen image is read
+    Promise.all(
+      files.map(
+        (f) =>
+          new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve();
+            r.onerror = () => reject();
+            r.readAsArrayBuffer(f);
+          }),
+      ),
+    )
+      .catch(() => {
+        setImageFiles([]); // unreadable image: clear it so the user can pick again
+        input.value = "";
+      })
+      .finally(() => setImageBusy(false));
+  };
 
   const handleCreateVendor = async (name) => {
     const created = await createVendor({ name });
@@ -4116,6 +4153,14 @@ function ProductFormBody({
     }));
   };
 
+  // reload the parent list from the server (used when a typed name is not found in the list we hold)
+  const reloadParentOptions = async () => {
+    const p = await getProducts();
+    const opts = buildParentOptions(p);
+    setParentOptions(opts);
+    return opts;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (requireParent && !form.parent_id) {
@@ -4133,7 +4178,9 @@ function ProductFormBody({
         const r = evalMath(t);
         if (r === null || r < 0) {
           setSubmitting(false);
-          return setError(`Cannot calculate "${t}" in ${f === "cost" ? "Cost" : "Sales Price"}`);
+          return setError(
+            `Cannot calculate "${t}" in ${f === "cost" ? "Cost" : "Sales Price"}`,
+          );
         }
         values[f] = round2(r);
       }
@@ -4239,6 +4286,7 @@ function ProductFormBody({
                     allowQuickAdd={parentKind !== "sub"}
                     onCreateParent={handleCreateParent}
                     onNew={(name) => setCreatingParent(name)}
+                    onRefresh={reloadParentOptions}
                   />
                 </div>
                 <div>
@@ -15977,12 +16025,7 @@ function CustomerForm({ initialData, onClose, onSubmit }) {
         ...form,
         opening_balance: Number(form.opening_balance) || 0,
       });
-            await onSubmit(isEditMode ? initialData.id : null, {
-              ...form,
-              opening_balance: Number(form.opening_balance) || 0,
-            });
-            draft.clear();
-            onClose();
+      draft.clear();
       onClose();
     } catch (err) {
       setError(err.message);
@@ -15997,11 +16040,6 @@ function CustomerForm({ initialData, onClose, onSubmit }) {
         <h2 className="text-lg font-semibold mb-4">
           {isEditMode ? "Edit Customer" : "New Customer"}
         </h2>
-        {error && (
-          <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
-            {error}
-          </div>
-        )}
         {error && (
           <div className="bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2 mb-4">
             {error}
