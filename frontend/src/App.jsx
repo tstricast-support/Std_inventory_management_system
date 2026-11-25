@@ -2,6 +2,7 @@
 import {
   useEffect,
   useRef,
+  useMemo,
   useState,
   forwardRef,
   useImperativeHandle,
@@ -7267,29 +7268,32 @@ function ItemsTableView({
   error,
   onContextMenuItem,
   onOpenItem,
+  onEditItem,
+  onDeleteItem,
+  modalOpen,
 }) {
   const [cols, saveCols, colsDefault] = useItemTableColumns();
-    const [widths, setWidth, commitWidths, resetWidth] = useItemTableWidths();
-    const justResized = useRef(false);
-    const startResize = (e, key, startW) => {
-      e.preventDefault();
-      e.stopPropagation();
-      justResized.current = true;
-      const startX = e.clientX;
-      const onMove = (ev) => setWidth(key, startW + ev.clientX - startX);
-      const onUp = () => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-        commitWidths();
-        setTimeout(() => (justResized.current = false), 0);
-      };
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+  const [widths, setWidth, commitWidths, resetWidth] = useItemTableWidths();
+  const justResized = useRef(false);
+  const startResize = (e, key, startW) => {
+    e.preventDefault();
+    e.stopPropagation();
+    justResized.current = true;
+    const startX = e.clientX;
+    const onMove = (ev) => setWidth(key, startW + ev.clientX - startX);
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      commitWidths();
+      setTimeout(() => (justResized.current = false), 0);
     };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
   const [colsOpen, setColsOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -7311,25 +7315,62 @@ function ItemsTableView({
   };
 
   const q = search.trim().toLowerCase();
-  const rows = buildItemTableRows(products, { q, typeFilter, sort, expanded });
+  const rows = useMemo(
+    () => buildItemTableRows(products, { q, typeFilter, sort, expanded }),
+    [products, q, typeFilter, sort, expanded],
+  );
   // totals must count every item, even the ones hidden inside a collapsed parent
-  const allRows = buildItemTableRows(products, {
-    q,
-    typeFilter,
-    sort,
-    expanded: new Set(allParentIds()),
-  });
+  const allRows = useMemo(
+    () =>
+      buildItemTableRows(products, {
+        q,
+        typeFilter,
+        sort,
+        expanded: new Set(allParentIds()),
+      }),
+    [products, q, typeFilter, sort],
+  );
+  // draw only the first rows; more are added as you scroll down
+  const [limit, setLimit] = useState(200);
+  useEffect(() => {
+    setLimit(200);
+  }, [q, typeFilter, sort]);
+  const visibleRows = rows.slice(0, limit);
   const visCols = cols
     .filter((c) => c.visible)
     .map((c) => ITEM_TABLE_DEFS.find((d) => d.key === c.key))
     .filter(Boolean);
-  
+
   const tableW = visCols.reduce((s, c) => s + itemColW(widths, c.key), 0);
 
   // totals count real (leaf) items only, so a parent's rolled-up stock is never added twice
   const leaves = allRows.filter((r) => !r._isParent);
   const totalQty = leaves.reduce((s, r) => s + r._qty, 0);
   const totalValue = leaves.reduce((s, r) => s + r._value, 0);
+
+  // select a row, press Ctrl+E to edit it or Ctrl+D to delete it (same as Chart of Accounts)
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k !== "e" && k !== "d") return;
+      const el = document.activeElement;
+      if (
+        el &&
+        (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) ||
+          el.isContentEditable)
+      )
+        return;
+      e.preventDefault(); // stops the browser's own Ctrl+D / Ctrl+E
+      if (modalOpen || colsOpen) return;
+      const item = allRows.find((r) => r.id === selectedId)?._src;
+      if (!item) return;
+      if (k === "e") onEditItem?.(item);
+      else onDeleteItem?.(item);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [allRows, selectedId, modalOpen, colsOpen, onEditItem, onDeleteItem]);
 
   const toggleSort = (key) =>
     setSort((s) =>
@@ -7512,7 +7553,17 @@ function ItemsTableView({
           Nothing matches your search.
         </p>
       ) : (
-        <div className="overflow-auto max-h-[calc(100vh-250px)]">
+        <div
+          className="overflow-auto max-h-[calc(100vh-250px)]"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            if (
+              limit < rows.length &&
+              el.scrollTop + el.clientHeight >= el.scrollHeight - 300
+            )
+              setLimit((l) => l + 200);
+          }}
+        >
           <table
             className="text-sm border-collapse"
             style={{ tableLayout: "fixed", width: tableW }}
@@ -7560,7 +7611,7 @@ function ItemsTableView({
               </tr>
             </thead>
             <tbody>
-              {rows.map((n, i) => {
+              {visibleRows.map((n, i) => {
                 const selected = n.id === selectedId;
                 return (
                   <tr
@@ -7624,7 +7675,8 @@ function ItemsTableView({
 
       <p className="px-3 py-1.5 text-[11px] text-gray-400 border-t border-gray-200">
         Click a column to sort · double-click an item to open it · right-click
-        for more options · right-click a column heading to customize columns
+        for more options · Ctrl+E edit · Ctrl+D delete · right-click a column
+        heading to customize columns
       </p>
 
       {colsOpen && (
@@ -7714,7 +7766,7 @@ function ItemsPage({
       }
     };
     load();
-    const interval = setInterval(load, 10000);
+    const interval = setInterval(load, 60000);
     const onVisible = () => {
       if (!document.hidden) load();
     };
@@ -7923,6 +7975,15 @@ function ItemsPage({
             onContextMenuItem={
               hasAnyAction ? (p, x, y) => setMenu({ item: p, x, y }) : undefined
             }
+            onEditItem={onEditItem}
+            onDeleteItem={onDeleteItem}
+            modalOpen={Boolean(
+              menu ||
+              restockingProduct ||
+              editingProduct ||
+              duplicatingProduct ||
+              deleteTarget,
+            )}
           />
         </main>
         {overlays}

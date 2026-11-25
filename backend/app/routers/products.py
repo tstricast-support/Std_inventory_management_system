@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload
+from collections import defaultdict
+from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm.attributes import set_committed_value
 from typing import Optional, List
 from .. import models, schemas
 from ..database import current_company_id, get_db
@@ -19,12 +21,26 @@ PRODUCT_RELATIONS = (
     joinedload(models.Product.subitems),
 )
 
+# list view: images use a separate batched query (no row explosion);
+# the single-value links are cheap joins
+LIST_RELATIONS = (
+    selectinload(models.Product.images),
+    joinedload(models.Product.cogs_account),
+    joinedload(models.Product.income_account),
+    joinedload(models.Product.asset_account),
+    joinedload(models.Product.preferred_vendor),
+)
+
 @router.get("/", response_model=list[schemas.ProductOut])
 def list_products(db: Session = Depends(get_db)):
-    query = db.query(models.Product).options(*PRODUCT_RELATIONS)
-    # only top-level items; subitems ride along nested inside `subitems`
-    query = query.filter(models.Product.parent_id.is_(None))
-    return query.all()
+    # load EVERY item in one go, then build the subitem tree in memory
+    rows = db.query(models.Product).options(*LIST_RELATIONS).all()
+    children = defaultdict(list)
+    for p in rows:
+        children[p.parent_id].append(p)
+    for p in rows:
+        set_committed_value(p, "subitems", children.get(p.id, []))  # no extra queries
+    return children[None]  # top-level items only, subitems nested inside
 
 
 @router.get("/{product_id}", response_model=schemas.ProductOut)
