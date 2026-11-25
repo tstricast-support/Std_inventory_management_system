@@ -18,6 +18,7 @@ import {
 } from "./api.js";
 import {
   loginWithPasskey as passkeyLogin,
+  passkeyEnrolledHere,
   passkeysSupported,
 } from "./passkeys.jsx";
 
@@ -316,6 +317,12 @@ function AuthCard({ title, subtitle, hero, children }) {
   );
 }
 
+// true when the app was opened from the phone's home screen (installed app), not in a browser tab
+const isInstalledApp = () =>
+  (typeof window !== "undefined" &&
+    window.matchMedia?.("(display-mode: standalone)").matches) ||
+  window.navigator?.standalone === true;
+
 function LoginPage() {
   const { login, loginWithPasskey } = useAuth();
   const [username, setUsername] = useState("");
@@ -428,7 +435,7 @@ function LoginPage() {
         </button>
       </form>
       {/* only shown on devices where Face unlock was already enabled (otherwise iOS shows a confusing QR sheet) */}
-      {passkeysSupported() && (        
+      {passkeysSupported() && (passkeyEnrolledHere() || isInstalledApp()) && (
         <>
           <div className="flex items-center gap-3 my-4 text-xs text-gray-400">
             <div className="flex-1 h-px bg-gray-200" />

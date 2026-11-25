@@ -92,6 +92,7 @@ export async function loginWithPasskey() {
     const cred = await navigator.credentials.get({
       publicKey: {
         ...options,
+        hints: ["client-device"],
         challenge: b64uToBuf(options.challenge),
         allowCredentials: (options.allowCredentials || []).map((c) => ({
           ...c,
