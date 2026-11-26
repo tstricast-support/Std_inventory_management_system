@@ -17057,6 +17057,62 @@ function useAccountLayout() {
   const reset = () => setLayout(save(ACCT_LAYOUT_DEFAULT));
   return [layout, update, reset];
 }
+
+// Column widths for the Chart of Accounts table (drag the header border to resize)
+const ACCT_WIDTHS_KEY = "acct_col_widths_v1";
+const ACCT_DEFAULT_W = {
+  code: 100,
+  name: 280,
+  type: 160,
+  description: 280,
+  balance: 130,
+  category: 150,
+  items: 100,
+  created: 130,
+};
+const ACCT_ACTION_W = 96;
+const acctColW = (widths, key) =>
+  widths[key] || ACCT_DEFAULT_W[key] || 140;
+
+function useAccountColWidths() {
+  const { company } = useCompany();
+  const key = `${ACCT_WIDTHS_KEY}${company?.id ? `:${company.id}` : ""}`;
+  const read = () => {
+    try {
+      const w = JSON.parse(localStorage.getItem(key) || "null");
+      return w && typeof w === "object" && !Array.isArray(w) ? w : {};
+    } catch (e) {
+      return {};
+    }
+  };
+  const [widths, setWidths] = useState(read);
+  useEffect(() => {
+    setWidths(read());
+  }, [key]);
+  const widthsRef = useRef(widths);
+  widthsRef.current = widths;
+
+  const setWidth = (k, w) =>
+    setWidths((p) => ({ ...p, [k]: Math.max(50, Math.round(w)) }));
+  const commit = () => {
+    try {
+      localStorage.setItem(key, JSON.stringify(widthsRef.current));
+    } catch (e) {
+      /* storage blocked */
+    }
+  };
+  const resetOne = (k) => {
+    setWidths((p) => {
+      const n = { ...p };
+      delete n[k];
+      widthsRef.current = n;
+      return n;
+    });
+    setTimeout(commit, 0);
+  };
+  return [widths, setWidth, commit, resetOne];
+}
+
 function orderAccountTree(list) {
   const ids = new Set(list.map((a) => a.id));
   const kids = new Map();
@@ -17233,6 +17289,28 @@ function AccountingPage({ isAdmin, go }) {
   const [colsOpen, setColsOpen] = useState(false); // QuickBooks "Customize Columns" dialog
   const t = ACCT_THEMES[layout.theme] || ACCT_THEMES.quickbooks;
   const pad = layout.density === "compact" ? "py-1" : "py-2.5";
+
+  const [widths, setWidth, commitWidths, resetWidth] = useAccountColWidths();
+  const justResized = useRef(false);
+  const startResize = (e, key, startW) => {
+    e.preventDefault();
+    e.stopPropagation();
+    justResized.current = true;
+    const startX = e.clientX;
+    const onMove = (ev) => setWidth(key, startW + ev.clientX - startX);
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      commitWidths();
+      setTimeout(() => (justResized.current = false), 0);
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
 
   const [search, setSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
@@ -17673,18 +17751,35 @@ function AccountingPage({ isAdmin, go }) {
           ) : (
             /* ---------- TABLE layout ---------- */
             <div className="overflow-x-auto max-h-[calc(100vh-330px)] overflow-y-auto">
-              <table className="w-full text-sm border-collapse">
+              <table
+                className="text-sm border-collapse"
+                style={{
+                  tableLayout: "fixed",
+                  width:
+                    visCols.reduce((s, c) => s + acctColW(widths, c.key), 0) +
+                    ACCT_ACTION_W,
+                }}
+              >
+                <colgroup>
+                  {visCols.map((c) => (
+                    <col key={c.key} style={{ width: acctColW(widths, c.key) }} />
+                  ))}
+                  <col style={{ width: ACCT_ACTION_W }} />
+                </colgroup>
                 <thead className={`sticky top-0 z-10 border-b ${t.head}`}>
                   <tr>
                     {visCols.map((c) => (
                       <th
                         key={c.key}
-                        onClick={() => toggleSort(c.key)}
+                        onClick={() => {
+                          if (justResized.current) return;
+                          toggleSort(c.key);
+                        }}
                         onContextMenu={(e) => {
                           e.preventDefault(); // right-click a header = Customize Columns (like QuickBooks)
                           setColsOpen(true);
                         }}
-                        className={`px-3 ${pad} text-[11px] font-semibold uppercase tracking-wide border-r ${t.line} cursor-pointer select-none whitespace-nowrap ${c.right ? "text-right" : "text-left"}`}
+                        className={`relative overflow-hidden text-ellipsis px-3 ${pad} text-[11px] font-semibold uppercase tracking-wide border-r ${t.line} cursor-pointer select-none whitespace-nowrap ${c.right ? "text-right" : "text-left"}`}
                       >
                         {c.label}
                         {sort.key === c.key && (
@@ -17692,6 +17787,18 @@ function AccountingPage({ isAdmin, go }) {
                             {sort.dir === "asc" ? "▲" : "▼"}
                           </span>
                         )}
+                        {/* drag handle: drag = resize, double-click = reset width */}
+                        <span
+                          onMouseDown={(e) =>
+                            startResize(e, c.key, acctColW(widths, c.key))
+                          }
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            resetWidth(c.key);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute top-0 right-0 h-full w-2 cursor-col-resize hover:bg-blue-400/60"
+                        />
                       </th>
                     ))}
                     <th
@@ -17745,7 +17852,7 @@ function AccountingPage({ isAdmin, go }) {
                           {visCols.map((c) => (
                             <td
                               key={c.key}
-                              className={`px-3 ${pad} whitespace-nowrap ${c.right ? "text-right" : ""} ${c.key === "description" ? "max-w-[16rem] truncate" : ""}`}
+                              className={`px-3 ${pad} whitespace-nowrap overflow-hidden text-ellipsis ${c.right ? "text-right" : ""}`}
                             >
                               {cell(c.key, a, selected)}
                             </td>
@@ -26288,6 +26395,11 @@ const SHORTCUT_HELP = [
       ["Alt + 1 ... 9", "Bring window 1 ... 9 to the front"],
       ["Alt + ]  /  Alt + [", "Next / previous window"],
       [
+        "Ctrl + Tab  /  Ctrl + Shift + Tab",
+        "Next / previous window (installed app window)",
+      ],
+      ["Alt + `  /  Alt + Shift + `", "Next / previous window (any browser)"],
+      [
         "Alt + Shift + W  or  Esc",
         "Close this window (Esc: when no form is open in it)",
       ],
@@ -26590,8 +26702,22 @@ function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
         return;
       }
 
+      // ---- Ctrl + Tab / Ctrl + Shift + Tab: next / previous window ----
+      // (browsers keep this key for their own tabs, so it works in the installed app window)
+      if (wins && e.ctrlKey && !e.altKey && e.key === "Tab") {
+        e.preventDefault();
+        wins.cycle(e.shiftKey ? -1 : 1);
+        return;
+      }
+
       // ---- windows: these work even while a form is open (the form stays in its own window) ----
       if (wins && e.altKey && !mod) {
+        // Alt + ` / Alt + Shift + ` : next / previous window (works in any browser)
+        if (e.code === "Backquote") {
+          e.preventDefault();
+          wins.cycle(e.shiftKey ? -1 : 1);
+          return;
+        }
         if (e.code === "KeyW") {
           e.preventDefault();
           if (e.shiftKey) wins.closeActive();
@@ -26674,7 +26800,7 @@ function GlobalAdminShortcuts({ isAdmin, onProductCreated, onNewBill }) {
         e.preventDefault();
         go(CTRL_GO[key]);
       }
-    };
+    };;
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isAdmin, active, floating, wins, onNewBill, searchParams, helpOpen]);
