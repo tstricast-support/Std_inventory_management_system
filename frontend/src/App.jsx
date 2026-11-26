@@ -992,7 +992,7 @@ function useFormWindow() {
 }
 
 // the window frame: dark backdrop, draggable title bar with a close button, resize handle
-function FormWindow({ title, onClose, children }) {
+function FormWindow({ title, onClose, children, resizable = true }) {
   const { panelRef, pos, size, startDrag, startResize } = useFormWindow();
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-2 sm:p-4 z-50">
@@ -1034,17 +1034,19 @@ function FormWindow({ title, onClose, children }) {
         {children}
 
         {/* resize handle (bottom-right corner) */}
-        <div className="sticky bottom-0 h-0 -mr-4 sm:-mr-5">
-          <div
-            onPointerDown={startResize}
-            title="Drag to resize"
-            className="absolute right-0 bottom-0 w-5 h-5 cursor-nwse-resize touch-none select-none z-10"
-            style={{
-              background:
-                "linear-gradient(135deg, transparent 50%, #9ca3af 50%, #9ca3af 58%, transparent 58%, transparent 70%, #9ca3af 70%, #9ca3af 78%, transparent 78%)",
-            }}
-          />
-        </div>
+        {resizable && (
+          <div className="sticky bottom-0 h-0 -mr-4 sm:-mr-5">
+            <div
+              onPointerDown={startResize}
+              title="Drag to resize"
+              className="absolute right-0 bottom-0 w-5 h-5 cursor-nwse-resize touch-none select-none z-10"
+              style={{
+                background:
+                  "linear-gradient(135deg, transparent 50%, #9ca3af 50%, #9ca3af 58%, transparent 58%, transparent 70%, #9ca3af 70%, #9ca3af 78%, transparent 78%)",
+              }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -4205,19 +4207,20 @@ function ProductFormBody({
   const box = "border border-gray-300 rounded p-3 space-y-2";
   const boxTitle = "text-xs font-bold text-gray-600 uppercase tracking-wide";
 
-  return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl p-5 max-h-[92vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-3">
-          {isEditMode
+    return (
+      <FormWindow
+        resizable={false}
+        title={
+          isEditMode
             ? "Edit Item"
             : isDuplicate
               ? "Duplicate Item"
               : requireParent
                 ? "New Subitem"
-                : "New Item"}
-        </h2>
-
+                : "New Item"
+        }
+        onClose={onClose}
+      >
         {error && (
           <div className="bg-red-50 text-red-600 text-sm rounded px-3 py-2 mb-3">
             {error}
@@ -4596,9 +4599,8 @@ function ProductFormBody({
             }}
           />
         )}
-      </div>
-    </div>
-  );
+      </FormWindow>
+    );
 }
 // ---------- Shared inventory view (used by both routes) ----------
 function InventoryView({ isAdmin, onBack }) {
